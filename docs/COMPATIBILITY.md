@@ -103,7 +103,9 @@ This snapshot is local and depends on the ROM set in `roms/`; regenerate it befo
 
 ## Movie Sidecar Checkpoints
 
-Movie checkpoint sidecars let one `.mdmovie` provide multiple named frame checks. A sidecar sits next to the movie with the same base filename and a JSON extension.
+Movie checkpoint sidecars let one `.mdmovie` provide multiple named frame checks. A sidecar sits next to the movie with a `.mdcheckpoints.json` suffix, such as `sonic-green-hill-sample.mdcheckpoints.json`.
+
+See [INPUT_MOVIES.md](INPUT_MOVIES.md) for the full input movie workflow and the committed Sonic sample.
 
 Example:
 

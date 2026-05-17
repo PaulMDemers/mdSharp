@@ -74,3 +74,6 @@ svp.bin
 # Input movies may contain ROM hashes and SRAM snapshots. Keep local unless
 # intentionally adding a regression asset.
 *.mdmovie
+!docs/assets/input-movies/
+!docs/assets/input-movies/*.mdmovie
+!docs/assets/input-movies/*.mdcheckpoints.json

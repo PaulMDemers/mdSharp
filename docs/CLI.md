@@ -97,22 +97,24 @@ Summarizes an existing compatibility CSV.
 
 ## Input Movies
 
+See [INPUT_MOVIES.md](INPUT_MOVIES.md) for the full recording, replay, checkpoint, and publishing workflow.
+
 Print movie metadata:
 
 ```powershell
-dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-info render-output\sonic-start-smoke.mdmovie
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-info docs\assets\input-movies\sonic-green-hill-sample.mdmovie
 ```
 
 Render a movie to a frame:
 
 ```powershell
-dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-render "roms\Sonic the Hedgehog (USA).md" render-output\sonic-start-smoke.mdmovie render-output\sonic-movie.ppm
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-render "TestRoms\Sonic.md" docs\assets\input-movies\sonic-green-hill-sample.mdmovie render-output\sonic-green-hill-sample.ppm 3724 300000
 ```
 
 Run a movie regression set:
 
 ```powershell
-dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-regress render-output roms render-output\movie-regress 300000
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-regress docs\assets\input-movies TestRoms render-output\movie-regress 300000
 ```
 
 Movie regression matches movies to ROMs by SHA-256, restores movie SRAM when present, runs each movie, and writes CSV/HTML output plus screenshots.

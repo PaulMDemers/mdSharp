@@ -2,7 +2,7 @@
 
 mdSharp is an experimental Sega Genesis/Mega Drive emulator written in C#.
 
-It contains a reusable emulation core, a WinForms desktop frontend for interactive play, and a command-line tool for compatibility sweeps, rendering, audio diagnostics, trace capture, and replay regression.
+It contains a reusable emulation core, a WinForms desktop frontend for interactive play, deterministic input-movie replay, and a command-line tool for compatibility sweeps, rendering, audio diagnostics, trace capture, and regression work.
 
 The project is in active development. It can boot and play a growing set of retail games, including several high-value compatibility targets, but it is not yet cycle-perfect and should be treated as a work-in-progress emulator.
 
@@ -40,7 +40,7 @@ The project is in active development. It can boot and play a growing set of reta
 - WinForms desktop UI with keyboard and XInput gamepad support
 - Two-player input configuration
 - Recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
-- Input movie recording and playback for repeatable compatibility testing
+- Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
 
 ## Project Layout
@@ -58,6 +58,7 @@ docs/
   TESTING.md         Test and regression strategy
   TEST_ROMS.md       Public diagnostic ROM source links
   COMPATIBILITY.md   Compatibility workflow and current focus areas
+  INPUT_MOVIES.md    Deterministic input recording and replay workflow
   AUDIO.md           Audio implementation and tuning workflow
   SHOWCASE.md        Local screenshot gallery workflow
   RELEASE.md         Release checklist
@@ -160,6 +161,21 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --audio-co
 
 See [docs/CLI.md](docs/CLI.md) for the fuller CLI reference.
 
+## Input Movies
+
+mdSharp can record controller input once and replay it deterministically by frame. A `.mdmovie` file stores ROM identity metadata, the ROM SHA-256, optional save-RAM state, and player input masks for each frame. It does not contain ROM data, rendered video, or audio.
+
+This makes long or timing-sensitive bug reports repeatable. A scene such as a title-screen idle demo, Green Hill gameplay path, Sonic 2 split-screen sequence, or save-dependent scene can be recorded once, then replayed through the CLI after future CPU, VDP, audio, or input changes.
+
+The repo includes a sanitized sample:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-info docs\assets\input-movies\sonic-green-hill-sample.mdmovie
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-checkpoints docs\assets\input-movies TestRoms render-output\movie-checkpoints 300000
+```
+
+See [docs/INPUT_MOVIES.md](docs/INPUT_MOVIES.md) for the full workflow.
+
 ## Visual Showcase
 
 The committed screenshot set can be refreshed from local visual checkpoint output:
@@ -207,6 +223,7 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 - [Testing and regression](docs/TESTING.md)
 - [Test ROM sources](docs/TEST_ROMS.md)
 - [Compatibility workflow](docs/COMPATIBILITY.md)
+- [Input movies](docs/INPUT_MOVIES.md)
 - [Audio workflow](docs/AUDIO.md)
 - [Visual showcase](docs/SHOWCASE.md)
 - [Release checklist](docs/RELEASE.md)

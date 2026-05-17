@@ -1,0 +1,19 @@
+{
+  "checkpoints": [
+    {
+      "id": "title-start",
+      "name": "Title/start transition",
+      "frame": 600
+    },
+    {
+      "id": "green-hill-early",
+      "name": "Green Hill early gameplay",
+      "frame": 1800
+    },
+    {
+      "id": "green-hill-final",
+      "name": "Green Hill final recorded frame",
+      "frame": 3723
+    }
+  ]
+}

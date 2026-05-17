@@ -77,6 +77,8 @@ Rows that become visible at a later frame are usually slow boots or transition t
 
 Input movies are the preferred way to capture a human-observed issue.
 
+See [INPUT_MOVIES.md](INPUT_MOVIES.md) for the full workflow and the committed Sonic sample movie.
+
 Desktop workflow:
 
 1. Load the ROM.

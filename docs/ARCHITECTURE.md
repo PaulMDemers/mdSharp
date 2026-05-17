@@ -163,6 +163,7 @@ The CLI is not a stable public API yet. Important workflows should be documented
 - Use [CLI.md](CLI.md) for command syntax and diagnostic workflows.
 - Use [TESTING.md](TESTING.md) for the regression strategy and what to run after each type of change.
 - Use [COMPATIBILITY.md](COMPATIBILITY.md) for game-focused status and triage.
+- Use [INPUT_MOVIES.md](INPUT_MOVIES.md) for deterministic input recording, playback, and checkpoint workflows.
 - Use [AUDIO.md](AUDIO.md) and [AUDIO_REFERENCES.md](AUDIO_REFERENCES.md) for YM2612/PSG tuning and reference capture.
 - Use [SHOWCASE.md](SHOWCASE.md) for the local screenshot gallery.
 - Use [RELEASE.md](RELEASE.md) before publishing the repository or cutting a binary build.
