@@ -9,6 +9,8 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added desktop `Help -> About mdSharp` dialog with version, license, and repository links.
 - Added `mdsharp --version` to the CLI.
 - Updated release packaging to stamp binaries with the requested package version.
+- Added README showcase composite panels.
+- Added tag-triggered GitHub release artifact upload with SHA-256 checksums.
 
 ## 0.1.0 - 2026-05-17
 

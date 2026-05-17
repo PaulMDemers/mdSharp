@@ -10,6 +10,13 @@ The project is in active development. It can boot and play a growing set of reta
 
 <table>
   <tr>
+    <td><img src="docs/assets/showcase/showcase-composite-1.png" alt="mdSharp showcase composite with Sonic, Sonic 2, Streets of Rage, and Virtua Racing" width="420"></td>
+    <td><img src="docs/assets/showcase/showcase-composite-2.png" alt="mdSharp showcase composite with Castlevania Bloodlines, Sonic 3, Aladdin, and Toy Story" width="420"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
     <td><img src="docs/assets/showcase/sonic1-green-hill.png" alt="Sonic the Hedgehog Green Hill" width="320"><br><sub>Sonic the Hedgehog</sub></td>
     <td><img src="docs/assets/showcase/sonic2-split-screen.png" alt="Sonic 2 split-screen demo" width="320"><br><sub>Sonic the Hedgehog 2 split-screen</sub></td>
   </tr>

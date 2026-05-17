@@ -49,4 +49,6 @@ Packages must not include:
 
 ## GitHub Actions
 
-The `Build` workflow builds, tests, packages the desktop app, and uploads zip artifacts for each run. It is intended as a CI smoke check and a convenient artifact source, not as a full release gate. Local release candidates should still follow [RELEASE.md](RELEASE.md).
+The `Build` workflow builds, tests, packages the desktop app, writes `SHA256SUMS.txt`, and uploads zip artifacts for each run. Normal branch and pull-request runs use the package version `ci`.
+
+When a tag named `v<version>` is pushed, the workflow packages with `<version>` and attaches the framework-dependent zip, self-contained zip, and checksum file to the matching GitHub release. Local release candidates should still follow [RELEASE.md](RELEASE.md) before tagging.

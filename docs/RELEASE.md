@@ -119,6 +119,17 @@ dotnet publish src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -r win-x64 
 
 Do not include ROMs, save files, save states, reference audio, or generated regression output in release archives.
 
+## Tag Release Assets
+
+After the release gate passes and the GitHub release draft exists, push a semantic version tag:
+
+```powershell
+git tag v<version>
+git push origin v<version>
+```
+
+The `Build` workflow packages the desktop app with `<version>`, generates `SHA256SUMS.txt`, and attaches the release zips plus checksums to the matching GitHub release.
+
 ## GitHub Release Draft
 
 Use [RELEASE_NOTES_DRAFT.md](RELEASE_NOTES_DRAFT.md) as the starting point for the first GitHub release description. Replace `<version>` placeholders, add current verification results, and summarize compatibility changes since the previous tag.

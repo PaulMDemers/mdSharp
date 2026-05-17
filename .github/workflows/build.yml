@@ -3,9 +3,14 @@ name: Build
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-test-package:
@@ -21,6 +26,17 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve package version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}".StartsWith("v")) {
+            $version = "${{ github.ref_name }}".Substring(1)
+          } else {
+            $version = "ci"
+          }
+
+          "PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
+
       - name: Build
         run: dotnet build mdSharp.sln -c Release
 
@@ -29,11 +45,32 @@ jobs:
 
       - name: Package desktop app
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version ci -SkipTests
+        run: powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version $env:PACKAGE_VERSION -SkipTests
+
+      - name: Generate package checksums
+        shell: pwsh
+        run: |
+          $packages = Get-ChildItem -LiteralPath artifacts\packages -Filter *.zip | Sort-Object Name
+          $lines = foreach ($package in $packages) {
+            $hash = Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256
+            "$($hash.Hash.ToLowerInvariant())  $($package.Name)"
+          }
+
+          $lines | Set-Content -LiteralPath artifacts\packages\SHA256SUMS.txt -Encoding ascii
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
           name: mdSharp-packages
-          path: artifacts/packages/*.zip
+          path: |
+            artifacts/packages/*.zip
+            artifacts/packages/SHA256SUMS.txt
           if-no-files-found: error
+
+      - name: Attach packages to GitHub release
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/packages/*.zip
+            artifacts/packages/SHA256SUMS.txt
