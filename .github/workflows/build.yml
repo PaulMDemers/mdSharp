@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-test-package:
+    name: Build, test, and package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build mdSharp.sln -c Release
+
+      - name: Test
+        run: dotnet test mdSharp.sln -c Release --no-build
+
+      - name: Package desktop app
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version ci -SkipTests
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdSharp-packages
+          path: artifacts/packages/*.zip
+          if-no-files-found: error

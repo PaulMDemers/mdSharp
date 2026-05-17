@@ -61,7 +61,9 @@ docs/
   INPUT_MOVIES.md    Deterministic input recording and replay workflow
   AUDIO.md           Audio implementation and tuning workflow
   SHOWCASE.md        Local screenshot gallery workflow
+  PACKAGING.md       Desktop package creation
   RELEASE.md         Release checklist
+  RELEASE_NOTES_DRAFT.md  Draft first-release notes
   CONTRIBUTING.md    Contribution workflow
   ROADMAP.md         Current status and next priorities
 ```
@@ -226,7 +228,9 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 - [Input movies](docs/INPUT_MOVIES.md)
 - [Audio workflow](docs/AUDIO.md)
 - [Visual showcase](docs/SHOWCASE.md)
+- [Packaging](docs/PACKAGING.md)
 - [Release checklist](docs/RELEASE.md)
+- [Release notes draft](docs/RELEASE_NOTES_DRAFT.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Roadmap](docs/ROADMAP.md)
 

@@ -1,0 +1,48 @@
+name: Compatibility Bug
+description: Report a game, hardware, or rendering compatibility issue.
+title: "[compat] "
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach commercial ROMs, BIOS files, save states, or copyrighted reference media.
+  - type: input
+    id: game
+    attributes:
+      label: Game and revision
+      description: Include region/revision from the ROM header or filename when possible.
+      placeholder: Sonic the Hedgehog 2 (USA) (Rev-B)
+    validations:
+      required: true
+  - type: input
+    id: hash
+    attributes:
+      label: ROM hash
+      description: SHA-256 or another hash if available. Do not upload the ROM.
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what mdSharp does incorrectly.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the expected hardware/reference-emulator behavior.
+    validations:
+      required: true
+  - type: input
+    id: frame
+    attributes:
+      label: Frame or scene
+      description: Include a frame number, menu path, level, cutscene, or input movie checkpoint when possible.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include mdSharp command lines, input-movie paths, screenshots, or trace commands when relevant.
+    validations:
+      required: true

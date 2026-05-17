@@ -97,13 +97,21 @@ Review [SHOWCASE.md](SHOWCASE.md), the generated images under `docs\assets\showc
 
 ## Publish Desktop Build
 
-Framework-dependent:
+Use the release packaging script for normal release candidates:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version <version>
+```
+
+The script writes framework-dependent and self-contained Windows packages under `artifacts\packages\`. See [PACKAGING.md](PACKAGING.md) for options and package contents.
+
+Manual framework-dependent publish:
 
 ```powershell
 dotnet publish src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -o artifacts\mdSharp-desktop
 ```
 
-Self-contained Windows x64:
+Manual self-contained Windows x64 publish:
 
 ```powershell
 dotnet publish src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts\mdSharp-desktop-win-x64
@@ -111,34 +119,16 @@ dotnet publish src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -r win-x64 
 
 Do not include ROMs, save files, save states, reference audio, or generated regression output in release archives.
 
-## Release Notes Template
+## GitHub Release Draft
 
-```markdown
-# mdSharp <version>
+Use [RELEASE_NOTES_DRAFT.md](RELEASE_NOTES_DRAFT.md) as the starting point for the first GitHub release description. Replace `<version>` placeholders, add current verification results, and summarize compatibility changes since the previous tag.
 
-## Highlights
+## Clean Clone Check
 
-- ...
+Before publishing, clone the repository into a fresh directory and verify:
 
-## Compatibility
-
-- ...
-
-## Audio
-
-- ...
-
-## UI
-
-- ...
-
-## Known Issues
-
-- ...
-
-## Verification
-
-- `dotnet test mdSharp.sln -c Release --no-build`
-- compatibility sweep: <path or summary>
-- audio regression: <path or summary>
+```powershell
+dotnet build mdSharp.sln -c Release
+dotnet test mdSharp.sln -c Release --no-build
+powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version clean-clone -SkipSelfContained
 ```

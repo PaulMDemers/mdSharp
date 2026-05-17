@@ -1,0 +1,40 @@
+name: Audio Bug
+description: Report incorrect YM2612, PSG, DAC, timing, or mixing behavior.
+title: "[audio] "
+labels: ["audio"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach copyrighted music files unless they are clearly redistributable. Prefer short notes, hashes, generated mdSharp diagnostics, or instructions for recreating local reference captures.
+  - type: input
+    id: game
+    attributes:
+      label: Game and track/scene
+      placeholder: Streets of Rage, title intro
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue
+      description: Describe the missing, distorted, mistuned, or incorrectly balanced sound.
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference source
+      description: Note the emulator, VGM, local capture, or hardware reference used for comparison.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Include audio regression output, stem reports, command lines, or timestamps when available.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include ROM hash, commands, frame range, and any input movie required to reach the scene.
+    validations:
+      required: true

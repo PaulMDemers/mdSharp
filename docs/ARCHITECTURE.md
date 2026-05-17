@@ -166,4 +166,5 @@ The CLI is not a stable public API yet. Important workflows should be documented
 - Use [INPUT_MOVIES.md](INPUT_MOVIES.md) for deterministic input recording, playback, and checkpoint workflows.
 - Use [AUDIO.md](AUDIO.md) and [AUDIO_REFERENCES.md](AUDIO_REFERENCES.md) for YM2612/PSG tuning and reference capture.
 - Use [SHOWCASE.md](SHOWCASE.md) for the local screenshot gallery.
+- Use [PACKAGING.md](PACKAGING.md) for desktop release package creation.
 - Use [RELEASE.md](RELEASE.md) before publishing the repository or cutting a binary build.
