@@ -17,6 +17,7 @@ internal sealed class DesktopSettings
     };
 
     public List<string> RecentRoms { get; set; } = [];
+    public string? DefaultRomDirectory { get; set; }
     public string? LastRomDirectory { get; set; }
     public string? LastRomPath { get; set; }
     public int CurrentStateSlot { get; set; } = 1;
@@ -107,6 +108,11 @@ internal sealed class DesktopSettings
         if (!string.IsNullOrWhiteSpace(LastRomPath))
         {
             LastRomPath = Path.GetFullPath(LastRomPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(DefaultRomDirectory))
+        {
+            DefaultRomDirectory = Path.GetFullPath(DefaultRomDirectory);
         }
 
         if (!string.IsNullOrWhiteSpace(LastRomDirectory))

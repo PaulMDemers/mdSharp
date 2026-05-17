@@ -131,6 +131,8 @@ internal sealed class MainForm : Form
         _recentMenu.DropDownOpening += (_, _) => PopulateRecentMenu();
         file.DropDownItems.Add(_recentMenu);
         file.DropDownItems.Add(new ToolStripSeparator());
+        file.DropDownItems.Add("&Preferences...", null, (_, _) => ShowPreferences());
+        file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add("&Save State...", null, (_, _) => SaveStateDialog());
         file.DropDownItems.Add("&Load State...", null, (_, _) => LoadStateDialog());
         _quickSaveMenu = new ToolStripMenuItem("Quick &Save Slot", null, (_, _) => QuickSaveState()) { ShortcutKeyDisplayString = "F5" };
@@ -189,7 +191,7 @@ internal sealed class MainForm : Form
             Filter = "Genesis ROMs|*.bin;*.md;*.gen;*.smd;*.rom|All files|*.*",
             Title = "Open Genesis/Mega Drive ROM",
         };
-        ApplyInitialDirectory(dialog);
+        ApplyRomInitialDirectory(dialog);
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
@@ -232,6 +234,36 @@ internal sealed class MainForm : Form
 
         SetStatus("No last ROM is available.");
         UpdateMenus();
+    }
+
+    private void ShowPreferences()
+    {
+        using PreferencesForm dialog = new(_settings);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        _settings.DefaultRomDirectory = dialog.DefaultRomDirectory;
+        _settings.InstructionBudget = dialog.InstructionBudget;
+        _settings.Muted = dialog.Muted;
+        _settings.NormalizeSession();
+
+        _instructionsPerFrame = _settings.InstructionBudget;
+        _muted = _settings.Muted;
+        if (_muted)
+        {
+            _audio?.Dispose();
+            _audio = null;
+        }
+        else
+        {
+            TryStartAudio();
+        }
+
+        _settings.Save();
+        UpdateMenus();
+        SetStatus("Preferences saved.");
     }
 
     private void TickEmulation()
@@ -1197,6 +1229,17 @@ internal sealed class MainForm : Form
     private void ApplyInitialDirectory(FileDialog dialog)
     {
         string? directory = CurrentFileDialogDirectory();
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            dialog.InitialDirectory = directory;
+        }
+    }
+
+    private void ApplyRomInitialDirectory(FileDialog dialog)
+    {
+        string? directory = !string.IsNullOrWhiteSpace(_settings.DefaultRomDirectory) && Directory.Exists(_settings.DefaultRomDirectory)
+            ? _settings.DefaultRomDirectory
+            : CurrentFileDialogDirectory();
         if (!string.IsNullOrWhiteSpace(directory))
         {
             dialog.InitialDirectory = directory;

@@ -12,6 +12,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added README showcase composite panels.
 - Added tag-triggered GitHub release artifact upload with SHA-256 checksums.
 - Added desktop shortcuts for opening a ROM and reopening the last ROM.
+- Added desktop Preferences for default ROM folder, mute state, and instruction budget.
 
 ## 0.1.0 - 2026-05-17
 
