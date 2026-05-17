@@ -87,13 +87,13 @@ The movie command requires a local `movies/` folder. Skip it if there are no che
 
 ## Screenshot Showcase
 
-After the visual checkpoints have run, build the local screenshot gallery:
+After the visual checkpoints have run, refresh the committed screenshot gallery:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
 ```
 
-Review [SHOWCASE.md](SHOWCASE.md) and the generated images under `render-output\showcase\`. Keep the generated images out of git unless the project has made an explicit legal/publishing decision for those screenshots.
+Review [SHOWCASE.md](SHOWCASE.md), the generated images under `docs\assets\showcase\`, and the README screenshot grid. Keep arbitrary regression output under `render-output\` out of git.
 
 ## Publish Desktop Build
 

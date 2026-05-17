@@ -6,6 +6,27 @@ It contains a reusable emulation core, a WinForms desktop frontend for interacti
 
 The project is in active development. It can boot and play a growing set of retail games, including several high-value compatibility targets, but it is not yet cycle-perfect and should be treated as a work-in-progress emulator.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/assets/showcase/sonic1-green-hill.png" alt="Sonic the Hedgehog Green Hill" width="320"><br><sub>Sonic the Hedgehog</sub></td>
+    <td><img src="docs/assets/showcase/sonic2-split-screen.png" alt="Sonic 2 split-screen demo" width="320"><br><sub>Sonic the Hedgehog 2 split-screen</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/streets-of-rage-intro.png" alt="Streets of Rage intro" width="320"><br><sub>Streets of Rage</sub></td>
+    <td><img src="docs/assets/showcase/virtua-racing-gameplay.png" alt="Virtua Racing gameplay" width="320"><br><sub>Virtua Racing</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/castlevania-bloodlines-gameplay.png" alt="Castlevania Bloodlines gameplay" width="320"><br><sub>Castlevania: Bloodlines</sub></td>
+    <td><img src="docs/assets/showcase/sonic3-special-stage.png" alt="Sonic 3 special stage" width="320"><br><sub>Sonic the Hedgehog 3</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/aladdin-gameplay.png" alt="Disney's Aladdin gameplay" width="320"><br><sub>Disney's Aladdin</sub></td>
+    <td><img src="docs/assets/showcase/toy-story-bedroom.png" alt="Disney's Toy Story gameplay" width="320"><br><sub>Disney's Toy Story</sub></td>
+  </tr>
+</table>
+
 ## Features
 
 - Motorola 68000 interpreter
@@ -141,13 +162,13 @@ See [docs/CLI.md](docs/CLI.md) for the fuller CLI reference.
 
 ## Visual Showcase
 
-Generated screenshots for the current high-value compatibility targets can be built locally:
+The committed screenshot set can be refreshed from local visual checkpoint output:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
 ```
 
-The gallery is documented in [docs/SHOWCASE.md](docs/SHOWCASE.md). Generated images live under `render-output/showcase/` and are ignored by git because they may contain copyrighted retail-game artwork.
+The full gallery is documented in [docs/SHOWCASE.md](docs/SHOWCASE.md). Intermediate regression images still live under `render-output/` and remain ignored by git.
 
 ## Compatibility Status
 

@@ -1,6 +1,7 @@
 param(
-    [string]$OutputFolder = "render-output\showcase",
-    [string]$SourceRoot = "render-output"
+    [string]$OutputFolder = "docs\assets\showcase",
+    [string]$SourceRoot = "render-output",
+    [string]$ManifestPath = "render-output\showcase\showcase-manifest.csv"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,8 +89,16 @@ foreach ($item in $items) {
     }
 }
 
-$manifestPath = Join-Path $outputFolderPath "showcase-manifest.csv"
-$written | Export-Csv -Path $manifestPath -NoTypeInformation
+if ($ManifestPath.Length -gt 0) {
+    $manifestFolder = Split-Path -Parent $ManifestPath
+    if ($manifestFolder.Length -gt 0) {
+        New-Item -ItemType Directory -Path $manifestFolder -Force | Out-Null
+    }
+
+    $written | Export-Csv -Path $ManifestPath -NoTypeInformation
+}
 
 Write-Host "Wrote $($written.Count) showcase image(s) to $outputFolderPath"
-Write-Host "Manifest: $manifestPath"
+if ($ManifestPath.Length -gt 0) {
+    Write-Host "Manifest: $ManifestPath"
+}
