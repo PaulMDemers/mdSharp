@@ -38,6 +38,7 @@ docs/
   TEST_ROMS.md       Public diagnostic ROM source links
   COMPATIBILITY.md   Compatibility workflow and current focus areas
   AUDIO.md           Audio implementation and tuning workflow
+  SHOWCASE.md        Local screenshot gallery workflow
   RELEASE.md         Release checklist
   CONTRIBUTING.md    Contribution workflow
   ROADMAP.md         Current status and next priorities
@@ -138,6 +139,16 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --audio-co
 
 See [docs/CLI.md](docs/CLI.md) for the fuller CLI reference.
 
+## Visual Showcase
+
+Generated screenshots for the current high-value compatibility targets can be built locally:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
+```
+
+The gallery is documented in [docs/SHOWCASE.md](docs/SHOWCASE.md). Generated images live under `render-output/showcase/` and are ignored by git because they may contain copyrighted retail-game artwork.
+
 ## Compatibility Status
 
 mdSharp is being developed against a mix of public test ROMs, targeted retail-game scenarios, and repeatable input movies. Recent focus areas include:
@@ -176,6 +187,7 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 - [Test ROM sources](docs/TEST_ROMS.md)
 - [Compatibility workflow](docs/COMPATIBILITY.md)
 - [Audio workflow](docs/AUDIO.md)
+- [Visual showcase](docs/SHOWCASE.md)
 - [Release checklist](docs/RELEASE.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Roadmap](docs/ROADMAP.md)

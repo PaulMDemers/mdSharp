@@ -1,0 +1,38 @@
+# Showcase
+
+This page documents the local screenshot gallery used to sanity-check mdSharp visually. The screenshots are generated artifacts under `render-output/showcase/` and are intentionally not committed because they can contain copyrighted retail-game artwork.
+
+To build the local gallery after running the release gate or visual checkpoints:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
+```
+
+The script converts selected release-gate BMP screenshots into PNG files and writes `render-output/showcase/showcase-manifest.csv`.
+
+## Gallery
+
+| Scenario | What it demonstrates | Local image |
+| --- | --- | --- |
+| Sonic the Hedgehog | baseline gameplay, sprites, scrolling planes, palette, audio-driver boot path | ![Sonic the Hedgehog Green Hill](../render-output/showcase/sonic1-green-hill.png) |
+| Sonic the Hedgehog 2 | two-player split-screen viewports, per-line scroll/viewport state, duplicated HUD and sprites | ![Sonic 2 split screen](../render-output/showcase/sonic2-split-screen.png) |
+| Sonic the Hedgehog 3 | special-stage and water/special rendering regressions around scrolling and sprite placement | ![Sonic 3 special-stage preview](../render-output/showcase/sonic3-special-stage.png) |
+| Streets of Rage | intro sequence, HUD alignment, text scrolling, Z80/audio-driver timing | ![Streets of Rage intro](../render-output/showcase/streets-of-rage-intro.png) |
+| Castlevania: Bloodlines | cutscene/gameplay palette behavior, sprite rendering, shadow/highlight-sensitive scenes | ![Castlevania Bloodlines gameplay](../render-output/showcase/castlevania-bloodlines-gameplay.png) |
+| Disney's Aladdin | DMA/sprite-pattern update timing, animated Genie intro path, gameplay sprite integrity | ![Aladdin gameplay](../render-output/showcase/aladdin-gameplay.png) |
+| Disney's Toy Story | intro bitmap/logo behavior and animated sprite-pattern updates | ![Toy Story Traveler's Tales intro](../render-output/showcase/toy-story-travelers-tales.png) |
+| Disney's Toy Story gameplay | scrolling playfield, character sprites, and ordinary retail-game playability after the intro fixes | ![Toy Story gameplay](../render-output/showcase/toy-story-bedroom.png) |
+| Aladdin Genie logo | short-lived sprite animation corruption regression around the first 600 frames | ![Aladdin Genie logo](../render-output/showcase/aladdin-genie-logo.png) |
+| Virtua Racing | SVP cartridge path, SSP1601 execution, 3D road/objects, and timing-sensitive layout checks | ![Virtua Racing gameplay](../render-output/showcase/virtua-racing-gameplay.png) |
+
+## Regenerating From Scratch
+
+The gallery assumes the release-gate visual checkpoints already exist. If `render-output/showcase/` is empty, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\run-release-gate.ps1 -SkipAudio -SkipPerf
+powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
+```
+
+Retail ROMs, `svp.bin`, and generated screenshots remain local-only. Do not force-add the generated PNGs unless you have made a separate legal/publishing decision for screenshots.
+

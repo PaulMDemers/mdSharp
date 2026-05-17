@@ -85,6 +85,16 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --movie-re
 
 The movie command requires a local `movies/` folder. Skip it if there are no checked-in or local movie assets.
 
+## Screenshot Showcase
+
+After the visual checkpoints have run, build the local screenshot gallery:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
+```
+
+Review [SHOWCASE.md](SHOWCASE.md) and the generated images under `render-output\showcase\`. Keep the generated images out of git unless the project has made an explicit legal/publishing decision for those screenshots.
+
 ## Publish Desktop Build
 
 Framework-dependent:

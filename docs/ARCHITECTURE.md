@@ -14,6 +14,26 @@ MdSharp.App      ->  MdSharp.Core
 MdSharp.Tests    ->  MdSharp.Core
 ```
 
+```mermaid
+flowchart LR
+    Desktop["MdSharp.Desktop\nWinForms UI, audio device,\nsettings, input mapping"] --> Core["MdSharp.Core\nMachine model"]
+    App["MdSharp.App\nCLI diagnostics,\nrendering, regressions"] --> Core
+    Tests["MdSharp.Tests\nconsole verification harness"] --> Core
+
+    Core --> Cpu68k["68000"]
+    Core --> Z80["Z80"]
+    Core --> Bus["Genesis bus"]
+    Core --> Vdp["VDP"]
+    Core --> Audio["PSG + YM2612"]
+    Core --> Cart["Cartridge hardware\nSRAM, EEPROM, SVP,\nJ-Cart, adapters"]
+
+    Bus --> Cpu68k
+    Bus --> Z80
+    Bus --> Vdp
+    Bus --> Audio
+    Bus --> Cart
+```
+
 `MdSharp.Core` should remain usable from any frontend. UI, file dialogs, Windows Forms, audio devices, and desktop settings belong outside the core.
 
 ## Core Runtime
@@ -45,6 +65,14 @@ Typical frontend flow:
 5. Run one frame.
 6. Render video and audio samples.
 7. Persist SRAM or save state when needed.
+
+## Design Principles
+
+- Keep the core deterministic. Given the same ROM, save data, settings, and input movie, the same frame should produce the same video, audio, and machine state.
+- Keep frontend responsibilities at the edge. Desktop code handles menus, input devices, audio playback, files, and presentation; the core handles hardware behavior.
+- Prefer hardware-shaped fixes. Game-specific diagnostics are useful, but compatibility fixes should normally explain a VDP, CPU, bus, cartridge, or audio behavior.
+- Make bugs replayable. A frame number, screenshot, trace, or input movie is much more valuable than a one-off visual report.
+- Use generated output as evidence, not source. Screenshots, WAVs, traces, ROMs, saves, and dashboards stay local unless there is a deliberate reason to publish a sanitized artifact.
 
 ## CPU And Bus
 
@@ -80,6 +108,8 @@ The renderer is designed around raster-sensitive games. During emulation it capt
 - split-screen and per-line viewport behavior
 
 The desktop frontend asks the VDP to render into a BGR frame buffer for display. CLI tools can write PPM/BMP screenshots.
+
+The most important video design choice is that rendering is driven by captured per-line state rather than a single end-of-frame register snapshot. Many of the compatibility targets that shaped mdSharp depend on mid-frame changes: Sonic 2 split-screen viewports, Streets of Rage HUD timing, Toy Story and Aladdin sprite-pattern DMA, Castlevania palette changes, and Virtua Racing layout behavior.
 
 ## Audio
 
@@ -127,3 +157,12 @@ Save states use `SaveStateSerializer` and capture CPU, bus, cartridge, VDP, audi
 - targeted game diagnostics used during development
 
 The CLI is not a stable public API yet. Prefer documenting important workflows in `docs/CLI.md` when commands become part of normal development.
+
+## Documentation Map
+
+- Use [CLI.md](CLI.md) for command syntax and diagnostic workflows.
+- Use [TESTING.md](TESTING.md) for the regression strategy and what to run after each type of change.
+- Use [COMPATIBILITY.md](COMPATIBILITY.md) for game-focused status and triage.
+- Use [AUDIO.md](AUDIO.md) and [AUDIO_REFERENCES.md](AUDIO_REFERENCES.md) for YM2612/PSG tuning and reference capture.
+- Use [SHOWCASE.md](SHOWCASE.md) for the local screenshot gallery.
+- Use [RELEASE.md](RELEASE.md) before publishing the repository or cutting a binary build.
