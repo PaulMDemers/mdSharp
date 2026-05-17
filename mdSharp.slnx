@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/MdSharp.Core/MdSharp.Core.csproj" />
+  <Project Path="src/MdSharp.App/MdSharp.App.csproj" />
+  <Project Path="src/MdSharp.Desktop/MdSharp.Desktop.csproj" />
+  <Project Path="tests/MdSharp.Tests/MdSharp.Tests.csproj" />
+</Solution>

@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "sonic1-sega-mame",
+      "romContains": ["sonic the hedgehog (usa)", "sonic the hedgehog"],
+      "reference": "../render-output/audio-reference-suite/mame/sonic-sega-intro-mame.wav",
+      "frames": 760,
+      "compareStartFrame": 0,
+      "alignmentWindowSeconds": 9
+    },
+    {
+      "id": "sonic1-title-mame",
+      "romContains": ["sonic the hedgehog (usa)", "sonic the hedgehog"],
+      "reference": "../render-output/audio-reference-suite/mame/sonic-title-mame.wav",
+      "frames": 1200,
+      "compareStartFrame": 0,
+      "alignmentWindowSeconds": 5,
+      "referenceStartSeconds": 8,
+      "emulatedStartSeconds": 8
+    },
+    {
+      "id": "sonic1-greenhill-mame",
+      "romContains": ["sonic the hedgehog (usa)", "sonic the hedgehog"],
+      "reference": "../render-output/audio-reference-suite/mame/sonic-greenhill-mame.wav",
+      "frames": 2600,
+      "compareStartFrame": 900,
+      "alignmentWindowSeconds": 10
+    },
+    {
+      "id": "streets-intro-mame",
+      "romContains": ["streets of rage (usa)", "streets of rage"],
+      "reference": "../render-output/audio-reference-suite/mame/streets-intro-60s-mame.wav",
+      "frames": 3600,
+      "compareStartFrame": 0,
+      "alignmentWindowSeconds": 10
+    }
+  ]
+}

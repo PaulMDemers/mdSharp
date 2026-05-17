@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "id": "sonic1-title",
+      "romContains": ["sonic the hedgehog (usa)", "sonic the hedgehog"],
+      "reference": "../01 - Title Theme - Masato Nakamura.flac",
+      "preset": "title",
+      "frames": 760
+    },
+    {
+      "id": "sonic1-greenhill",
+      "romContains": ["sonic the hedgehog (usa)", "sonic the hedgehog"],
+      "reference": "../Sonic the Hedgehog-Green Hill Zone Theme.mp3",
+      "preset": "greenhill",
+      "frames": 2600
+    },
+    {
+      "id": "streets-title",
+      "romContains": ["streets of rage (usa)", "streets of rage"],
+      "reference": "../streets-title.flac",
+      "frames": 900,
+      "compareStartFrame": 0
+    }
+  ]
+}

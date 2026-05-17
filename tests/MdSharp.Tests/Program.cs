@@ -1,0 +1,5064 @@
+using MdSharp.Core;
+using MdSharp.Core.Audio;
+using MdSharp.Core.Bus;
+using MdSharp.Core.Cartridge;
+using MdSharp.Core.Cpu.Z80;
+using MdSharp.Core.Input;
+using MdSharp.Core.State;
+using MdSharp.Core.Video;
+
+int failures = 0;
+
+Run("cartridge header parsing", CartridgeHeaderParsing);
+Run("cartridge diagnostics", CartridgeDiagnosticsReport);
+Run("68k reset and simple instructions", CpuResetAndSimpleInstructions);
+Run("68k Codemasters DNLD reset vectors", CodemastersDnldResetVectors);
+Run("VDP register and VRAM writes", VdpRegisterAndVramWrites);
+Run("VDP byte writes mirror onto the 16-bit data bus", VdpByteWritesMirrorOntoDataBus);
+Run("VDP command decode and history", VdpCommandDecodeAndHistory);
+Run("VDP HV counter and interrupt status", VdpHvCounterAndInterruptStatus);
+Run("VDP V interrupt pending survives frame boundary until status read", VdpVInterruptPendingSurvivesFrameBoundaryUntilStatusRead);
+Run("VDP 68k interrupt acknowledge clears pending flags", VdpM68kInterruptAcknowledgeClearsPendingFlags);
+Run("VDP HV counter advances horizontally", VdpHvCounterAdvancesHorizontally);
+Run("VDP HBlank status pulses without H interrupt", VdpHBlankStatusPulsesWithoutHInterrupt);
+Run("VDP 68k DMA copy writes VRAM and CRAM", VdpDmaMemoryCopyWritesVramAndCram);
+Run("VDP long DMA timing scales with transfer length", VdpLongDmaTimingScalesWithTransferLength);
+Run("VDP DMA fill and copy modes", VdpDmaFillAndCopyModes);
+Run("VDP DMA only starts on completed command", VdpDmaOnlyStartsOnCompletedCommand);
+Run("VDP data FIFO adds 68k wait cycles when full", VdpDataFifoAdds68kWaitCyclesWhenFull);
+Run("68000 peripheral accesses add wait cycles", M68kPeripheralAccessesAddWaitCycles);
+Run("controller TH multiplexing", ControllerMultiplexing);
+Run("six-button controller handshake", SixButtonControllerHandshake);
+Run("controller data and control ports", ControllerDataAndControlPorts);
+Run("Sega Team Player adapter protocol", SegaTeamPlayerAdapterProtocol);
+Run("EA 4-Way Play adapter protocol", Ea4WayPlayAdapterProtocol);
+Run("light gun adapter button protocol", LightGunAdapterButtonProtocol);
+Run("input movies preserve separate player inputs", InputMoviesPreserveSeparatePlayerInputs);
+Run("input movies load legacy single-player frames", InputMoviesLoadLegacySinglePlayerFrames);
+Run("hardware version register reflects region", HardwareVersionRegisterReflectsRegion);
+Run("PSG reset starts muted", PsgResetStartsMuted);
+Run("PSG tone generation", PsgToneGeneration);
+Run("PSG writes render at frame timestamps", PsgWritesRenderAtFrameTimestamps);
+Run("PSG frame events are sorted by timestamp", PsgFrameEventsAreSortedByTimestamp);
+Run("PSG channel stems isolate tone channel", PsgChannelStemsIsolateToneChannel);
+Run("PSG snapshots expose tone state", PsgSnapshotsExposeToneState);
+Run("PSG noise control resets shift register", PsgNoiseControlResetsShiftRegister);
+Run("YM2612 timers and status", Ym2612TimersAndStatus);
+Run("YM2612 timer reloads from latch writes", Ym2612TimerReloadsFromLatchWrites);
+Run("YM2612 busy status after register writes", Ym2612BusyStatusAfterRegisterWrites);
+Run("YM2612 DAC reset level is neutral", Ym2612DacResetLevelIsNeutral);
+Run("YM2612 CSM key-on from Timer A overflow", Ym2612CsmKeyOnFromTimerAOverflow);
+Run("YM2612 DAC writes render at frame timestamps", Ym2612DacWritesRenderAtFrameTimestamps);
+Run("YM2612 key-on writes render at frame timestamps", Ym2612KeyOnWritesRenderAtFrameTimestamps);
+Run("YM2612 frame events are sorted by timestamp", Ym2612FrameEventsAreSortedByTimestamp);
+Run("YM2612 channel stems isolate keyed channel", Ym2612ChannelStemsIsolateKeyedChannel);
+Run("YM2612 stereo panning", Ym2612StereoPanning);
+Run("YM2612 renders upper-bank keyed channels", Ym2612RendersUpperBankKeyedChannels);
+Run("YM2612 algorithm 0 uses S4 carrier", Ym2612Algorithm0UsesS4Carrier);
+Run("YM2612 algorithm 4 uses S2 and S4 carriers", Ym2612Algorithm4UsesS2AndS4Carriers);
+Run("YM2612 algorithm 5 uses S2 S3 and S4 carriers", Ym2612Algorithm5UsesS2S3AndS4Carriers);
+Run("YM2612 selective key-on maps S2 and S3 bits", Ym2612SelectiveKeyOnMapsS2AndS3Bits);
+Run("YM2612 snapshots expose feedback and modulation sensitivity", Ym2612SnapshotsExposeFeedbackAndModulationSensitivity);
+Run("YM2612 frequency high byte latches on low byte write", Ym2612FrequencyHighByteLatchesOnLowByteWrite);
+Run("YM2612 channel 3 special mode affects operator pitch", Ym2612Channel3SpecialModeAffectsOperatorPitch);
+Run("YM2612 channel 3 special mode maps operator frequency registers", Ym2612Channel3SpecialModeMapsOperatorFrequencyRegisters);
+Run("YM2612 detune affects operator pitch", Ym2612DetuneAffectsOperatorPitch);
+Run("YM2612 detune is applied before multiplier", Ym2612DetuneIsAppliedBeforeMultiplier);
+Run("YM2612 attack rate zero stays silent", Ym2612AttackRateZeroStaysSilent);
+Run("YM2612 SSG envelope cycles", Ym2612SsgEnvelopeCycles);
+Run("YM2612 total level attenuation can mute carriers", Ym2612TotalLevelAttenuationCanMuteCarriers);
+Run("YM2612 sustain level zero remains audible", Ym2612SustainLevelZeroRemainsAudible);
+Run("YM2612 sustain level fifteen decays to silence", Ym2612SustainLevelFifteenDecaysToSilence);
+Run("YM2612 low sustain rates decay gradually", Ym2612LowSustainRatesDecayGradually);
+Run("Z80 core executes basic program", Z80CoreExecutesBasicProgram);
+Run("Z80 core executes Sonic bank init loop", Z80CoreExecutesSonicBankInitLoop);
+Run("Z80 JR uses displacement after operand", Z80JrUsesDisplacementAfterOperand);
+Run("Z80 core executes CB prefix stack and conditional flow", Z80CoreExecutesCbStackAndConditionalFlow);
+Run("Z80 core executes register ALU variants", Z80CoreExecutesRegisterAluVariants);
+Run("Z80 accumulator flag instructions", Z80AccumulatorFlagInstructions);
+Run("Z80 maskable interrupt enters IM1 vector after EI delay", Z80MaskableInterruptEntersIm1VectorAfterEiDelay);
+Run("Z80 maskable interrupt supports IM2 vectors", Z80MaskableInterruptSupportsIm2Vectors);
+Run("Z80 core executes ED and indexed operations", Z80CoreExecutesEdAndIndexedOperations);
+Run("Z80 NEG aliases update flags", Z80NegAliasesUpdateFlags);
+Run("Z80 bus writes YM2612", Z80BusWritesYm2612);
+Run("Z80 bus exposes banked 68k window", Z80BusExposesBanked68kWindow);
+Run("Z80 reset and bus request word writes use even byte", Z80ControlWordWritesUseEvenByte);
+Run("Z80 bus grant is delayed after request", Z80BusGrantIsDelayedAfterRequest);
+Run("Z80 runs during short 68k bus release windows", Z80RunsDuringShortBusReleaseWindows);
+Run("Z80 receives VBlank interrupt pulse", Z80ReceivesVBlankInterruptPulse);
+Run("Z80 VBlank interrupt is independent of 68k VBlank enable", Z80VBlankInterruptIgnores68kEnable);
+Run("Sonic 1 startup streams YM DAC sample", Sonic1StartupStreamsYmDacSample);
+Run("Sonic 1 title drives YM and PSG music", Sonic1TitleDrivesYmAndPsgMusic);
+Run("work RAM mirroring", WorkRamMirroring);
+Run("cartridge save RAM", CartridgeSaveRam);
+Run("cartridge save RAM byte lanes", CartridgeSaveRamByteLanes);
+Run("cartridge serial EEPROM", CartridgeSerialEeprom);
+Run("input movie preserves initial save RAM", InputMoviePreservesInitialSaveRam);
+Run("cartridge bank switching", CartridgeBankSwitching);
+Run("J-Cart controller ports", JCartControllerPorts);
+Run("SVP cartridge memory map", SvpCartridgeMemoryMap);
+Run("SVP immediate ops use reference timing", SvpImmediateOpsUseReferenceTiming);
+Run("SVP optional MAME timing charges immediate cycles", SvpOptionalMameTimingChargesImmediateCycles);
+Run("SVP MLD clears status flags without setting Z", SvpMldClearsStatusFlagsWithoutSettingZ);
+Run("SVP AL read preserves pending PMAC except dummy assign", SvpAlReadPreservesPendingPmacExceptDummyAssign);
+Run("SVP pointer writes ignore modulo length", SvpPointerWritesIgnoreModuloLength);
+Run("SVP PM trace captures DRAM writes", SvpPmTraceCapturesDramWrites);
+Run("SVP pointer trace captures RAM operands", SvpPointerTraceCapturesRamOperands);
+Run("save-state round trip", SaveStateRoundTrip);
+Run("synthetic Genesis startup ROM", SyntheticGenesisStartupRom);
+Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
+Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
+Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
+Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
+Run("68000 multiply instructions", MultiplyInstructions);
+Run("68000 EOR and CMPM instructions", EorAndCmpmInstructions);
+Run("68000 NEG Scc CHK and MOVEP instructions", NegSccChkAndMovepInstructions);
+Run("68000 MOVE from SR instruction", MoveFromSrInstruction);
+Run("68000 exchange TAS and dynamic bit ops", ExchangeTasAndBitOps);
+Run("68000 immediate bit write ops", ImmediateBitWriteOps);
+Run("68000 illegal exception and RTE", IllegalExceptionAndRte);
+Run("68000 ILLEGAL opcode vectors without extension word", IllegalOpcodeVectorsWithoutExtensionWord);
+Run("68000 invalid MOVEA.B vectors illegal", InvalidMoveaByteVectorsIllegal);
+Run("68000 invalid effective address vectors illegal", InvalidEffectiveAddressVectorsIllegal);
+Run("68000 MOVE USP directions and privilege", MoveUspDirectionsAndPrivilege);
+Run("68000 RTE restores user-mode PC from supervisor stack", RteReturnsToUserModeFromSupervisorStack);
+Run("68000 interrupt switches from user stack to supervisor stack", InterruptSwitchesFromUserStackToSupervisorStack);
+Run("68000 RTR restores CCR and PC", RtrRestoresCcrAndPc);
+Run("68000 RESET is privileged and resumes", ResetInstructionIsPrivilegedAndResumes);
+Run("68000 MOVE.W postincrement to VDP absolute long", MovePostincrementToVdpAbsoluteLong);
+Run("68000 DBRA displacement word origin", DbraUsesDisplacementWordOrigin);
+Run("68000 BRA.W displacement word origin", BraWordUsesDisplacementWordOrigin);
+Run("68000 immediate RMW absolute long evaluates EA once", ImmediateRmwAbsoluteLongEvaluatesEaOnce);
+Run("68000 ASR sign extends byte and word register operands", AsrSignExtendsRegisterOperands);
+Run("68000 register shift count zero is no-op", RegisterShiftCountZeroIsNoOp);
+Run("68000 register shift counts above operand width", RegisterShiftCountsAboveOperandWidth);
+Run("68000 rotate and arithmetic shift flags", RotateAndArithmeticShiftFlags);
+Run("68000 ADDX and SUBX instructions", AddSubXInstructions);
+Run("68000 BCD arithmetic instructions", BcdArithmeticInstructions);
+Run("VDP frame renderer draws plane tiles", VdpFrameRendererDrawsPlaneTiles);
+Run("VDP plane pixel trace maps tile source", VdpPlanePixelTraceMapsTileSource);
+Run("VDP interlace double mode uses 8x16 tiles", VdpInterlaceDoubleModeUsesTallTiles);
+Run("VDP frame renderer draws sprites", VdpFrameRendererDrawsSprites);
+Run("VDP H32 sprites use active display coordinates", VdpH32SpritesUseActiveDisplayCoordinates);
+Run("VDP interlace sprites use source coordinates", VdpInterlaceSpritesUseSourceCoordinates);
+Run("VDP sprite Y coordinate ignores high bits", VdpSpriteYCoordinateIgnoresHighBits);
+Run("VDP frame renderer uses per-line sprite snapshots", VdpFrameRendererUsesPerLineSpriteSnapshots);
+Run("VDP frame renderer uses active-frame VRAM snapshot", VdpFrameRendererUsesActiveFrameVramSnapshot);
+Run("VDP frame renderer uses per-line plane VRAM snapshots", VdpFrameRendererUsesPerLinePlaneVramSnapshots);
+Run("VDP DMA timing snapshots preserve partial VRAM", VdpDmaTimingSnapshotsPreservePartialVram);
+Run("VDP frame renderer uses per-line sprite pattern snapshots", VdpFrameRendererUsesPerLineSpritePatternSnapshots);
+Run("VDP frame renderer draws multi-cell sprites in VDP order", VdpFrameRendererDrawsMultiCellSpritesInVdpOrder);
+Run("VDP frame renderer blanks when display is disabled", VdpFrameRendererBlanksWhenDisplayIsDisabled);
+Run("VDP frame renderer applies scroll", VdpFrameRendererAppliesScroll);
+Run("VDP interlace double mode indexes hscroll by display line", VdpInterlaceDoubleModeIndexesHscrollByDisplayLine);
+Run("VDP frame renderer uses per-line H-scroll snapshots", VdpFrameRendererUsesPerLineHscrollSnapshots);
+Run("VDP frame renderer uses per-line register snapshots", VdpFrameRendererUsesPerLineRegisterSnapshots);
+Run("VDP frame renderer uses per-line CRAM snapshots", VdpFrameRendererUsesPerLineCramSnapshots);
+Run("VDP frame renderer uses per-line VSRAM snapshots", VdpFrameRendererUsesPerLineVsramSnapshots);
+Run("VDP frame renderer applies window plane", VdpFrameRendererAppliesWindowPlane);
+Run("VDP H40 window uses 64-cell row stride", VdpH40WindowUsesSixtyFourCellStride);
+Run("VDP frame renderer applies priority", VdpFrameRendererAppliesPriority);
+Run("VDP sprite link priority feeds layer priority", VdpSpriteLinkPriorityFeedsLayerPriority);
+Run("VDP frame renderer applies shadow highlight", VdpFrameRendererAppliesShadowHighlight);
+Run("VDP sprite mask preserves high priority sprites", VdpSpriteMaskPreservesHighPrioritySprites);
+Run("VDP sprite dot limit clips the final sprite", VdpSpriteDotLimitClipsFinalSprite);
+Run("VDP sprite status flags", VdpSpriteStatusFlags);
+Run("VDP direct color DMA capture renders frame", VdpDirectColorDmaCaptureRendersFrame);
+
+if (failures > 0)
+{
+    Console.Error.WriteLine($"{failures} test(s) failed.");
+    Environment.Exit(1);
+}
+
+Console.WriteLine("All tests passed.");
+
+void Run(string name, Action test)
+{
+    try
+    {
+        test();
+        Console.WriteLine($"PASS {name}");
+    }
+    catch (Exception ex)
+    {
+        failures++;
+        Console.Error.WriteLine($"FAIL {name}: {ex.Message}");
+    }
+}
+
+void CartridgeHeaderParsing()
+{
+    byte[] rom = CreateRom();
+    WriteAscii(rom, 0x100, "SEGA MEGA DRIVE ");
+    WriteAscii(rom, 0x120, "DOMESTIC");
+    WriteAscii(rom, 0x150, "OVERSEAS");
+    WriteAscii(rom, 0x180, "GM TEST-00");
+    WriteAscii(rom, 0x1F0, "JUE");
+
+    CartridgeImage image = CartridgeImage.FromBytes(rom);
+    AssertEqual("SEGA MEGA DRIVE", image.Header.ConsoleName);
+    AssertEqual("DOMESTIC", image.Header.DomesticName);
+    AssertEqual("OVERSEAS", image.Header.OverseasName);
+    AssertEqual("GM TEST-00", image.Header.ProductCode);
+    AssertEqual("JUE", image.Header.Region);
+    AssertTrue(!image.Header.PrefersPal, "mixed JUE region should default to NTSC timing");
+
+    WriteAscii(rom, 0x1F0, "8");
+    image = CartridgeImage.FromBytes(rom);
+    AssertTrue(image.Header.PrefersPal, "numeric 8 region code should select PAL timing");
+}
+
+void CartridgeDiagnosticsReport()
+{
+    byte[] sramRom = CreateRom();
+    WriteLong(sramRom, 0x1A0, 0x0000_0000);
+    WriteLong(sramRom, 0x1A4, (uint)(sramRom.Length - 1));
+    DeclareSaveRam(sramRom, 0x0020_0001, 0x0020_3FFF, 0x20);
+
+    CartridgeDiagnostics sram = CartridgeImage.FromBytes(sramRom).Diagnostics;
+    AssertEqual("SRAM", sram.SaveHardware);
+    AssertEqual("odd", sram.SaveRamLanes);
+    AssertTrue(sram.SaveRamStart == 0x0020_0001, "SRAM start should be reported");
+    AssertTrue(sram.SaveRamEnd == 0x0020_3FFF, "SRAM end should be reported");
+    AssertTrue(!sram.HasUnsupportedHardware, "plain SRAM cartridge should not report unsupported hardware");
+
+    byte[] largeRom = new byte[0x50_0000];
+    WriteLong(largeRom, 0x1A0, 0x0000_0000);
+    WriteLong(largeRom, 0x1A4, (uint)(largeRom.Length - 1));
+    AssertTrue(CartridgeImage.FromBytes(largeRom).Diagnostics.UsesBankSwitchRegisters, "large cartridges should report expected bank switching");
+
+    byte[] svpRom = CreateRom();
+    WriteAscii(svpRom, 0x150, "VIRTUA RACING");
+    CartridgeDiagnostics svp = CartridgeImage.FromBytes(svpRom).Diagnostics;
+    AssertTrue(!svp.HasUnsupportedHardware, "SVP cartridges should be supported by the cartridge mapper");
+    AssertTrue(svp.HasSvp, "SVP diagnostic should flag the coprocessor");
+    AssertTrue(svp.Warnings.Any(item => item.Contains("SVP", StringComparison.Ordinal)), "SVP diagnostic should name the coprocessor");
+
+    byte[] x32Rom = CreateRom();
+    WriteAscii(x32Rom, 0x100, "SEGA 32X");
+    CartridgeDiagnostics x32 = CartridgeImage.FromBytes(x32Rom).Diagnostics;
+    AssertTrue(x32.UnsupportedHardware.Any(item => item.Contains("32X", StringComparison.Ordinal)), "32X diagnostic should name unsupported 32X hardware");
+
+    byte[] jCartRom = CreateRom();
+    WriteAscii(jCartRom, 0x150, "MICRO MACHINES II");
+    CartridgeDiagnostics jCart = CartridgeImage.FromBytes(jCartRom).Diagnostics;
+    AssertTrue(!jCart.HasUnsupportedHardware, "J-Cart games should still boot with normal controller ports");
+    AssertTrue(jCart.Warnings.Any(item => item.Contains("J-Cart", StringComparison.Ordinal)), "J-Cart diagnostic should call out extra controller ports");
+
+    byte[] t2ActionRom = CreateRom();
+    WriteAscii(t2ActionRom, 0x150, "TERMINATOR 2");
+    CartridgeDiagnostics t2Action = CartridgeImage.FromBytes(t2ActionRom).Diagnostics;
+    AssertTrue(!t2Action.Warnings.Any(item => item.Contains("Light gun", StringComparison.Ordinal)), "non-arcade Terminator 2 should not be flagged as a light gun game");
+
+    byte[] t2ArcadeRom = CreateRom();
+    WriteAscii(t2ArcadeRom, 0x150, "T2 THE ARCADE GAME");
+    CartridgeDiagnostics t2Arcade = CartridgeImage.FromBytes(t2ArcadeRom).Diagnostics;
+    AssertTrue(t2Arcade.Warnings.Any(item => item.Contains("Light gun", StringComparison.Ordinal)), "T2 arcade should be flagged as a light gun game");
+}
+
+void CpuResetAndSimpleInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x7001); // MOVEQ #1,D0
+    WriteWord(rom, 0x202, 0x7200); // MOVEQ #0,D1
+    WriteWord(rom, 0x204, 0x4E71); // NOP
+    WriteWord(rom, 0x206, 0x60FC); // BRA -4
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    AssertEqual(0x00FF_0000u, machine.MainCpu.A[7]);
+    AssertEqual(0x0000_0200u, machine.MainCpu.PC);
+
+    machine.StepInstruction();
+    machine.StepInstruction();
+    machine.StepInstruction();
+    machine.StepInstruction();
+
+    AssertEqual(1u, machine.MainCpu.D[0]);
+    AssertEqual(0u, machine.MainCpu.D[1]);
+    AssertEqual(0x0000_0204u, machine.MainCpu.PC);
+}
+
+void CodemastersDnldResetVectors()
+{
+    byte[] rom = CreateRom();
+    WriteAscii(rom, 0x000, "DNLD");
+    WriteLong(rom, 0x004, 0);
+    WriteLong(rom, 0x008, 0x0001_FACC);
+    WriteLong(rom, 0x00C, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x7007); // MOVEQ #7,D0
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    AssertEqual(0x0001_FACCu, machine.MainCpu.A[7]);
+
+    machine.StepInstruction();
+    AssertEqual(7u, machine.MainCpu.D[0]);
+}
+
+void VdpRegisterAndVramWrites()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8F04);
+    AssertEqual((byte)4, vdp.AutoIncrement);
+
+    vdp.WriteControlPort(0x4000);
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x1234);
+    vdp.WriteDataPort(0xABCD);
+
+    AssertEqual((byte)0x12, vdp.Vram[0]);
+    AssertEqual((byte)0x34, vdp.Vram[1]);
+    AssertEqual((byte)0xAB, vdp.Vram[4]);
+    AssertEqual((byte)0xCD, vdp.Vram[5]);
+}
+
+void VdpByteWritesMirrorOntoDataBus()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteWord(0x00C0_0004, 0x8F02);
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000);
+    machine.Bus.WriteWord(0x00C0_0004, 0x0000);
+    machine.Bus.WriteByte(0x00C0_0000, 0x5A);
+
+    AssertEqual((byte)0x5A, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x5A, machine.Vdp.Vram[1]);
+    AssertEqual((byte)0x02, machine.Vdp.AutoIncrement);
+}
+
+void VdpCommandDecodeAndHistory()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8200);
+    vdp.WriteControlPort(0x8238);
+    AssertEqual(2, vdp.RegisterWrites.Count);
+    AssertEqual(2, vdp.RegisterWrites[0].Register);
+    AssertEqual((byte)0x00, vdp.RegisterWrites[0].PreviousValue);
+    AssertEqual((byte)0x38, vdp.RegisterWrites[1].Value);
+
+    vdp.WriteControlPort(0x6800); // VRAM write at $A800.
+    vdp.WriteControlPort(0x0002);
+    vdp.WriteDataPort(0xBEEF);
+    AssertEqual((byte)0xBE, vdp.Vram[0xA800]);
+    AssertEqual((byte)0xEF, vdp.Vram[0xA801]);
+    AssertEqual(1, vdp.ControlCommands.Count);
+    AssertEqual((byte)0x01, vdp.ControlCommands[^1].Code);
+    AssertEqual(0xA800u, vdp.ControlCommands[^1].Address);
+
+    vdp.WriteControlPort(0xC004); // CRAM write at color 2.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x0EEE);
+    AssertEqual((ushort)0x0EEE, vdp.Cram[2]);
+    AssertEqual((byte)0x03, vdp.ControlCommands[^1].Code);
+    AssertEqual(0x0004u, vdp.ControlCommands[^1].Address);
+
+    vdp.WriteControlPort(0x4006); // VSRAM write at entry 3.
+    vdp.WriteControlPort(0x0010);
+    vdp.WriteDataPort(0x0123);
+    AssertEqual((ushort)0x0123, vdp.Vsram[3]);
+    AssertEqual((byte)0x05, vdp.ControlCommands[^1].Code);
+    AssertEqual(0x0006u, vdp.ControlCommands[^1].Address);
+
+    Vdp.VdpDiagnostics diagnostics = vdp.GetDiagnostics();
+    AssertEqual(2, diagnostics.PlaneARegisterWriteCount);
+    AssertEqual((byte)0x05, diagnostics.LastCommandCode);
+    AssertEqual(0x0006u, diagnostics.LastCommandAddress);
+}
+
+void VdpHvCounterAndInterruptStatus()
+{
+    Vdp vdp = new();
+    vdp.BeginFrame(pal: false);
+
+    AssertEqual(0x0084, vdp.ReadHvCounter());
+    AssertTrue((vdp.Status & 0x0200) != 0, "FIFO should begin empty");
+
+    Vdp.Interrupts line0 = vdp.StepScanline(0, pal: false);
+    AssertTrue((line0 & Vdp.Interrupts.Horizontal) != 0, "line zero should trigger initial H interrupt when counter is zero");
+    AssertTrue((vdp.Status & 0x0004) == 0, "HBlank status should not be set until the HBlank slice");
+
+    vdp.SetHBlank(true);
+    ushort status = vdp.ReadControlPort();
+    AssertTrue((status & 0x0004) != 0, "control read should return current HBlank status");
+    AssertTrue((vdp.Status & 0x0004) != 0, "control read should not clear current HBlank status");
+    vdp.SetHBlank(false);
+    AssertTrue((vdp.Status & 0x0004) == 0, "leaving HBlank should clear HBlank status");
+
+    Vdp.Interrupts vblank = vdp.StepScanline(224, pal: false);
+    AssertTrue((vblank & Vdp.Interrupts.Vertical) != 0, "line 224 should trigger V interrupt");
+    AssertTrue((vdp.Status & 0x0008) != 0, "VBlank flag should be set");
+    AssertTrue((vdp.Status & 0x0080) != 0, "V interrupt pending bit should be set");
+    status = vdp.ReadControlPort();
+    AssertTrue((status & 0x0008) != 0, "control read should return current VBlank status");
+    AssertTrue((vdp.Status & 0x0008) != 0, "control read should not clear current VBlank status");
+    AssertTrue((vdp.Status & 0x0080) != 0, "control read during VBlank should keep the V interrupt status visible for polling code");
+    AssertEqual(0xDA84, vdp.ReadHvCounter());
+}
+
+void VdpVInterruptPendingSurvivesFrameBoundaryUntilStatusRead()
+{
+    Vdp vdp = new();
+    vdp.BeginFrame(pal: false);
+
+    _ = vdp.StepScanline(224, pal: false);
+    AssertTrue((vdp.Status & 0x0080) != 0, "V interrupt pending bit should set at VBlank");
+
+    _ = vdp.StepScanline(Vdp.NtscScanlines - 1, pal: false);
+    AssertTrue((vdp.Status & 0x0008) == 0, "current VBlank status should clear at the frame boundary");
+    AssertTrue((vdp.Status & 0x0080) != 0, "V interrupt pending bit should survive until the status port is read");
+
+    vdp.BeginFrame(pal: false);
+    AssertTrue((vdp.Status & 0x0080) != 0, "new frame setup should not discard an unread V interrupt pending bit");
+
+    ushort status = vdp.ReadControlPort();
+    AssertTrue((status & 0x0080) != 0, "status read should expose the pending V interrupt bit");
+    AssertTrue((vdp.Status & 0x0080) == 0, "status read should clear the pending V interrupt bit");
+}
+
+void VdpM68kInterruptAcknowledgeClearsPendingFlags()
+{
+    Vdp vdp = new();
+    vdp.BeginFrame(pal: false);
+
+    _ = vdp.StepScanline(0, pal: false);
+    AssertTrue(vdp.HInterruptPending, "line zero should set the H interrupt pending flag when the counter is zero");
+    vdp.AcknowledgeM68kInterrupt(4);
+    AssertTrue(!vdp.HInterruptPending, "level 4 acknowledge should clear the H interrupt pending flag");
+
+    _ = vdp.StepScanline(224, pal: false);
+    AssertTrue(vdp.VInterruptPending, "VBlank should set the V interrupt pending flag");
+    vdp.AcknowledgeM68kInterrupt(6);
+    AssertTrue(!vdp.VInterruptPending, "level 6 acknowledge should clear the V interrupt pending flag");
+    AssertTrue((vdp.Status & 0x0080) == 0, "acknowledge should update the visible V interrupt status bit");
+}
+
+void VdpHvCounterAdvancesHorizontally()
+{
+    Vdp vdp = new();
+    vdp.BeginFrame(pal: false);
+    ushort lineStart = vdp.ReadHvCounter(0, 3420);
+    ushort middle = vdp.ReadHvCounter(1710, 3420);
+    ushort lineEnd = vdp.ReadHvCounter(3419, 3420);
+
+    AssertEqual((ushort)0x0084, lineStart);
+    AssertTrue((middle & 0x00FF) != (lineStart & 0x00FF), "horizontal counter should advance inside a scanline");
+    AssertTrue((lineEnd & 0x00FF) != (middle & 0x00FF), "horizontal counter should continue through the line");
+    AssertEqual((ushort)0x0000, (ushort)(middle & 0xFF00));
+}
+
+void VdpHBlankStatusPulsesWithoutHInterrupt()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8A7F); // Keep the H-interrupt counter away from zero.
+    vdp.BeginFrame(pal: false);
+
+    Vdp.Interrupts interrupts = vdp.StepScanline(0, pal: false);
+    AssertTrue((interrupts & Vdp.Interrupts.Horizontal) == 0, "test setup should not request H interrupt");
+    AssertTrue((vdp.Status & 0x0004) == 0, "HBlank should start clear during the active scanline slice");
+
+    vdp.SetHBlank(true);
+    ushort status = vdp.ReadControlPort();
+    AssertTrue((status & 0x0004) != 0, "HBlank status should pulse every scanline");
+    AssertTrue((vdp.Status & 0x0004) != 0, "HBlank should remain set for the HBlank slice");
+    vdp.SetHBlank(false);
+    AssertTrue((vdp.Status & 0x0004) == 0, "HBlank should clear when the slice ends");
+}
+
+void VdpDmaMemoryCopyWritesVramAndCram()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_0000, 0x1234);
+    machine.Bus.WriteWord(0x00FF_0002, 0x5678);
+    List<DmaWordTransfer> transfers = [];
+    machine.Bus.DmaWordObserver = transfers.Add;
+
+    ConfigureDma(machine.Vdp, lengthWords: 2, sourceAddress: 0x00FF_0000, mode: 0);
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000); // VRAM DMA write at $0000.
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+
+    AssertEqual((byte)0x12, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x34, machine.Vdp.Vram[1]);
+    AssertEqual((byte)0x56, machine.Vdp.Vram[2]);
+    AssertEqual((byte)0x78, machine.Vdp.Vram[3]);
+    AssertEqual(1, machine.Vdp.DmaEvents.Count);
+    AssertEqual("68k-to-vdp", machine.Vdp.DmaEvents[0].Operation);
+    AssertEqual(2, transfers.Count);
+    AssertEqual(0x00FF_0000u, transfers[0].SourceAddress);
+    AssertEqual(0x0000u, transfers[0].DestinationAddress);
+    AssertEqual(0x1234, transfers[0].Value);
+    AssertEqual(0x00FF_0002u, transfers[1].SourceAddress);
+    AssertEqual(0x0002u, transfers[1].DestinationAddress);
+    AssertEqual(0x5678, transfers[1].Value);
+
+    machine.Bus.WriteWord(0x00FF_0010, 0x000E);
+    ConfigureDma(machine.Vdp, lengthWords: 1, sourceAddress: 0x00FF_0010, mode: 0);
+    machine.Bus.WriteWord(0x00C0_0004, 0xC000); // CRAM DMA write at color 0.
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+
+    AssertEqual((ushort)0x000E, machine.Vdp.Cram[0]);
+    AssertEqual(2, machine.Vdp.DmaEvents.Count);
+}
+
+void VdpLongDmaTimingScalesWithTransferLength()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+
+    const int lengthWords = 2_000;
+    ConfigureDma(machine.Vdp, lengthWords, sourceAddress: 0x00FF_0000, mode: 0);
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000);
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+
+    AssertEqual(lengthWords * 2, machine.Vdp.DmaCycleDebt);
+    AssertEqual(1, machine.Vdp.DmaEvents.Count);
+    AssertEqual(lengthWords, machine.Vdp.DmaEvents[0].LengthWords);
+}
+
+void VdpDmaFillAndCopyModes()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+
+    ConfigureDma(machine.Vdp, lengthWords: 3, sourceAddress: 0, mode: 2);
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000); // VRAM DMA fill at $0000.
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+    machine.Bus.WriteWord(0x00C0_0000, 0xCAFE);
+
+    AssertEqual((byte)0xCA, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[1]);
+    AssertEqual((byte)0xCA, machine.Vdp.Vram[2]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[3]);
+    AssertEqual((byte)0xCA, machine.Vdp.Vram[4]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[5]);
+    AssertEqual(2, machine.Vdp.DmaEvents.Count);
+    AssertEqual("fill-armed", machine.Vdp.DmaEvents[0].Operation);
+    AssertEqual(6, machine.Vdp.DmaCycleDebt);
+
+    ConfigureDma(machine.Vdp, lengthWords: 2, sourceAddress: 0, mode: 3);
+    machine.Bus.WriteWord(0x00C0_0004, 0x4020); // VRAM DMA copy to $0020.
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+
+    AssertEqual((byte)0xCA, machine.Vdp.Vram[0x20]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[0x21]);
+    AssertEqual((byte)0xCA, machine.Vdp.Vram[0x22]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[0x23]);
+    AssertEqual("vram-copy", machine.Vdp.DmaEvents[^1].Operation);
+}
+
+void VdpDmaOnlyStartsOnCompletedCommand()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_0000, 0x1234);
+
+    ConfigureDma(machine.Vdp, lengthWords: 1, sourceAddress: 0x00FF_0000, mode: 0);
+    AssertEqual(0, machine.Vdp.DmaEvents.Count);
+
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000);
+    AssertEqual(0, machine.Vdp.DmaEvents.Count);
+
+    machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+    AssertEqual(1, machine.Vdp.DmaEvents.Count);
+    AssertEqual((byte)0x12, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x34, machine.Vdp.Vram[1]);
+}
+
+void VdpDataFifoAdds68kWaitCyclesWhenFull()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+
+    machine.Bus.WriteWord(0x00C0_0004, 0x4000);
+    machine.Bus.WriteWord(0x00C0_0004, 0x0000);
+    _ = machine.Bus.ConsumeM68kWaitCycles();
+
+    machine.Bus.WriteWord(0x00C0_0000, 0x1111);
+    machine.Bus.WriteWord(0x00C0_0000, 0x2222);
+    machine.Bus.WriteWord(0x00C0_0000, 0x3333);
+    machine.Bus.WriteWord(0x00C0_0000, 0x4444);
+    AssertEqual(8, machine.Bus.ConsumeM68kWaitCycles());
+
+    machine.Bus.WriteWord(0x00C0_0000, 0x5555);
+    AssertEqual(6, machine.Bus.ConsumeM68kWaitCycles());
+    AssertEqual(0, machine.Bus.ConsumeM68kWaitCycles());
+}
+
+void M68kPeripheralAccessesAddWaitCycles()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+
+    machine.Bus.WriteByte(0x00A1_0009, 0x40);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+
+    _ = machine.Bus.ReadByte(0x00A1_0001);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+
+    machine.Bus.WriteWord(0x00A0_0000, 0x1234);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+
+    _ = machine.Bus.ReadLong(0x00A0_0000);
+    AssertEqual(4, machine.Bus.ConsumeM68kWaitCycles());
+
+    machine.Bus.WriteByte(0x00A0_4000, 0x22);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+
+    machine.Bus.WriteWord(0x00C0_0004, 0x8F02);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+
+    machine.Bus.WriteByte(0x00A1_3000, 0x01);
+    AssertEqual(2, machine.Bus.ConsumeM68kWaitCycles());
+}
+
+void ControllerMultiplexing()
+{
+    ThreeButtonController controller = new();
+    controller.Pressed = GenesisButton.A | GenesisButton.B | GenesisButton.Start;
+
+    controller.WriteControl(0x40);
+    byte high = controller.ReadData();
+    AssertTrue((high & 0x10) == 0, "B should be visible when TH is high");
+    AssertTrue((high & 0x20) != 0, "Start should be hidden when TH is high");
+
+    controller.WriteControl(0x00);
+    byte low = controller.ReadData();
+    AssertTrue((low & 0x04) == 0, "Left line should identify a 3-button controller when TH is low");
+    AssertTrue((low & 0x08) == 0, "Right line should identify a 3-button controller when TH is low");
+    AssertTrue((low & 0x10) == 0, "A should be visible when TH is low");
+    AssertTrue((low & 0x20) == 0, "Start should be visible when TH is low");
+}
+
+void SixButtonControllerHandshake()
+{
+    ThreeButtonController controller = new()
+    {
+        SixButtonEnabled = true,
+        Pressed = GenesisButton.A |
+            GenesisButton.B |
+            GenesisButton.C |
+            GenesisButton.Start |
+            GenesisButton.X |
+            GenesisButton.Y |
+            GenesisButton.Z |
+            GenesisButton.Mode,
+    };
+
+    controller.WriteData(0x40, 10);
+    byte firstHigh = controller.ReadData();
+    AssertTrue((firstHigh & 0x10) == 0, "B should remain visible during the first high read");
+    AssertTrue((firstHigh & 0x20) == 0, "C should remain visible during the first high read");
+
+    controller.WriteData(0x00, 20);
+    byte firstLow = controller.ReadData();
+    AssertTrue((firstLow & 0x0C) == 0, "3-button signature should be visible before the six-button unlock");
+    AssertTrue((firstLow & 0x10) == 0, "A should remain visible during the first low read");
+    AssertTrue((firstLow & 0x20) == 0, "Start should remain visible during the first low read");
+
+    controller.WriteData(0x40, 30);
+    controller.WriteData(0x00, 40);
+    controller.WriteData(0x40, 50);
+    controller.WriteData(0x00, 60);
+    byte signature = controller.ReadData();
+    AssertEqual(0, signature & 0x0F);
+
+    controller.WriteData(0x40, 70);
+    byte extra = controller.ReadData();
+    AssertTrue((extra & 0x01) == 0, "Z should be visible after the six-button unlock");
+    AssertTrue((extra & 0x02) == 0, "Y should be visible after the six-button unlock");
+    AssertTrue((extra & 0x04) == 0, "X should be visible after the six-button unlock");
+    AssertTrue((extra & 0x08) == 0, "Mode should be visible after the six-button unlock");
+    AssertTrue((extra & 0x10) == 0, "B should remain visible after the six-button unlock");
+    AssertTrue((extra & 0x20) == 0, "C should remain visible after the six-button unlock");
+    AssertTrue((extra & 0x40) != 0, "TH should read high during the extra-button phase");
+
+    controller.WriteData(0x00, 200_000);
+    controller.WriteData(0x40, 200_010);
+    byte resetHigh = controller.ReadData();
+    AssertTrue((resetHigh & 0x0F) != 0, "A long idle gap should reset the six-button handshake");
+}
+
+void ControllerDataAndControlPorts()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+    machine.Bus.Controller1.Pressed = GenesisButton.B | GenesisButton.Start;
+
+    AssertEqual((uint)0, machine.Bus.ReadLong(0x00A1_0008));
+
+    machine.Bus.WriteByte(0x00A1_0009, 0x40); // TH is an output, lower bits are controller inputs.
+    machine.Bus.WriteByte(0x00A1_0003, 0x40);
+    byte high = machine.Bus.ReadByte(0x00A1_0003);
+    AssertTrue((high & 0x40) != 0, "TH output latch should read high");
+    AssertTrue((high & 0x10) == 0, "B should be visible through the data port when TH is high");
+    AssertTrue((high & 0x20) != 0, "Start should be hidden through the data port when TH is high");
+
+    machine.Bus.WriteByte(0x00A1_0003, 0x00);
+    byte low = machine.Bus.ReadByte(0x00A1_0003);
+    AssertTrue((low & 0x40) == 0, "TH output latch should read low");
+    AssertTrue((low & 0x04) == 0, "Left line should identify a 3-button controller through the data port when TH is low");
+    AssertTrue((low & 0x08) == 0, "Right line should identify a 3-button controller through the data port when TH is low");
+    AssertTrue((low & 0x20) == 0, "Start should be visible through the data port when TH is low");
+}
+
+void SegaTeamPlayerAdapterProtocol()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.Port1Device = ControllerPortDevice.SegaTeamPlayer;
+    machine.Bus.Controller1.Pressed = GenesisButton.Up | GenesisButton.Right | GenesisButton.B | GenesisButton.Start;
+    machine.Bus.Controller2.Pressed = GenesisButton.Down;
+    machine.Bus.Controller3.Pressed = GenesisButton.Left;
+    machine.Bus.Controller4.Pressed = GenesisButton.A;
+
+    machine.Bus.WriteByte(0x00A1_0009, 0x60); // TH and TR output, lower data lines input.
+    machine.Bus.WriteByte(0x00A1_0003, 0x60);
+    AssertEqual(0x03, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x20);
+    AssertEqual(0x0F, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x00);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x20);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x00);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x20);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x00);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x20);
+    AssertEqual(0x00, machine.Bus.ReadByte(0x00A1_0003) & 0x0F);
+
+    TeamPlayerStep(machine, 0x00);
+    int p1Direction = machine.Bus.ReadByte(0x00A1_0003) & 0x0F;
+    AssertTrue((p1Direction & 0x01) == 0, "Team Player should expose P1 Up in the first pad data nibble");
+    AssertTrue((p1Direction & 0x08) == 0, "Team Player should expose P1 Right in the first pad data nibble");
+
+    TeamPlayerStep(machine, 0x20);
+    int p1Buttons = machine.Bus.ReadByte(0x00A1_0003) & 0x0F;
+    AssertTrue((p1Buttons & 0x01) == 0, "Team Player should expose P1 B in the second pad data nibble");
+    AssertTrue((p1Buttons & 0x08) == 0, "Team Player should expose P1 Start in the second pad data nibble");
+}
+
+void TeamPlayerStep(MegaDrive machine, byte value)
+{
+    machine.Bus.WriteByte(0x00A1_0003, value);
+}
+
+void Ea4WayPlayAdapterProtocol()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.Port1Device = ControllerPortDevice.Ea4WayPlay;
+    machine.Bus.Controller1.Pressed = GenesisButton.Up;
+    machine.Bus.Controller2.Pressed = GenesisButton.Down;
+    machine.Bus.Controller3.Pressed = GenesisButton.Left;
+    machine.Bus.Controller4.Pressed = GenesisButton.Right;
+
+    machine.Bus.WriteByte(0x00A1_0009, 0x40); // Port A TH output, data lines input.
+    machine.Bus.WriteByte(0x00A1_000B, 0x33); // Port B TL/TR/TH/D0/D1 output.
+
+    SelectEa4WayPlayController(machine, 0);
+    AssertTrue((machine.Bus.ReadByte(0x00A1_0003) & 0x01) == 0, "4-Way Play should expose controller 1 on port A");
+
+    SelectEa4WayPlayController(machine, 1);
+    AssertTrue((machine.Bus.ReadByte(0x00A1_0003) & 0x02) == 0, "4-Way Play should expose controller 2 on port A");
+
+    SelectEa4WayPlayController(machine, 2);
+    AssertTrue((machine.Bus.ReadByte(0x00A1_0003) & 0x04) == 0, "4-Way Play should expose controller 3 on port A");
+
+    SelectEa4WayPlayController(machine, 3);
+    AssertTrue((machine.Bus.ReadByte(0x00A1_0003) & 0x08) == 0, "4-Way Play should expose controller 4 on port A");
+
+    SelectEa4WayPlayController(machine, 4);
+    AssertEqual(0x7C, machine.Bus.ReadByte(0x00A1_0003) & 0x7F);
+    AssertEqual(0x7F, machine.Bus.ReadByte(0x00A1_0005) & 0x7F);
+}
+
+void SelectEa4WayPlayController(MegaDrive machine, int latch)
+{
+    machine.Bus.WriteByte(0x00A1_0005, (byte)((latch << 4) & 0x70));
+}
+
+void LightGunAdapterButtonProtocol()
+{
+    MegaDrive menacer = new(CartridgeImage.FromBytes(CreateRom()));
+    menacer.Bus.Port2Device = ControllerPortDevice.Menacer;
+    menacer.Bus.Controller2.Pressed = GenesisButton.A | GenesisButton.B | GenesisButton.C | GenesisButton.Start;
+    byte menacerValue = menacer.Bus.ReadByte(0x00A1_0005);
+    AssertEqual(0x4F, menacerValue & 0x7F);
+
+    MegaDrive justifier = new(CartridgeImage.FromBytes(CreateRom()));
+    justifier.Bus.Port2Device = ControllerPortDevice.KonamiJustifier;
+    justifier.Bus.WriteByte(0x00A1_000B, 0x60);
+    justifier.Bus.WriteByte(0x00A1_0005, 0x40);
+    AssertEqual(0x30, justifier.Bus.ReadByte(0x00A1_0005) & 0x7F);
+
+    justifier.Bus.Controller2.Pressed = GenesisButton.A | GenesisButton.Start;
+    justifier.Bus.WriteByte(0x00A1_0005, 0x00);
+    AssertEqual(0x70, justifier.Bus.ReadByte(0x00A1_0005) & 0x7C);
+    AssertEqual(0x00, justifier.Bus.ReadByte(0x00A1_0005) & 0x03);
+
+    justifier.Bus.Controller3.Pressed = GenesisButton.A;
+    justifier.Bus.WriteByte(0x00A1_0005, 0x20);
+    AssertEqual(0x00, justifier.Bus.ReadByte(0x00A1_0005) & 0x01);
+    AssertEqual(0x02, justifier.Bus.ReadByte(0x00A1_0005) & 0x02);
+
+    MegaDrive aiming = new(CartridgeImage.FromBytes(CreateRom()));
+    aiming.Bus.Port2Device = ControllerPortDevice.Menacer;
+    aiming.Bus.MasterCyclesPerScanline = 3_200;
+    aiming.Bus.SetLightGunPosition(160, 40, visible: true);
+    aiming.Bus.BeginLightGunFrame();
+    aiming.Vdp.BeginFrame(pal: false);
+    _ = aiming.Vdp.StepScanline(40, pal: false);
+    aiming.Bus.UpdateLightGunForScanline(40);
+    AssertTrue(!aiming.Bus.LightGunLatchedThisFrame, "Light gun should not latch unless port 2 HL control is enabled");
+
+    aiming.Bus.WriteByte(0x00A1_000B, 0x80);
+    aiming.Bus.BeginLightGunFrame();
+    aiming.Vdp.BeginFrame(pal: false);
+    _ = aiming.Vdp.StepScanline(40, pal: false);
+    aiming.Bus.UpdateLightGunForScanline(40);
+    ushort latchedHv = aiming.Bus.ReadWord(0x00C0_0008);
+    AssertEqual(40, (latchedHv >> 8) & 0xFF);
+
+    _ = aiming.Vdp.StepScanline(80, pal: false);
+    aiming.Bus.UpdateLightGunForScanline(80);
+    AssertTrue(!aiming.Bus.LightGunLatchedThisFrame, "Forced light gun latch should clear after the aimed scanline when VDP HV latch is disabled");
+
+    aiming.Vdp.WriteControlPort(0x8002);
+    aiming.Bus.BeginLightGunFrame();
+    aiming.Vdp.BeginFrame(pal: false);
+    _ = aiming.Vdp.StepScanline(40, pal: false);
+    aiming.Bus.UpdateLightGunForScanline(40);
+    latchedHv = aiming.Bus.ReadWord(0x00C0_0008);
+    _ = aiming.Vdp.StepScanline(80, pal: false);
+    aiming.Bus.UpdateLightGunForScanline(80);
+    AssertEqual(latchedHv, aiming.Bus.ReadWord(0x00C0_0008));
+
+    aiming.Bus.CurrentScanlineMasterCycleOffset = 1_600;
+    _ = aiming.Vdp.StepScanline(40, pal: false);
+    byte beamRead = aiming.Bus.ReadByte(0x00A1_0005);
+    AssertTrue((beamRead & 0x40) == 0, "Menacer TH should go low when the beam reaches the aimed position");
+}
+
+void InputMoviesPreserveSeparatePlayerInputs()
+{
+    InputMovie movie = new();
+    movie.AddFrame(0, GenesisButton.A | GenesisButton.Left, GenesisButton.Start | GenesisButton.Right);
+
+    AssertEqual((int)(GenesisButton.A | GenesisButton.Left), (int)movie.GetButtons(0, playerIndex: 0));
+    AssertEqual((int)(GenesisButton.Start | GenesisButton.Right), (int)movie.GetButtons(0, playerIndex: 1));
+    AssertEqual((int)(GenesisButton.A | GenesisButton.Left), (int)movie.GetButtons(0));
+}
+
+void InputMoviesLoadLegacySinglePlayerFrames()
+{
+    string path = Path.Combine(Path.GetTempPath(), $"mdsharp-legacy-{Guid.NewGuid():N}.mdmovie");
+    try
+    {
+        File.WriteAllText(path, """
+            {
+              "version": 1,
+              "emulator": "mdSharp",
+              "frames": [
+                { "frame": 0, "buttons": 192 }
+              ]
+            }
+            """);
+
+        InputMovie movie = InputMovie.Load(path);
+        AssertEqual((int)(GenesisButton.C | GenesisButton.Start), (int)movie.GetButtons(0, playerIndex: 0));
+        AssertEqual((int)(GenesisButton.C | GenesisButton.Start), (int)movie.GetButtons(0, playerIndex: 1));
+    }
+    finally
+    {
+        File.Delete(path);
+    }
+}
+
+void HardwareVersionRegisterReflectsRegion()
+{
+    byte[] rom = CreateRom();
+    WriteAscii(rom, 0x1F0, "U");
+    MegaDrive ntsc = new(CartridgeImage.FromBytes(rom), pal: false);
+    AssertEqual((byte)0xA1, ntsc.Bus.ReadByte(0x00A1_0001));
+
+    WriteAscii(rom, 0x1F0, "E");
+    MegaDrive pal = new(CartridgeImage.FromBytes(rom), pal: true);
+    AssertEqual((byte)0xE1, pal.Bus.ReadByte(0x00A1_0001));
+
+    WriteAscii(rom, 0x1F0, "8");
+    MegaDrive numericPal = new(CartridgeImage.FromBytes(rom), pal: true);
+    AssertEqual((byte)0xE1, numericPal.Bus.ReadByte(0x00A1_0001));
+
+    WriteAscii(rom, 0x1F0, "J");
+    MegaDrive domestic = new(CartridgeImage.FromBytes(rom), pal: false);
+    AssertEqual((byte)0x21, domestic.Bus.ReadByte(0x00A1_0001));
+}
+
+void PsgToneGeneration()
+{
+    Psg psg = new();
+    psg.Write(0x80 | 0x04); // Channel 0 tone low bits.
+    psg.Write(0x10); // Channel 0 tone high bits: period $104.
+    psg.Write(0x90 | 0x00); // Channel 0 full volume.
+    psg.Write(0xB0 | 0x0F); // Channel 1 muted.
+    psg.Write(0xD0 | 0x0F); // Channel 2 muted.
+    psg.Write(0xF0 | 0x0F); // Noise muted.
+
+    AssertEqual(0x104, psg.TonePeriod(0));
+    short[] samples = psg.RenderMonoSamples(128);
+    AssertTrue(samples.Any(sample => sample != 0), "PSG tone should produce nonzero samples");
+    AssertTrue(samples.Distinct().Count() > 1, "PSG tone should toggle waveform output");
+}
+
+void PsgResetStartsMuted()
+{
+    Psg psg = new();
+    short[] samples = psg.RenderMonoSamples(128);
+    AssertTrue(samples.All(sample => sample == 0), "PSG should power on muted until a game writes audible channel volumes");
+
+    psg.Write(0x90 | 0x00);
+    AssertTrue(psg.RenderMonoSamples(128).Any(sample => sample != 0), "PSG should still become audible after a volume write");
+}
+
+void PsgWritesRenderAtFrameTimestamps()
+{
+    Psg psg = new();
+    psg.Write(0x9F); // Channel 0 muted before the frame starts.
+    psg.Write(0xBF);
+    psg.Write(0xDF);
+    psg.Write(0xFF);
+
+    psg.BeginAudioFrame(0, 100);
+    psg.Write(0x80 | 0x02, 0);
+    psg.Write(0x01, 0);
+    psg.Write(0x90 | 0x00, 50);
+
+    short[] samples = psg.RenderMonoSamples(10);
+    AssertTrue(samples.Take(4).All(sample => Math.Abs(sample) < 512), "PSG volume write should not affect earlier frame samples");
+    AssertTrue(samples.Skip(6).Any(sample => Math.Abs(sample) > 512), "PSG volume write should affect later frame samples");
+}
+
+void PsgFrameEventsAreSortedByTimestamp()
+{
+    Psg psg = new();
+    psg.Write(0x80 | 0x02);
+    psg.Write(0x01);
+    psg.Write(0x9F);
+    psg.Write(0xBF);
+    psg.Write(0xDF);
+    psg.Write(0xFF);
+
+    psg.BeginAudioFrame(0, 100);
+    psg.Write(0x9F, 80);
+    psg.Write(0x90, 10);
+
+    short[] samples = psg.RenderMonoSamples(10);
+    AssertTrue(Math.Abs(samples[0]) < 512, "first sample should use the muted initial PSG state");
+    AssertTrue(samples.Skip(1).Take(6).Any(sample => Math.Abs(sample) > 512), "earlier timestamped PSG write should render before later queued writes");
+    AssertTrue(samples.Skip(8).All(sample => Math.Abs(sample) < 512), "later timestamped PSG write should mute the channel again");
+}
+
+void PsgChannelStemsIsolateToneChannel()
+{
+    Psg psg = new();
+    psg.Write(0x80 | 0x04);
+    psg.Write(0x10);
+    psg.Write(0x90);
+    psg.Write(0xBF);
+    psg.Write(0xDF);
+    psg.Write(0xFF);
+
+    short[] stems = new short[4 * 128];
+    psg.RenderMonoChannelStemsInto(stems, 128);
+
+    AssertTrue(stems.Take(128).Any(sample => Math.Abs(sample) > 512), "PSG stem 0 should contain the keyed tone");
+    AssertTrue(stems.Skip(128).All(sample => Math.Abs(sample) < 512), "muted PSG stems should stay quiet");
+}
+
+void PsgSnapshotsExposeToneState()
+{
+    Psg psg = new();
+    psg.Write(0x80 | 0x04);
+    psg.Write(0x10);
+    psg.Write(0x90 | 0x03);
+    psg.Write(0xBF);
+    psg.Write(0xDF);
+    psg.Write(0xE7);
+
+    Psg.PsgChannelSnapshot[] snapshots = psg.GetChannelSnapshots();
+    AssertEqual(4, snapshots.Length);
+    AssertEqual(0x104, snapshots[0].Period);
+    AssertEqual(3, snapshots[0].Volume);
+    AssertTrue(snapshots[0].FrequencyHz > 400.0 && snapshots[0].FrequencyHz < 500.0, "PSG period $104 should report an audible tone frequency");
+    AssertEqual(0x07, psg.GetNoiseSnapshot().Control);
+}
+
+void PsgNoiseControlResetsShiftRegister()
+{
+    Psg psg = new();
+    psg.Write(0x9F);
+    psg.Write(0xBF);
+    psg.Write(0xDF);
+    psg.Write(0xE4); // White noise, fixed low clock.
+    psg.Write(0xF0); // Noise full volume.
+    _ = psg.RenderMonoSamples(64);
+
+    AssertTrue(psg.NoiseShift != 0x4000, "noise shift register should advance while rendering");
+    psg.Write(0xE4);
+    AssertEqual((ushort)0x4000, psg.NoiseShift);
+}
+
+void Ym2612TimersAndStatus()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0x24);
+    ym.WriteData(0, 0xFF);
+    ym.WriteAddress(0, 0x25);
+    ym.WriteData(0, 0x03);
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, 0x05); // Load/enable Timer A and enable overflow flag.
+
+    ym.Step(144);
+    AssertTrue((ym.ReadStatus() & 0x01) != 0, "Timer A should set status bit on overflow");
+
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, 0x10); // Reset Timer A flag.
+    AssertTrue((ym.ReadStatus() & 0x01) == 0, "Timer A reset should clear status bit");
+
+    ConfigureSimpleYmTone(ym, 0);
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+    short[] samples = ym.RenderMonoSamples(256);
+    AssertTrue(samples.Distinct().Count() > 1, "keyed YM channel should produce a toggling placeholder tone");
+}
+
+void Ym2612TimerReloadsFromLatchWrites()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0x26);
+    ym.WriteData(0, 0xF0);
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, 0x0A); // Load/enable Timer B and enable overflow flag.
+
+    ym.Step(30_000);
+    ym.WriteAddress(0, 0x26);
+    ym.WriteData(0, 0xE4); // Re-arm from the new latch while Timer B remains loaded.
+    ym.Step(8_000);
+    AssertTrue((ym.ReadStatus() & 0x02) == 0, "Timer B latch write should reload the running timer instead of keeping the old near-expired counter");
+
+    ym.Step((256 - 0xE4) * 2_304);
+    AssertTrue((ym.ReadStatus() & 0x02) != 0, "Timer B should set its status bit after the reloaded period elapses");
+}
+
+void Ym2612BusyStatusAfterRegisterWrites()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0x22);
+    ym.WriteData(0, 0x08, 1_000);
+
+    AssertTrue((ym.ReadStatus(1_000) & 0x80) != 0, "YM should report busy immediately after a register write");
+    AssertTrue((ym.ReadStatus(1_127) & 0x80) != 0, "YM should remain busy for the configured busy window");
+    AssertTrue((ym.ReadStatus(1_128) & 0x80) == 0, "YM busy bit should clear after the busy window");
+}
+
+void Ym2612DacResetLevelIsNeutral()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0x2B);
+    ym.WriteData(0, 0x80);
+
+    short[] samples = ym.RenderStereoSamples(128);
+    AssertTrue(samples.All(sample => sample == 0), "Enabling DAC before the first sample write should output neutral silence");
+
+    ym.WriteAddress(0, 0x2A);
+    ym.WriteData(0, 0x00);
+    AssertTrue(ym.RenderStereoSamples(128).Any(sample => sample < 0), "DAC should still produce a negative level after an explicit low sample write");
+}
+
+void Ym2612CsmKeyOnFromTimerAOverflow()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 2);
+    WriteYmFrequency(ym, 2, 0x280, 4);
+    ym.WriteAddress(0, 0x24);
+    ym.WriteData(0, 0xFF);
+    ym.WriteAddress(0, 0x25);
+    ym.WriteData(0, 0x03);
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, 0x85); // CSM, Timer A start, Timer A status enable.
+
+    ym.Step(144);
+    short[] samples = ym.RenderMonoSamples(256);
+    AssertTrue((ym.ReadStatus() & 0x01) != 0, "Timer A should set status during CSM overflow");
+    AssertTrue(samples.Any(sample => sample != 0), "CSM Timer A overflow should key on channel 3");
+}
+
+void Ym2612DacWritesRenderAtFrameTimestamps()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0x2A);
+    ym.WriteData(0, 0x80);
+    ym.BeginAudioFrame(0, 100);
+    ym.WriteAddress(0, 0x2B);
+    ym.WriteData(0, 0x80, 0);
+    ym.WriteAddress(0, 0x2A);
+    ym.WriteData(0, 0xFF, 50);
+
+    short[] samples = ym.RenderMonoSamples(10);
+    AssertTrue(Math.Abs(samples[1]) < 256, "DAC should start from the frame's initial sample before timed writes");
+    AssertTrue(samples[6] > 5_000, "DAC write should affect samples at and after its frame timestamp");
+}
+
+void Ym2612KeyOnWritesRenderAtFrameTimestamps()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    WriteYmFrequency(ym, 0, 0x280, 4);
+
+    ym.BeginAudioFrame(0, 640);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0, 320);
+
+    short[] samples = ym.RenderMonoSamples(64);
+    AssertTrue(samples.Take(28).All(sample => Math.Abs(sample) < 128), "YM key-on should not affect earlier frame samples");
+    AssertTrue(samples.Skip(40).Any(sample => Math.Abs(sample) > 32), "YM key-on should affect later frame samples");
+}
+
+void Ym2612FrameEventsAreSortedByTimestamp()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x40);
+    ym.WriteData(0, 0x7F);
+    ym.WriteAddress(0, 0x48);
+    ym.WriteData(0, 0x7F);
+    ym.WriteAddress(0, 0x44);
+    ym.WriteData(0, 0x7F);
+    ym.WriteAddress(0, 0x4C);
+    ym.WriteData(0, 0x7F);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    ym.BeginAudioFrame(0, 100);
+    ym.WriteAddress(0, 0x40);
+    ym.WriteData(0, 0x7F, 80);
+    ym.WriteAddress(0, 0x40);
+    ym.WriteData(0, 0x00, 10);
+
+    short[] samples = ym.RenderMonoSamples(10);
+    AssertTrue(samples.Take(2).All(sample => Math.Abs(sample) < 64), "early samples should use the muted initial YM state");
+    AssertTrue(samples.Skip(2).Take(5).Any(sample => Math.Abs(sample) > 8), "earlier timestamped YM write should render before later queued writes");
+    AssertTrue(samples.Skip(9).All(sample => Math.Abs(sample) < 64), "later timestamped YM write should mute the operator again after the operator delay");
+}
+
+void Ym2612ChannelStemsIsolateKeyedChannel()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 1);
+    WriteYmFrequency(ym, 1, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF1);
+
+    short[] stems = new short[6 * 128 * 2];
+    ym.RenderStereoChannelStemsInto(stems, 128);
+
+    int stem0Energy = StereoEnergy(stems, 0, 128);
+    int stem1Energy = StereoEnergy(stems, 1, 128);
+    int stem2Energy = StereoEnergy(stems, 2, 128);
+    AssertEqual(0, stem0Energy);
+    AssertTrue(stem1Energy > 0, "YM stem 1 should contain the keyed channel");
+    AssertEqual(0, stem2Energy);
+}
+
+void Ym2612StereoPanning()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    ym.WriteAddress(0, 0xB4);
+    ym.WriteData(0, 0x80); // Channel 0 left only.
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    short[] stereo = ym.RenderStereoSamples(256);
+    int leftEnergy = 0;
+    int rightEnergy = 0;
+    for (int i = 0; i < stereo.Length; i += 2)
+    {
+        leftEnergy += Math.Abs(stereo[i]);
+        rightEnergy += Math.Abs(stereo[i + 1]);
+    }
+
+    AssertTrue(leftEnergy > 0, "left-panned YM channel should render on the left");
+    AssertEqual(0, rightEnergy);
+}
+
+void Ym2612RendersUpperBankKeyedChannels()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 3);
+    WriteYmFrequency(ym, 3, 0x290, 5);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF4); // Key on channel 4.
+
+    short[] samples = ym.RenderMonoSamples(512);
+    AssertTrue(samples.Any(sample => sample != 0), "upper-bank YM channel should produce audio");
+    AssertTrue(samples.Distinct().Count() > 1, "upper-bank YM channel should vary over time");
+}
+
+void Ym2612Algorithm4UsesS2AndS4Carriers()
+{
+    Ym2612 mutedCarriers = CreateAlgorithmCarrierProbe(algorithm: 4, mutedOperators: [1, 3]);
+    Ym2612 mutedModulators = CreateAlgorithmCarrierProbe(algorithm: 4, mutedOperators: [0, 2]);
+
+    int carrierMutedEnergy = MonoEnergy(mutedCarriers.RenderMonoSamples(2048));
+    int modulatorMutedEnergy = MonoEnergy(mutedModulators.RenderMonoSamples(2048));
+
+    AssertTrue(modulatorMutedEnergy > 10_000, "algorithm 4 should keep output from S2/S4 carriers when S1/S3 modulators are muted");
+    AssertTrue(carrierMutedEnergy * 8 < modulatorMutedEnergy, $"algorithm 4 should be mostly silent when S2/S4 carriers are muted ({carrierMutedEnergy} vs {modulatorMutedEnergy})");
+}
+
+void Ym2612Algorithm0UsesS4Carrier()
+{
+    Ym2612 mutedCarrier = CreateAlgorithmCarrierProbe(algorithm: 0, mutedOperators: [3]);
+    Ym2612 mutedModulators = CreateAlgorithmCarrierProbe(algorithm: 0, mutedOperators: [0, 1, 2]);
+
+    int carrierMutedEnergy = MonoEnergy(mutedCarrier.RenderMonoSamples(2048));
+    int modulatorMutedEnergy = MonoEnergy(mutedModulators.RenderMonoSamples(2048));
+
+    AssertTrue(modulatorMutedEnergy > 10_000, "algorithm 0 should keep output from S4 when S1/S2/S3 modulators are muted");
+    AssertTrue(carrierMutedEnergy * 8 < modulatorMutedEnergy, $"algorithm 0 should be mostly silent when S4 is muted ({carrierMutedEnergy} vs {modulatorMutedEnergy})");
+}
+
+void Ym2612Algorithm5UsesS2S3AndS4Carriers()
+{
+    Ym2612 mutedCarriers = CreateAlgorithmCarrierProbe(algorithm: 5, mutedOperators: [1, 2, 3]);
+    Ym2612 mutedModulator = CreateAlgorithmCarrierProbe(algorithm: 5, mutedOperators: [0]);
+
+    int carrierMutedEnergy = MonoEnergy(mutedCarriers.RenderMonoSamples(2048));
+    int modulatorMutedEnergy = MonoEnergy(mutedModulator.RenderMonoSamples(2048));
+
+    AssertTrue(modulatorMutedEnergy > 10_000, "algorithm 5 should keep output from S2/S3/S4 when S1 is muted");
+    AssertTrue(carrierMutedEnergy * 8 < modulatorMutedEnergy, $"algorithm 5 should be mostly silent when S2/S3/S4 carriers are muted ({carrierMutedEnergy} vs {modulatorMutedEnergy})");
+}
+
+void Ym2612SelectiveKeyOnMapsS2AndS3Bits()
+{
+    Ym2612 s2Keyed = CreateSelectiveKeyOnProbe(0x20);
+    Ym2612 s3Keyed = CreateSelectiveKeyOnProbe(0x40);
+
+    int s2Energy = MonoEnergy(s2Keyed.RenderMonoSamples(2048));
+    int s3Energy = MonoEnergy(s3Keyed.RenderMonoSamples(2048));
+
+    AssertTrue(s2Energy > 10_000, "key-on bit 5 should start S2, the algorithm 4 carrier");
+    AssertTrue(s3Energy * 8 < s2Energy, $"key-on bit 6 should start S3, a muted modulator in this probe ({s3Energy} vs {s2Energy})");
+}
+
+void Ym2612SnapshotsExposeFeedbackAndModulationSensitivity()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0xB0);
+    ym.WriteData(0, 0x3A); // feedback 7, algorithm 2.
+    ym.WriteAddress(0, 0xB4);
+    ym.WriteData(0, 0xB5); // left, AMS 3, PMS 5.
+
+    Ym2612.Ym2612ChannelSnapshot snapshot = ym.GetChannelSnapshots()[0];
+    AssertEqual(2, snapshot.Algorithm);
+    AssertEqual(7, snapshot.Feedback);
+    AssertEqual(5, snapshot.PhaseModulationSensitivity);
+    AssertEqual(3, snapshot.AmplitudeModulationSensitivity);
+
+    ym.WriteAddress(0, 0x30);
+    ym.WriteData(0, 0x73);
+    snapshot = ym.GetChannelSnapshots()[0];
+    AssertEqual(3, snapshot.Multipliers[0]);
+    AssertEqual(7, snapshot.Detunes[0]);
+}
+
+void Ym2612FrequencyHighByteLatchesOnLowByteWrite()
+{
+    Ym2612 ym = new();
+    WriteYmFrequency(ym, 0, 0x280, 4);
+
+    ym.WriteAddress(0, 0xA4);
+    ym.WriteData(0, 0x32);
+    Ym2612.Ym2612ChannelSnapshot beforeLowWrite = ym.GetChannelSnapshots()[0];
+
+    ym.WriteAddress(0, 0xA0);
+    ym.WriteData(0, 0x90);
+    Ym2612.Ym2612ChannelSnapshot afterLowWrite = ym.GetChannelSnapshots()[0];
+
+    AssertEqual(0x280, beforeLowWrite.FNumber);
+    AssertEqual(4, beforeLowWrite.Block);
+    AssertEqual(0x290, afterLowWrite.FNumber);
+    AssertEqual(6, afterLowWrite.Block);
+}
+
+void Ym2612Channel3SpecialModeAffectsOperatorPitch()
+{
+    Ym2612 normal = CreateChannel3SpecialProbe(enableSpecialMode: false);
+    Ym2612 special = CreateChannel3SpecialProbe(enableSpecialMode: true);
+
+    short[] normalSamples = normal.RenderMonoSamples(512);
+    short[] specialSamples = special.RenderMonoSamples(512);
+    AssertTrue(!normalSamples.SequenceEqual(specialSamples), "channel 3 special mode should alter the rendered operator pitch mix");
+}
+
+void Ym2612Channel3SpecialModeMapsOperatorFrequencyRegisters()
+{
+    Ym2612 lowS2 = CreateChannel3SingleOperatorProbe(s2Fnum: 0x280, s2Block: 3, s3Fnum: 0x700, s3Block: 5);
+    Ym2612 highS2 = CreateChannel3SingleOperatorProbe(s2Fnum: 0x700, s2Block: 5, s3Fnum: 0x280, s3Block: 3);
+
+    short[] lowSamples = lowS2.RenderMonoSamples(4096);
+    short[] highSamples = highS2.RenderMonoSamples(4096);
+    int lowCrossings = CountZeroCrossings(lowSamples);
+    int highCrossings = CountZeroCrossings(highSamples);
+
+    AssertTrue(highCrossings > lowCrossings * 3, $"operator S2 should use $AA/$AE in channel 3 special mode ({lowCrossings} vs {highCrossings} crossings)");
+}
+
+void Ym2612DetuneAffectsOperatorPitch()
+{
+    Ym2612 positive = CreateDetuneProbe(0x30);
+    Ym2612 negative = CreateDetuneProbe(0x70);
+
+    short[] positiveSamples = positive.RenderMonoSamples(4096);
+    short[] negativeSamples = negative.RenderMonoSamples(4096);
+
+    AssertTrue(!positiveSamples.SequenceEqual(negativeSamples), "positive and negative detune settings should produce different operator phase evolution");
+}
+
+void Ym2612DetuneIsAppliedBeforeMultiplier()
+{
+    int lowMultipleDifference = DetuneCrossingDifference(multiple: 1);
+    int highMultipleDifference = DetuneCrossingDifference(multiple: 8);
+
+    AssertTrue(highMultipleDifference > lowMultipleDifference * 2, $"detune should scale with operator multiple ({lowMultipleDifference} vs {highMultipleDifference})");
+}
+
+void Ym2612AttackRateZeroStaysSilent()
+{
+    Ym2612 ym = new();
+    ym.WriteAddress(0, 0xB0);
+    ym.WriteData(0, 0x07);
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    short[] samples = ym.RenderMonoSamples(512);
+    AssertTrue(samples.All(sample => sample == 0), "operators with attack rate zero should not rise from silence");
+}
+
+void Ym2612SsgEnvelopeCycles()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    ym.WriteAddress(0, 0x60);
+    ym.WriteData(0, 0x1F);
+    ym.WriteAddress(0, 0x70);
+    ym.WriteData(0, 0x1F);
+    ym.WriteAddress(0, 0x90);
+    ym.WriteData(0, 0x0B); // SSG-EG enabled, alternate with hold.
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    _ = ym.RenderMonoSamples(4096);
+    Ym2612.Ym2612State state = ym.CaptureState();
+    AssertTrue(state.SsgHolding.Any(value => value), "SSG hold envelope should latch after cycling");
+}
+
+void Ym2612SustainLevelZeroRemainsAudible()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op);
+        ym.WriteAddress(0, (byte)(0x60 + offset));
+        ym.WriteData(0, 0x1F);
+        ym.WriteAddress(0, (byte)(0x80 + offset));
+        ym.WriteData(0, 0x0F); // SL=0, RR=15.
+    }
+
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    short[] samples = ym.RenderMonoSamples(4096);
+    AssertTrue(samples.Skip(2048).Any(sample => Math.Abs(sample) > 64), "SL=0 should sustain an audible operator level rather than decaying to silence");
+}
+
+void Ym2612TotalLevelAttenuationCanMuteCarriers()
+{
+    Ym2612 audible = new();
+    ConfigureSimpleYmTone(audible, 0);
+    WriteYmFrequency(audible, 0, 0x280, 4);
+    audible.WriteAddress(0, 0x28);
+    audible.WriteData(0, 0xF0);
+
+    Ym2612 muted = new();
+    ConfigureSimpleYmTone(muted, 0);
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op);
+        muted.WriteAddress(0, (byte)(0x40 + offset));
+        muted.WriteData(0, 0x7F);
+    }
+
+    WriteYmFrequency(muted, 0, 0x280, 4);
+    muted.WriteAddress(0, 0x28);
+    muted.WriteData(0, 0xF0);
+
+    int audibleEnergy = MonoEnergy(audible.RenderMonoSamples(2048));
+    int mutedEnergy = MonoEnergy(muted.RenderMonoSamples(2048));
+    AssertTrue(audibleEnergy > 10_000, "baseline carrier should be audible");
+    AssertTrue(mutedEnergy * 16 < audibleEnergy, $"max total level should mute carriers ({mutedEnergy} vs {audibleEnergy})");
+}
+
+void Ym2612SustainLevelFifteenDecaysToSilence()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op);
+        ym.WriteAddress(0, (byte)(0x60 + offset));
+        ym.WriteData(0, 0x1F);
+        ym.WriteAddress(0, (byte)(0x80 + offset));
+        ym.WriteData(0, 0xFF); // SL=15, RR=15.
+    }
+
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    short[] samples = ym.RenderMonoSamples(8192);
+    AssertTrue(samples.Skip(6144).All(sample => Math.Abs(sample) < 32), "SL=15 should decay to the silent envelope floor");
+}
+
+void Ym2612LowSustainRatesDecayGradually()
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op);
+        ym.WriteAddress(0, (byte)(0x60 + offset));
+        ym.WriteData(0, 0x1F);
+        ym.WriteAddress(0, (byte)(0x70 + offset));
+        ym.WriteData(0, 0x01);
+        ym.WriteAddress(0, (byte)(0x80 + offset));
+        ym.WriteData(0, 0x0F); // SL=0, RR=15.
+    }
+
+    WriteYmFrequency(ym, 0, 0x280, 4);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+
+    short[] samples = ym.RenderMonoSamples(4096);
+    AssertTrue(samples.Skip(2048).Any(sample => Math.Abs(sample) > 64), "SR=1 should decay gradually, not force a one-unit envelope step every sample");
+}
+
+Ym2612 CreateChannel3SpecialProbe(bool enableSpecialMode)
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 2);
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, enableSpecialMode ? (byte)0x40 : (byte)0x00);
+    ym.WriteAddress(0, 0xB2);
+    ym.WriteData(0, 0x07); // Parallel algorithm.
+    WriteYmFrequency(ym, 2, 0x040, 4);
+    WriteChannel3Frequency(ym, 0xA8, 0xAC, 0x0E0, 5);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF2);
+    _ = ym.RenderMonoSamples(64);
+    return ym;
+}
+
+Ym2612 CreateChannel3SingleOperatorProbe(int s2Fnum, int s2Block, int s3Fnum, int s3Block)
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 2);
+    ym.WriteAddress(0, 0x27);
+    ym.WriteData(0, 0x40);
+    ym.WriteAddress(0, 0xB2);
+    ym.WriteData(0, 0x07);
+
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op) + 2;
+        ym.WriteAddress(0, (byte)(0x40 + offset));
+        ym.WriteData(0, op == 1 ? (byte)0x00 : (byte)0x7F);
+    }
+
+    WriteChannel3Frequency(ym, 0xA2, 0xA6, 0x280, 3); // S4/base
+    WriteChannel3Frequency(ym, 0xA8, 0xAC, s3Fnum, s3Block); // S3
+    WriteChannel3Frequency(ym, 0xA9, 0xAD, 0x300, 4); // S1
+    WriteChannel3Frequency(ym, 0xAA, 0xAE, s2Fnum, s2Block); // S2
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF2);
+    _ = ym.RenderMonoSamples(512);
+    return ym;
+}
+
+Ym2612 CreateDetuneProbe(byte detune)
+{
+    Ym2612 ym = new();
+    ConfigureSimpleYmTone(ym, 0);
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op);
+        ym.WriteAddress(0, (byte)(0x30 + offset));
+        ym.WriteData(0, (byte)(detune | 0x01));
+    }
+
+    WriteYmFrequency(ym, 0, 0x7F0, 5);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+    _ = ym.RenderMonoSamples(512);
+    return ym;
+}
+
+int DetuneCrossingDifference(byte multiple)
+{
+    Ym2612 plain = CreateSingleCarrierDetuneProbe(detune: 0x00, multiple);
+    Ym2612 detuned = CreateSingleCarrierDetuneProbe(detune: 0x30, multiple);
+
+    int plainCrossings = CountZeroCrossings(plain.RenderMonoSamples(32768));
+    int detunedCrossings = CountZeroCrossings(detuned.RenderMonoSamples(32768));
+    return Math.Abs(detunedCrossings - plainCrossings);
+}
+
+Ym2612 CreateSingleCarrierDetuneProbe(byte detune, byte multiple)
+{
+    Ym2612 ym = new();
+    int bank = 0;
+    int slot = 0;
+    ym.WriteAddress(bank, (byte)(0xB0 + slot));
+    ym.WriteData(bank, 0x07);
+
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op) + slot;
+        ym.WriteAddress(bank, (byte)(0x30 + offset));
+        ym.WriteData(bank, (byte)(op == 3 ? detune | (multiple & 0x0F) : 0x01));
+        ym.WriteAddress(bank, (byte)(0x40 + offset));
+        ym.WriteData(bank, op == 3 ? (byte)0x00 : (byte)0x7F);
+        ym.WriteAddress(bank, (byte)(0x50 + offset));
+        ym.WriteData(bank, 0x1F);
+        ym.WriteAddress(bank, (byte)(0x60 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x70 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x80 + offset));
+        ym.WriteData(bank, 0x0F);
+    }
+
+    WriteYmFrequency(ym, 0, 0x7F0, 5);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, 0xF0);
+    _ = ym.RenderMonoSamples(512);
+    return ym;
+}
+
+void WriteChannel3Frequency(Ym2612 ym, byte lowRegister, byte highRegister, int fnum, int block)
+{
+    ym.WriteAddress(0, highRegister);
+    ym.WriteData(0, (byte)(((block & 0x07) << 3) | ((fnum >> 8) & 0x07)));
+    ym.WriteAddress(0, lowRegister);
+    ym.WriteData(0, (byte)(fnum & 0xFF));
+}
+
+void WriteYmFrequency(Ym2612 ym, int channel, int fnum, int block)
+{
+    int bank = channel / 3;
+    int slot = channel % 3;
+    ym.WriteAddress(bank, (byte)(0xA4 + slot));
+    ym.WriteData(bank, (byte)(((block & 0x07) << 3) | ((fnum >> 8) & 0x07)));
+    ym.WriteAddress(bank, (byte)(0xA0 + slot));
+    ym.WriteData(bank, (byte)(fnum & 0xFF));
+}
+
+int CountZeroCrossings(short[] samples)
+{
+    int crossings = 0;
+    int previous = 0;
+    foreach (short sample in samples)
+    {
+        int current = sample > 16 ? 1 : sample < -16 ? -1 : 0;
+        if (current != 0 && previous != 0 && current != previous)
+        {
+            crossings++;
+        }
+
+        if (current != 0)
+        {
+            previous = current;
+        }
+    }
+
+    return crossings;
+}
+
+int StereoEnergy(short[] channelMajorStereoStems, int channel, int samples)
+{
+    int start = channel * samples * 2;
+    int energy = 0;
+    for (int i = 0; i < samples * 2; i++)
+    {
+        energy += Math.Abs(channelMajorStereoStems[start + i]);
+    }
+
+    return energy;
+}
+
+int MonoEnergy(short[] samples)
+{
+    int energy = 0;
+    foreach (short sample in samples)
+    {
+        energy += Math.Abs(sample);
+    }
+
+    return energy;
+}
+
+void ConfigureSimpleYmTone(Ym2612 ym, int channel)
+{
+    int bank = channel / 3;
+    int slot = channel % 3;
+    ym.WriteAddress(bank, (byte)(0xB0 + slot));
+    ym.WriteData(bank, 0x07); // Parallel algorithm so all operators are audible in the placeholder core.
+
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op) + slot;
+        ym.WriteAddress(bank, (byte)(0x30 + offset));
+        ym.WriteData(bank, 0x01);
+        ym.WriteAddress(bank, (byte)(0x40 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x50 + offset));
+        ym.WriteData(bank, 0x1F);
+        ym.WriteAddress(bank, (byte)(0x60 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x70 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x80 + offset));
+        ym.WriteData(bank, 0x0F);
+    }
+}
+
+Ym2612 CreateAlgorithmCarrierProbe(int algorithm, int[] mutedOperators)
+{
+    Ym2612 ym = new();
+    int channel = 0;
+    int bank = 0;
+    int slot = 0;
+
+    ym.WriteAddress(bank, (byte)(0xB0 + slot));
+    ym.WriteData(bank, (byte)(algorithm & 0x07));
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op) + slot;
+        ym.WriteAddress(bank, (byte)(0x30 + offset));
+        ym.WriteData(bank, 0x01);
+        ym.WriteAddress(bank, (byte)(0x40 + offset));
+        ym.WriteData(bank, mutedOperators.Contains(op) ? (byte)0x7F : (byte)0x00);
+        ym.WriteAddress(bank, (byte)(0x50 + offset));
+        ym.WriteData(bank, 0x1F);
+        ym.WriteAddress(bank, (byte)(0x60 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x70 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x80 + offset));
+        ym.WriteData(bank, 0x0F);
+    }
+
+    ym.WriteAddress(bank, (byte)(0xA4 + slot));
+    ym.WriteData(bank, 0x28);
+    ym.WriteAddress(bank, (byte)(0xA0 + slot));
+    ym.WriteData(bank, 0x80);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, (byte)(0xF0 | channel));
+    _ = ym.RenderMonoSamples(256);
+    return ym;
+}
+
+Ym2612 CreateSelectiveKeyOnProbe(byte keyOnValue)
+{
+    Ym2612 ym = new();
+    int bank = 0;
+    int slot = 0;
+
+    ym.WriteAddress(bank, (byte)(0xB0 + slot));
+    ym.WriteData(bank, 0x04); // S1->S2 and S3->S4, output from S2/S4.
+    for (int op = 0; op < 4; op++)
+    {
+        int offset = YmOperatorRegisterOffset(op) + slot;
+        ym.WriteAddress(bank, (byte)(0x30 + offset));
+        ym.WriteData(bank, 0x01);
+        ym.WriteAddress(bank, (byte)(0x40 + offset));
+        ym.WriteData(bank, op == 1 ? (byte)0x00 : (byte)0x7F);
+        ym.WriteAddress(bank, (byte)(0x50 + offset));
+        ym.WriteData(bank, 0x1F);
+        ym.WriteAddress(bank, (byte)(0x60 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x70 + offset));
+        ym.WriteData(bank, 0x00);
+        ym.WriteAddress(bank, (byte)(0x80 + offset));
+        ym.WriteData(bank, 0x0F);
+    }
+
+    ym.WriteAddress(bank, (byte)(0xA4 + slot));
+    ym.WriteData(bank, 0x28);
+    ym.WriteAddress(bank, (byte)(0xA0 + slot));
+    ym.WriteData(bank, 0x80);
+    ym.WriteAddress(0, 0x28);
+    ym.WriteData(0, keyOnValue);
+    return ym;
+}
+
+int YmOperatorRegisterOffset(int op)
+{
+    return op switch
+    {
+        0 => 0x00,
+        1 => 0x08,
+        2 => 0x04,
+        _ => 0x0C,
+    };
+}
+
+void Z80CoreExecutesBasicProgram()
+{
+    byte[] memory = new byte[0x10000];
+    memory[0x0000] = 0x3E; // LD A,$12
+    memory[0x0001] = 0x12;
+    memory[0x0002] = 0x06; // LD B,3
+    memory[0x0003] = 0x03;
+    memory[0x0004] = 0x04; // INC B
+    memory[0x0005] = 0x80; // ADD A,B
+    memory[0x0006] = 0x32; // LD ($2000),A
+    memory[0x0007] = 0x00;
+    memory[0x0008] = 0x20;
+    memory[0x0009] = 0x76; // HALT
+
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!z80.Halted)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value);
+    }
+
+    AssertEqual((byte)0x16, z80.A);
+    AssertEqual((byte)0x16, memory[0x2000]);
+}
+
+void Z80CoreExecutesSonicBankInitLoop()
+{
+    byte[] memory = new byte[0x10000];
+    byte[] program =
+    [
+        0xF3, 0xF3, 0xF3, 0x31, 0xFC, 0x1F, 0xDD, 0x21,
+        0x00, 0x40, 0xAF, 0x32, 0xFD, 0x1F, 0x32, 0xFF,
+        0x1F, 0x3E, 0x01, 0x32, 0x00, 0x60, 0x06, 0x08,
+        0x3E, 0x07, 0x32, 0x00, 0x60, 0x0F, 0x10, 0xFA,
+        0x76,
+    ];
+    Array.Copy(program, memory, program.Length);
+    int bankWrites = 0;
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+
+    int guard = 0;
+    while (!z80.Halted && guard++ < 64)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) =>
+        {
+            if (address == 0x6000)
+            {
+                bankWrites++;
+                return;
+            }
+
+            memory[address] = value;
+        });
+    }
+
+    AssertTrue(z80.Halted, "Sonic Z80 bank-init loop should finish");
+    AssertEqual((byte)0x00, z80.B);
+    AssertEqual(9, bankWrites);
+}
+
+void Z80JrUsesDisplacementAfterOperand()
+{
+    byte[] memory = new byte[0x10000];
+    memory[0x0000] = 0x18; // JR +2 should land at $0004, after the displacement operand.
+    memory[0x0001] = 0x02;
+    memory[0x0002] = 0x76; // Incorrect off-by-one target.
+    memory[0x0003] = 0x76;
+    memory[0x0004] = 0x3E; // LD A,$42
+    memory[0x0005] = 0x42;
+    memory[0x0006] = 0x76; // HALT
+
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+    int guard = 0;
+    while (!z80.Halted && guard++ < 8)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value);
+    }
+
+    AssertEqual((byte)0x42, z80.A);
+}
+
+void Z80CoreExecutesCbStackAndConditionalFlow()
+{
+    byte[] memory = new byte[0x10000];
+    memory[0x0000] = 0x21; // LD HL,$2000
+    memory[0x0001] = 0x00;
+    memory[0x0002] = 0x20;
+    memory[0x0003] = 0x36; // LD (HL),$80
+    memory[0x0004] = 0x80;
+    memory[0x0005] = 0xCB; // RLC (HL) => $01 with carry.
+    memory[0x0006] = 0x06;
+    memory[0x0007] = 0xCB; // BIT 0,(HL)
+    memory[0x0008] = 0x46;
+    memory[0x0009] = 0x7E; // LD A,(HL)
+    memory[0x000A] = 0xE5; // PUSH HL
+    memory[0x000B] = 0xD1; // POP DE
+    memory[0x000C] = 0xFE; // CP $01
+    memory[0x000D] = 0x01;
+    memory[0x000E] = 0xCC; // CALL Z,$0018
+    memory[0x000F] = 0x18;
+    memory[0x0010] = 0x00;
+    memory[0x0011] = 0x76; // HALT
+    memory[0x0018] = 0x06; // LD B,3
+    memory[0x0019] = 0x03;
+    memory[0x001A] = 0x10; // DJNZ $001A
+    memory[0x001B] = 0xFE;
+    memory[0x001C] = 0xC9; // RET
+
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+    int guard = 0;
+    while (!z80.Halted && guard++ < 64)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value);
+    }
+
+    AssertTrue(z80.Halted, "Z80 should halt after returning from conditional call");
+    AssertEqual((byte)0x01, memory[0x2000]);
+    AssertEqual((byte)0x01, z80.A);
+    AssertEqual((byte)0x20, z80.D);
+    AssertEqual((byte)0x00, z80.E);
+    AssertEqual((byte)0x00, z80.B);
+}
+
+void Z80BusWritesYm2612()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+    machine.Bus.WriteZ80Byte(0x0000, 0x3E); // LD A,$2A
+    machine.Bus.WriteZ80Byte(0x0001, 0x2A);
+    machine.Bus.WriteZ80Byte(0x0002, 0x32); // LD ($4000),A
+    machine.Bus.WriteZ80Byte(0x0003, 0x00);
+    machine.Bus.WriteZ80Byte(0x0004, 0x40);
+    machine.Bus.WriteZ80Byte(0x0005, 0x3E); // LD A,$7F
+    machine.Bus.WriteZ80Byte(0x0006, 0x7F);
+    machine.Bus.WriteZ80Byte(0x0007, 0x32); // LD ($4001),A
+    machine.Bus.WriteZ80Byte(0x0008, 0x01);
+    machine.Bus.WriteZ80Byte(0x0009, 0x40);
+    machine.Bus.WriteZ80Byte(0x000A, 0x76); // HALT
+
+    machine.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!machine.Z80.Halted)
+    {
+        machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x7F, machine.Ym2612.ReadRegister(0, 0x2A));
+}
+
+void Z80CoreExecutesRegisterAluVariants()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteZ80Byte(0x0000, 0x21); // LD HL,$0100
+    machine.Bus.WriteZ80Byte(0x0001, 0x00);
+    machine.Bus.WriteZ80Byte(0x0002, 0x01);
+    machine.Bus.WriteZ80Byte(0x0003, 0x36); // LD (HL),$22
+    machine.Bus.WriteZ80Byte(0x0004, 0x22);
+    machine.Bus.WriteZ80Byte(0x0005, 0x3E); // LD A,$22
+    machine.Bus.WriteZ80Byte(0x0006, 0x22);
+    machine.Bus.WriteZ80Byte(0x0007, 0xBE); // CP (HL)
+    machine.Bus.WriteZ80Byte(0x0008, 0x28); // JR Z,+2
+    machine.Bus.WriteZ80Byte(0x0009, 0x02);
+    machine.Bus.WriteZ80Byte(0x000A, 0x3E); // Would load failure value if CP/JR failed.
+    machine.Bus.WriteZ80Byte(0x000B, 0x00);
+    machine.Bus.WriteZ80Byte(0x000C, 0x06); // LD B,$11
+    machine.Bus.WriteZ80Byte(0x000D, 0x11);
+    machine.Bus.WriteZ80Byte(0x000E, 0x80); // ADD A,B
+    machine.Bus.WriteZ80Byte(0x000F, 0x76); // HALT
+
+    machine.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!machine.Z80.Halted)
+    {
+        machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x33, machine.Z80.A);
+}
+
+void Z80AccumulatorFlagInstructions()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteZ80Byte(0x0000, 0x3E); // LD A,$45
+    machine.Bus.WriteZ80Byte(0x0001, 0x45);
+    machine.Bus.WriteZ80Byte(0x0002, 0xC6); // ADD A,$38 => $7D
+    machine.Bus.WriteZ80Byte(0x0003, 0x38);
+    machine.Bus.WriteZ80Byte(0x0004, 0x27); // DAA => $83
+    machine.Bus.WriteZ80Byte(0x0005, 0x37); // SCF
+    machine.Bus.WriteZ80Byte(0x0006, 0x3F); // CCF
+    machine.Bus.WriteZ80Byte(0x0007, 0x2F); // CPL => $7C
+    machine.Bus.WriteZ80Byte(0x0008, 0x76); // HALT
+
+    machine.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!machine.Z80.Halted)
+    {
+        machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x7C, machine.Z80.A);
+    AssertTrue((machine.Z80.F & 0x03) == 0x02, "CPL should set N and leave carry clear after CCF");
+    AssertTrue((machine.Z80.F & 0x10) != 0, "CPL should set H");
+}
+
+void Z80MaskableInterruptEntersIm1VectorAfterEiDelay()
+{
+    byte[] memory = new byte[0x10000];
+    memory[0x0000] = 0xED; // IM 1
+    memory[0x0001] = 0x56;
+    memory[0x0002] = 0xFB; // EI
+    memory[0x0003] = 0x3E; // LD A,$11, must execute before IRQ is accepted.
+    memory[0x0004] = 0x11;
+    memory[0x0038] = 0x3E; // LD A,$42
+    memory[0x0039] = 0x42;
+    memory[0x003A] = 0xF3; // DI, then HALT so the level interrupt does not re-enter.
+    memory[0x003B] = 0x76;
+
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+    z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    AssertEqual((byte)0x11, z80.A);
+    z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    AssertEqual((ushort)0x0038, z80.PC);
+
+    while (!z80.Halted)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    }
+
+    AssertEqual((byte)0x42, z80.A);
+    AssertEqual((byte)0x05, memory[0xFFFD]);
+    AssertEqual((byte)0x00, memory[0xFFFE]);
+}
+
+void Z80MaskableInterruptSupportsIm2Vectors()
+{
+    byte[] memory = new byte[0x10000];
+    memory[0x0000] = 0x3E; // LD A,$80
+    memory[0x0001] = 0x80;
+    memory[0x0002] = 0xED; // LD I,A
+    memory[0x0003] = 0x47;
+    memory[0x0004] = 0xED; // IM 2
+    memory[0x0005] = 0x5E;
+    memory[0x0006] = 0xFB; // EI
+    memory[0x0007] = 0x00; // NOP before interrupt acceptance.
+    memory[0x80FF] = 0x34;
+    memory[0x8100] = 0x12;
+    memory[0x1234] = 0x3E; // LD A,$69
+    memory[0x1235] = 0x69;
+    memory[0x1236] = 0x76;
+
+    Z80Core z80 = new();
+    z80.Reset();
+    z80.SetLines(resetAsserted: false, busRequested: false);
+    for (int i = 0; i < 6; i++)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value, interruptPending: true);
+    }
+
+    AssertEqual((ushort)0x1234, z80.PC);
+    while (!z80.Halted)
+    {
+        z80.StepInstruction(address => memory[address], (address, value) => memory[address] = value);
+    }
+
+    AssertEqual((byte)0x69, z80.A);
+}
+
+void Z80CoreExecutesEdAndIndexedOperations()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteZ80Byte(0x0000, 0xFD); // LD IY,$0100
+    machine.Bus.WriteZ80Byte(0x0001, 0x21);
+    machine.Bus.WriteZ80Byte(0x0002, 0x00);
+    machine.Bus.WriteZ80Byte(0x0003, 0x01);
+    machine.Bus.WriteZ80Byte(0x0004, 0xFD); // LD (IY+2),$44
+    machine.Bus.WriteZ80Byte(0x0005, 0x36);
+    machine.Bus.WriteZ80Byte(0x0006, 0x02);
+    machine.Bus.WriteZ80Byte(0x0007, 0x44);
+    machine.Bus.WriteZ80Byte(0x0008, 0xFD); // LD A,(IY+2)
+    machine.Bus.WriteZ80Byte(0x0009, 0x7E);
+    machine.Bus.WriteZ80Byte(0x000A, 0x02);
+    machine.Bus.WriteZ80Byte(0x000B, 0xFD); // SET 0,(IY+2)
+    machine.Bus.WriteZ80Byte(0x000C, 0xCB);
+    machine.Bus.WriteZ80Byte(0x000D, 0x02);
+    machine.Bus.WriteZ80Byte(0x000E, 0xC6);
+    machine.Bus.WriteZ80Byte(0x000F, 0x76); // HALT
+
+    machine.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!machine.Z80.Halted)
+    {
+        machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((ushort)0x0100, machine.Z80.IY);
+    AssertEqual((byte)0x44, machine.Z80.A);
+    AssertEqual((byte)0x45, machine.Bus.ReadZ80Byte(0x0102));
+
+    MegaDrive indexHalves = new(CartridgeImage.FromBytes(CreateRom()));
+    indexHalves.Bus.WriteZ80Byte(0x0000, 0xDD); // LD IX,$1234
+    indexHalves.Bus.WriteZ80Byte(0x0001, 0x21);
+    indexHalves.Bus.WriteZ80Byte(0x0002, 0x34);
+    indexHalves.Bus.WriteZ80Byte(0x0003, 0x12);
+    indexHalves.Bus.WriteZ80Byte(0x0004, 0xDD); // LD E,IXL
+    indexHalves.Bus.WriteZ80Byte(0x0005, 0x5D);
+    indexHalves.Bus.WriteZ80Byte(0x0006, 0xDD); // LD D,IXH
+    indexHalves.Bus.WriteZ80Byte(0x0007, 0x54);
+    indexHalves.Bus.WriteZ80Byte(0x0008, 0xDD); // LD IXH,$56
+    indexHalves.Bus.WriteZ80Byte(0x0009, 0x26);
+    indexHalves.Bus.WriteZ80Byte(0x000A, 0x56);
+    indexHalves.Bus.WriteZ80Byte(0x000B, 0xDD); // LD IXL,$78
+    indexHalves.Bus.WriteZ80Byte(0x000C, 0x2E);
+    indexHalves.Bus.WriteZ80Byte(0x000D, 0x78);
+    indexHalves.Bus.WriteZ80Byte(0x000E, 0xDD); // LD B,IXH
+    indexHalves.Bus.WriteZ80Byte(0x000F, 0x44);
+    indexHalves.Bus.WriteZ80Byte(0x0010, 0xDD); // LD C,IXL
+    indexHalves.Bus.WriteZ80Byte(0x0011, 0x4D);
+    indexHalves.Bus.WriteZ80Byte(0x0012, 0xDD); // ADD A,IXH
+    indexHalves.Bus.WriteZ80Byte(0x0013, 0x84);
+    indexHalves.Bus.WriteZ80Byte(0x0014, 0xFD); // LD IY,$9ABC
+    indexHalves.Bus.WriteZ80Byte(0x0015, 0x21);
+    indexHalves.Bus.WriteZ80Byte(0x0016, 0xBC);
+    indexHalves.Bus.WriteZ80Byte(0x0017, 0x9A);
+    indexHalves.Bus.WriteZ80Byte(0x0018, 0xFD); // LD D,IYH
+    indexHalves.Bus.WriteZ80Byte(0x0019, 0x54);
+    indexHalves.Bus.WriteZ80Byte(0x001A, 0xFD); // LD E,IYL
+    indexHalves.Bus.WriteZ80Byte(0x001B, 0x5D);
+    indexHalves.Bus.WriteZ80Byte(0x001C, 0x76);
+    indexHalves.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!indexHalves.Z80.Halted)
+    {
+        indexHalves.Z80.StepInstruction(indexHalves.Bus.ReadZ80Byte, indexHalves.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x9A, indexHalves.Z80.D);
+    AssertEqual((byte)0xBC, indexHalves.Z80.E);
+    AssertEqual((ushort)0x5678, indexHalves.Z80.IX);
+    AssertEqual((byte)0x56, indexHalves.Z80.B);
+    AssertEqual((byte)0x78, indexHalves.Z80.C);
+    AssertEqual((byte)0x56, indexHalves.Z80.A);
+
+    MegaDrive indexedMemory = new(CartridgeImage.FromBytes(CreateRom()));
+    indexedMemory.Bus.WriteZ80Byte(0x0000, 0xDD); // LD IX,$0100
+    indexedMemory.Bus.WriteZ80Byte(0x0001, 0x21);
+    indexedMemory.Bus.WriteZ80Byte(0x0002, 0x00);
+    indexedMemory.Bus.WriteZ80Byte(0x0003, 0x01);
+    indexedMemory.Bus.WriteZ80Byte(0x0004, 0x21); // LD HL,$ABCD
+    indexedMemory.Bus.WriteZ80Byte(0x0005, 0xCD);
+    indexedMemory.Bus.WriteZ80Byte(0x0006, 0xAB);
+    indexedMemory.Bus.WriteZ80Byte(0x0007, 0xDD); // LD (IX+4),H
+    indexedMemory.Bus.WriteZ80Byte(0x0008, 0x74);
+    indexedMemory.Bus.WriteZ80Byte(0x0009, 0x04);
+    indexedMemory.Bus.WriteZ80Byte(0x000A, 0xDD); // LD (IX+5),L
+    indexedMemory.Bus.WriteZ80Byte(0x000B, 0x75);
+    indexedMemory.Bus.WriteZ80Byte(0x000C, 0x05);
+    indexedMemory.Bus.WriteZ80Byte(0x000D, 0x21); // LD HL,$0000
+    indexedMemory.Bus.WriteZ80Byte(0x000E, 0x00);
+    indexedMemory.Bus.WriteZ80Byte(0x000F, 0x00);
+    indexedMemory.Bus.WriteZ80Byte(0x0010, 0xDD); // LD H,(IX+4)
+    indexedMemory.Bus.WriteZ80Byte(0x0011, 0x66);
+    indexedMemory.Bus.WriteZ80Byte(0x0012, 0x04);
+    indexedMemory.Bus.WriteZ80Byte(0x0013, 0xDD); // LD L,(IX+5)
+    indexedMemory.Bus.WriteZ80Byte(0x0014, 0x6E);
+    indexedMemory.Bus.WriteZ80Byte(0x0015, 0x05);
+    indexedMemory.Bus.WriteZ80Byte(0x0016, 0x76);
+    indexedMemory.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!indexedMemory.Z80.Halted)
+    {
+        indexedMemory.Z80.StepInstruction(indexedMemory.Bus.ReadZ80Byte, indexedMemory.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((ushort)0x0100, indexedMemory.Z80.IX);
+    AssertEqual((byte)0xAB, indexedMemory.Z80.H);
+    AssertEqual((byte)0xCD, indexedMemory.Z80.L);
+    AssertEqual((byte)0xAB, indexedMemory.Bus.ReadZ80Byte(0x0104));
+    AssertEqual((byte)0xCD, indexedMemory.Bus.ReadZ80Byte(0x0105));
+
+    MegaDrive exchange = new(CartridgeImage.FromBytes(CreateRom()));
+    exchange.Bus.WriteZ80Byte(0x0000, 0x06); // LD B,$12
+    exchange.Bus.WriteZ80Byte(0x0001, 0x12);
+    exchange.Bus.WriteZ80Byte(0x0002, 0xD9); // EXX
+    exchange.Bus.WriteZ80Byte(0x0003, 0x06); // LD B,$A0 in alternate set
+    exchange.Bus.WriteZ80Byte(0x0004, 0xA0);
+    exchange.Bus.WriteZ80Byte(0x0005, 0xD9); // EXX back
+    exchange.Bus.WriteZ80Byte(0x0006, 0x76);
+    exchange.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!exchange.Z80.Halted)
+    {
+        exchange.Z80.StepInstruction(exchange.Bus.ReadZ80Byte, exchange.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x12, exchange.Z80.B);
+    AssertEqual((byte)0xA0, exchange.Z80.AlternateB);
+
+    MegaDrive arithmetic = new(CartridgeImage.FromBytes(CreateRom()));
+    arithmetic.Bus.WriteZ80Byte(0x0000, 0x21); // LD HL,$0005
+    arithmetic.Bus.WriteZ80Byte(0x0001, 0x05);
+    arithmetic.Bus.WriteZ80Byte(0x0002, 0x00);
+    arithmetic.Bus.WriteZ80Byte(0x0003, 0x11); // LD DE,$0003
+    arithmetic.Bus.WriteZ80Byte(0x0004, 0x03);
+    arithmetic.Bus.WriteZ80Byte(0x0005, 0x00);
+    arithmetic.Bus.WriteZ80Byte(0x0006, 0xED); // SBC HL,DE
+    arithmetic.Bus.WriteZ80Byte(0x0007, 0x52);
+    arithmetic.Bus.WriteZ80Byte(0x0008, 0x76);
+    arithmetic.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!arithmetic.Z80.Halted)
+    {
+        arithmetic.Z80.StepInstruction(arithmetic.Bus.ReadZ80Byte, arithmetic.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0x00, arithmetic.Z80.H);
+    AssertEqual((byte)0x02, arithmetic.Z80.L);
+
+    MegaDrive block = new(CartridgeImage.FromBytes(CreateRom()));
+    block.Bus.WriteZ80Byte(0x0200, 0xAA);
+    block.Bus.WriteZ80Byte(0x0201, 0xBB);
+    block.Bus.WriteZ80Byte(0x0202, 0xCC);
+    block.Bus.WriteZ80Byte(0x0000, 0xED); // IM 1
+    block.Bus.WriteZ80Byte(0x0001, 0x56);
+    block.Bus.WriteZ80Byte(0x0002, 0x21); // LD HL,$0200
+    block.Bus.WriteZ80Byte(0x0003, 0x00);
+    block.Bus.WriteZ80Byte(0x0004, 0x02);
+    block.Bus.WriteZ80Byte(0x0005, 0x11); // LD DE,$0300
+    block.Bus.WriteZ80Byte(0x0006, 0x00);
+    block.Bus.WriteZ80Byte(0x0007, 0x03);
+    block.Bus.WriteZ80Byte(0x0008, 0x01); // LD BC,$0003
+    block.Bus.WriteZ80Byte(0x0009, 0x03);
+    block.Bus.WriteZ80Byte(0x000A, 0x00);
+    block.Bus.WriteZ80Byte(0x000B, 0xED); // LDIR
+    block.Bus.WriteZ80Byte(0x000C, 0xB0);
+    block.Bus.WriteZ80Byte(0x000D, 0x76);
+    block.Z80.SetLines(resetAsserted: false, busRequested: false);
+    while (!block.Z80.Halted)
+    {
+        block.Z80.StepInstruction(block.Bus.ReadZ80Byte, block.Bus.WriteZ80Byte);
+    }
+
+    AssertEqual((byte)0xAA, block.Bus.ReadZ80Byte(0x0300));
+    AssertEqual((byte)0xBB, block.Bus.ReadZ80Byte(0x0301));
+    AssertEqual((byte)0xCC, block.Bus.ReadZ80Byte(0x0302));
+    AssertEqual((byte)0x02, block.Z80.H);
+    AssertEqual((byte)0x03, block.Z80.L);
+    AssertEqual((byte)0x03, block.Z80.D);
+    AssertEqual((byte)0x03, block.Z80.E);
+    AssertEqual((byte)0x00, block.Z80.B);
+    AssertEqual((byte)0x00, block.Z80.C);
+}
+
+void Z80BusExposesBanked68kWindow()
+{
+    byte[] rom = CreateRom();
+    rom[0x0000] = 0x12;
+    rom[0x8000] = 0x34;
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+
+    machine.Bus.WriteZ80Byte(0x2000, 0xA5);
+    AssertEqual((byte)0xA5, machine.Bus.ReadZ80Byte(0x0000));
+    AssertEqual((byte)0x12, machine.Bus.ReadZ80Byte(0x8000));
+
+    machine.Bus.WriteZ80Byte(0x6000, 0x01);
+    for (int i = 0; i < 8; i++)
+    {
+        machine.Bus.WriteZ80Byte(0x6000, 0x00);
+    }
+
+    AssertEqual((byte)0x34, machine.Bus.ReadZ80Byte(0x8000));
+}
+
+void Z80NegAliasesUpdateFlags()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteZ80Byte(0x0000, 0x3E); // LD A,$34
+    machine.Bus.WriteZ80Byte(0x0001, 0x34);
+    machine.Bus.WriteZ80Byte(0x0002, 0xED); // NEG
+    machine.Bus.WriteZ80Byte(0x0003, 0x44);
+    machine.Bus.WriteZ80Byte(0x0004, 0x3E); // LD A,$80
+    machine.Bus.WriteZ80Byte(0x0005, 0x80);
+    machine.Bus.WriteZ80Byte(0x0006, 0xED); // NEG alias
+    machine.Bus.WriteZ80Byte(0x0007, 0x4C);
+    machine.Bus.WriteZ80Byte(0x0008, 0x3E); // LD A,$00
+    machine.Bus.WriteZ80Byte(0x0009, 0x00);
+    machine.Bus.WriteZ80Byte(0x000A, 0xED); // NEG alias
+    machine.Bus.WriteZ80Byte(0x000B, 0x54);
+
+    machine.Z80.SetLines(resetAsserted: false, busRequested: false);
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    AssertEqual((byte)0xCC, machine.Z80.A);
+    AssertEqual((byte)0x93, machine.Z80.F);
+
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    AssertEqual((byte)0x80, machine.Z80.A);
+    AssertEqual((byte)0x87, machine.Z80.F);
+
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    machine.Z80.StepInstruction(machine.Bus.ReadZ80Byte, machine.Bus.WriteZ80Byte);
+    AssertEqual((byte)0x00, machine.Z80.A);
+    AssertEqual((byte)0x42, machine.Z80.F);
+}
+
+void Z80ControlWordWritesUseEvenByte()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100);
+    AssertTrue(!machine.Bus.Z80ResetAsserted, "word write #$0100 should deassert Z80 reset");
+
+    machine.Bus.WriteWord(0x00A1_1200, 0x0000);
+    AssertTrue(machine.Bus.Z80ResetAsserted, "word write #$0000 should assert Z80 reset");
+
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100);
+    AssertTrue(!machine.Bus.Z80ResetAsserted, "word write #$0100 should deassert Z80 reset again");
+
+    machine.Bus.WriteWord(0x00A1_1100, 0x0100);
+    AssertTrue(machine.Bus.Z80BusRequested, "word write #$0100 should request the Z80 bus");
+    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+    machine.Bus.CurrentMasterCycle += 128;
+    AssertEqual((byte)0x00, machine.Bus.ReadByte(0x00A1_1100));
+
+    machine.Bus.WriteWord(0x00A1_1200, 0x0000);
+    AssertTrue(machine.Bus.Z80ResetAsserted, "word write #$0000 should assert Z80 reset");
+    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+
+    machine.Bus.WriteWord(0x00A1_1100, 0x0000);
+    AssertTrue(!machine.Bus.Z80BusRequested, "word write #$0000 should release the Z80 bus");
+    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+}
+
+void Z80BusGrantIsDelayedAfterRequest()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100);
+
+    machine.Bus.CurrentMasterCycle = 1_000;
+    machine.Bus.WriteWord(0x00A1_1100, 0x0100);
+    AssertTrue(machine.Bus.Z80BusRequested, "request line should assert immediately");
+    AssertTrue(!machine.Bus.Z80BusGranted, "bus should not be granted before the grant delay elapses");
+
+    machine.Bus.CurrentMasterCycle = 1_063;
+    AssertTrue(!machine.Bus.Z80BusGranted, "grant should still be pending one master cycle before the delay");
+    machine.Bus.CurrentMasterCycle = 1_064;
+    AssertTrue(machine.Bus.Z80BusGranted, "bus should be granted once the delay elapses");
+
+    machine.Bus.WriteWord(0x00A1_1100, 0x0000);
+    AssertTrue(!machine.Bus.Z80BusGranted, "releasing the request should release the grant");
+}
+
+void Z80RunsDuringShortBusReleaseWindows()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$0100,$A11200: deassert Z80 reset.
+    EmitWord(rom, ref pc, 0x0100);
+    EmitLong(rom, ref pc, 0x00A1_1200);
+    int releaseLoop = pc;
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$0000,$A11100: briefly release the Z80 bus.
+    EmitWord(rom, ref pc, 0x0000);
+    EmitLong(rom, ref pc, 0x00A1_1100);
+    for (int i = 0; i < 32; i++)
+    {
+        EmitWord(rom, ref pc, 0x4E71);
+    }
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$0100,$A11100: take the bus back.
+    EmitWord(rom, ref pc, 0x0100);
+    EmitLong(rom, ref pc, 0x00A1_1100);
+    EmitWord(rom, ref pc, 0x0839); // BTST #7,$A01FFD
+    EmitWord(rom, ref pc, 0x0007);
+    EmitLong(rom, ref pc, 0x00A0_1FFD);
+    int displacement = releaseLoop - (pc + 2);
+    EmitWord(rom, ref pc, (ushort)(0x6600 | ((byte)(sbyte)displacement))); // BNE.S releaseLoop
+    EmitWord(rom, ref pc, 0x7001); // MOVEQ #1,D0
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteZ80Byte(0x0000, 0x21); // LD HL,$1FFD
+    machine.Bus.WriteZ80Byte(0x0001, 0xFD);
+    machine.Bus.WriteZ80Byte(0x0002, 0x1F);
+    machine.Bus.WriteZ80Byte(0x0003, 0xAF); // XOR A
+    machine.Bus.WriteZ80Byte(0x0004, 0x77); // LD (HL),A
+    machine.Bus.WriteZ80Byte(0x0005, 0x76); // HALT
+    machine.Bus.WriteZ80Byte(0x1FFD, 0x80);
+
+    machine.RunFrame(20_000);
+
+    AssertEqual(1u, machine.MainCpu.D[0]);
+    AssertEqual((byte)0x00, machine.Bus.ReadZ80Byte(0x1FFD));
+    AssertTrue(machine.Z80.Halted, "Z80 should run and halt during the brief bus release");
+}
+
+void Z80ReceivesVBlankInterruptPulse()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x4E71); // NOP
+    WriteWord(rom, 0x202, 0x60FC); // BRA -4
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteZ80Byte(0x0000, 0xED); // IM 1
+    machine.Bus.WriteZ80Byte(0x0001, 0x56);
+    machine.Bus.WriteZ80Byte(0x0002, 0xFB); // EI
+    machine.Bus.WriteZ80Byte(0x0003, 0x76); // HALT
+    machine.Bus.WriteZ80Byte(0x0038, 0x3A); // LD A,($0070)
+    machine.Bus.WriteZ80Byte(0x0039, 0x70);
+    machine.Bus.WriteZ80Byte(0x003A, 0x00);
+    machine.Bus.WriteZ80Byte(0x003B, 0x3C); // INC A
+    machine.Bus.WriteZ80Byte(0x003C, 0x32); // LD ($0070),A
+    machine.Bus.WriteZ80Byte(0x003D, 0x70);
+    machine.Bus.WriteZ80Byte(0x003E, 0x00);
+    machine.Bus.WriteZ80Byte(0x003F, 0xF3); // DI
+    machine.Bus.WriteZ80Byte(0x0040, 0xC9); // RET
+    machine.Vdp.WriteControlPort(0x8124); // display + VBlank interrupt enable
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100); // release Z80 reset
+
+    machine.RunFrameCycles(200_000);
+
+    AssertEqual((byte)1, machine.Bus.Z80Ram[0x70]);
+}
+
+void Z80VBlankInterruptIgnores68kEnable()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x4E71); // NOP
+    WriteWord(rom, 0x202, 0x60FC); // BRA -4
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteZ80Byte(0x0000, 0xED); // IM 1
+    machine.Bus.WriteZ80Byte(0x0001, 0x56);
+    machine.Bus.WriteZ80Byte(0x0002, 0xFB); // EI
+    machine.Bus.WriteZ80Byte(0x0003, 0x76); // HALT
+    machine.Bus.WriteZ80Byte(0x0038, 0x3A); // LD A,($0070)
+    machine.Bus.WriteZ80Byte(0x0039, 0x70);
+    machine.Bus.WriteZ80Byte(0x003A, 0x00);
+    machine.Bus.WriteZ80Byte(0x003B, 0x3C); // INC A
+    machine.Bus.WriteZ80Byte(0x003C, 0x32); // LD ($0070),A
+    machine.Bus.WriteZ80Byte(0x003D, 0x70);
+    machine.Bus.WriteZ80Byte(0x003E, 0x00);
+    machine.Bus.WriteZ80Byte(0x003F, 0xF3); // DI
+    machine.Bus.WriteZ80Byte(0x0040, 0xC9); // RET
+    machine.Vdp.WriteControlPort(0x8104); // 68k VBlank interrupt disabled.
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100); // release Z80 reset
+
+    machine.RunFrameCycles(200_000);
+
+    AssertEqual((byte)1, machine.Bus.Z80Ram[0x70]);
+}
+
+void Sonic1StartupStreamsYmDacSample()
+{
+    string path = Path.Combine("TestRoms", "Sonic.md");
+    if (!File.Exists(path))
+    {
+        return;
+    }
+
+    MegaDrive machine = new(CartridgeImage.FromFile(path));
+    machine.Reset();
+    int dacWrites = 0;
+    int dacEnableWrites = 0;
+    machine.Bus.AudioObserver = access =>
+    {
+        if (access.Chip != AudioChip.Ym2612 || access.Kind != AudioAccessKind.Data || access.Port != 0)
+        {
+            return;
+        }
+
+        if (access.Register == 0x2A)
+        {
+            dacWrites++;
+        }
+        else if (access.Register == 0x2B)
+        {
+            dacEnableWrites++;
+        }
+    };
+
+    for (int frame = 0; frame < 400; frame++)
+    {
+        machine.RunFrameCycles(300_000);
+        _ = machine.RenderFrameStereoAudioSamples();
+    }
+
+    machine.Bus.AudioObserver = null;
+    AssertTrue(dacEnableWrites > 0, "Sonic 1 startup should enable the YM DAC");
+    AssertTrue(dacWrites > 10_000, "Sonic 1 startup should stream the SEGA voice through YM DAC register $2A");
+}
+
+void Sonic1TitleDrivesYmAndPsgMusic()
+{
+    string path = Path.Combine("TestRoms", "Sonic.md");
+    if (!File.Exists(path))
+    {
+        return;
+    }
+
+    MegaDrive machine = new(CartridgeImage.FromFile(path));
+    machine.Reset();
+    int keyOnWrites = 0;
+    int psgWrites = 0;
+    long audioEnergy = 0;
+    machine.Bus.AudioObserver = access =>
+    {
+        if (access.Chip == AudioChip.Ym2612 && access.Kind == AudioAccessKind.Data && access.Port == 0 && access.Register == 0x28)
+        {
+            keyOnWrites++;
+        }
+        else if (access.Chip == AudioChip.Psg)
+        {
+            psgWrites++;
+        }
+    };
+
+    for (int frame = 0; frame < 900; frame++)
+    {
+        machine.RunFrameCycles(300_000);
+        short[] samples = machine.RenderFrameStereoAudioSamples();
+        if (frame >= 500)
+        {
+            for (int i = 0; i < samples.Length; i += 64)
+            {
+                audioEnergy += Math.Abs(samples[i]);
+            }
+        }
+    }
+
+    machine.Bus.AudioObserver = null;
+    AssertTrue(keyOnWrites > 100, "Sonic 1 title path should actively key YM channels for music");
+    AssertTrue(psgWrites > 100, "Sonic 1 title path should actively drive PSG channels for music/effects");
+    AssertTrue(audioEnergy > 100_000, "Sonic 1 title path should produce sustained mixed audio");
+}
+
+void WorkRamMirroring()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Bus.WriteByte(0xE00000, 0x5A);
+    AssertEqual((byte)0x5A, machine.Bus.ReadByte(0xFF0000));
+}
+
+void CartridgeSaveRam()
+{
+    byte[] rom = CreateRom();
+    DeclareSaveRam(rom);
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    AssertEqual((byte)0x00, machine.Bus.ReadByte(0x200123));
+    machine.Bus.WriteByte(0xA130F1, 0x01);
+    machine.Bus.WriteByte(0x200123, 0xA5);
+    AssertEqual((byte)0xA5, machine.Bus.ReadByte(0x200123));
+
+    byte[] noRamRom = CreateRom();
+    noRamRom[0x123] = 0x5A;
+    MegaDrive noRamMachine = new(CartridgeImage.FromBytes(noRamRom));
+    AssertEqual((byte)0x5A, noRamMachine.Bus.ReadByte(0x200123));
+    noRamMachine.Bus.WriteByte(0x200123, 0xA5);
+    AssertEqual((byte)0xA5, noRamMachine.Bus.ReadByte(0x200123));
+}
+
+void CartridgeSaveRamByteLanes()
+{
+    byte[] oddRom = CreateRom();
+    DeclareSaveRam(oddRom, 0x0020_0001, 0x0020_3FFF, 0x20);
+    MegaDrive oddMachine = new(CartridgeImage.FromBytes(oddRom));
+    oddMachine.Bus.WriteByte(0xA130F1, 0x01);
+    oddMachine.Bus.WriteByte(0x200001, 0x5A);
+    oddMachine.Bus.WriteByte(0x200002, 0xC3);
+    oddMachine.Bus.WriteByte(0x200003, 0x6B);
+    AssertEqual((byte)0x5A, oddMachine.Bus.ReadByte(0x200001));
+    AssertEqual((byte)0xFF, oddMachine.Bus.ReadByte(0x200002));
+    AssertEqual((byte)0x6B, oddMachine.Bus.ReadByte(0x200003));
+    AssertEqual((byte)0x5A, oddMachine.Bus.Cartridge.SaveRam[0]);
+    AssertEqual((byte)0x6B, oddMachine.Bus.Cartridge.SaveRam[1]);
+
+    byte[] evenRom = CreateRom();
+    DeclareSaveRam(evenRom, 0x0020_0000, 0x0020_3FFE, 0x40);
+    MegaDrive evenMachine = new(CartridgeImage.FromBytes(evenRom));
+    evenMachine.Bus.WriteByte(0xA130F1, 0x01);
+    evenMachine.Bus.WriteByte(0x200000, 0x11);
+    evenMachine.Bus.WriteByte(0x200001, 0x22);
+    evenMachine.Bus.WriteByte(0x200002, 0x33);
+    AssertEqual((byte)0x11, evenMachine.Bus.ReadByte(0x200000));
+    AssertEqual((byte)0xFF, evenMachine.Bus.ReadByte(0x200001));
+    AssertEqual((byte)0x33, evenMachine.Bus.ReadByte(0x200002));
+    AssertEqual((byte)0x11, evenMachine.Bus.Cartridge.SaveRam[0]);
+    AssertEqual((byte)0x33, evenMachine.Bus.Cartridge.SaveRam[1]);
+
+    byte[] oddSingleRom = CreateRom();
+    DeclareSaveRam(oddSingleRom, 0x0020_0001, 0x0020_0001, 0x40);
+    MegaDrive oddSingleMachine = new(CartridgeImage.FromBytes(oddSingleRom));
+    AssertEqual((byte)0x00, oddSingleMachine.Bus.ReadByte(0x200001));
+    oddSingleMachine.Bus.WriteByte(0x200001, 0x7E);
+    AssertEqual((byte)0x7E, oddSingleMachine.Bus.ReadByte(0x200001));
+    AssertEqual((byte)0x7E, oddSingleMachine.Bus.Cartridge.SaveRam[0]);
+}
+
+void CartridgeSerialEeprom()
+{
+    byte[] rom = CreateRom();
+    DeclareEeprom(rom);
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+
+    EepromPins segaPins = new(0x200001, 0, 0x200001, 0, 0x200001, 1);
+    EepromStart(machine, segaPins);
+    EepromSendByte(machine, segaPins, 0x10); // Address $08, write.
+    AssertEqual((byte)0xFE, (byte)(machine.Bus.ReadByte(0x200001) & 0x01 | 0xFE));
+    EepromAckClock(machine, segaPins);
+    EepromSendByte(machine, segaPins, 0xA5);
+    EepromAckClock(machine, segaPins);
+    EepromStop(machine, segaPins);
+
+    EepromStart(machine, segaPins);
+    EepromSendByte(machine, segaPins, 0x11); // Address $08, read.
+    EepromAckClock(machine, segaPins);
+    byte readBack = EepromReadByte(machine, segaPins, ack: false);
+    EepromStop(machine, segaPins);
+
+    AssertEqual((byte)0xA5, readBack);
+    AssertEqual((byte)0xA5, machine.Bus.Cartridge.SaveRam[0x08]);
+
+    byte[] nbaJamRom = CreateRom();
+    WriteAscii(nbaJamRom, 0x180, "T-081326");
+    MegaDrive nbaJamMachine = new(CartridgeImage.FromBytes(nbaJamRom));
+    EepromPins nbaJamPins = new(0x200001, 0, 0x200001, 1, 0x200001, 1);
+    EepromWriteBytes(nbaJamMachine, nbaJamPins, command: 0xA0, addressBytes: [0x5C], data: [0x3C]);
+    byte mode2 = EepromReadAt(nbaJamMachine, nbaJamPins, writeCommand: 0xA0, readCommand: 0xA1, addressBytes: [0x5C]);
+    AssertEqual((byte)0x3C, mode2);
+    AssertEqual((byte)0x3C, nbaJamMachine.Bus.Cartridge.SaveRam[0x5C]);
+
+    byte[] quarterbackRom = CreateRom();
+    WriteAscii(quarterbackRom, 0x180, "T-081276");
+    MegaDrive quarterbackMachine = new(CartridgeImage.FromBytes(quarterbackRom));
+    EepromPins quarterbackPins = new(0x200001, 0, 0x200001, 0, 0x200000, 0, WordAccess: true);
+    EepromWriteBytes(quarterbackMachine, quarterbackPins, command: 0xA0, addressBytes: [0x71], data: [0x96]);
+    byte wordAccessMode2 = EepromReadAt(quarterbackMachine, quarterbackPins, writeCommand: 0xA0, readCommand: 0xA1, addressBytes: [0x71]);
+    AssertEqual((byte)0x96, wordAccessMode2);
+    AssertEqual((byte)0x96, quarterbackMachine.Bus.Cartridge.SaveRam[0x71]);
+
+    byte[] codemastersRom = CreateRom();
+    WriteAscii(codemastersRom, 0x150, "BRIAN LARA CRICKET 96");
+    MegaDrive codemastersMachine = new(CartridgeImage.FromBytes(codemastersRom));
+    EepromPins codemastersPins = new(0x300000, 0, 0x380001, 7, 0x300000, 1);
+    EepromWriteBytes(codemastersMachine, codemastersPins, command: 0xA0, addressBytes: [0x12, 0x34], data: [0xC7]);
+    byte mode3 = EepromReadAt(codemastersMachine, codemastersPins, writeCommand: 0xA0, readCommand: 0xA1, addressBytes: [0x12, 0x34]);
+    AssertEqual((byte)0xC7, mode3);
+    AssertEqual((byte)0xC7, codemastersMachine.Bus.Cartridge.SaveRam[0x1234]);
+}
+
+void InputMoviePreservesInitialSaveRam()
+{
+    byte[] rom = CreateRom();
+    DeclareSaveRam(rom);
+    CartridgeImage source = CartridgeImage.FromBytes(rom);
+    byte[] saveRam = new byte[64 * 1024];
+    saveRam[0x0123] = 0x5A;
+    saveRam[0x7FFF] = 0xC3;
+    source.RestoreSaveRam(saveRam);
+
+    InputMovie movie = InputMovie.Create("synthetic.md", source);
+    CartridgeImage restored = CartridgeImage.FromBytes(rom);
+    movie.RestoreInitialSaveRam(restored);
+
+    AssertEqual((byte)0x5A, restored.SaveRam[0x0123]);
+    AssertEqual((byte)0xC3, restored.SaveRam[0x7FFF]);
+}
+
+void CartridgeBankSwitching()
+{
+    byte[] rom = new byte[0x10_0000];
+    rom[0x000000] = 0x11;
+    rom[0x080000] = 0x22;
+    CartridgeImage image = CartridgeImage.FromBytes(rom);
+    MegaDrive machine = new(image);
+
+    AssertEqual((byte)0x22, machine.Bus.ReadByte(0x080000));
+    machine.Bus.WriteByte(0xA13000, 0x00);
+    AssertEqual((byte)0x11, machine.Bus.ReadByte(0x080000));
+    machine.Bus.WriteByte(0xA13000, 0x01);
+    AssertEqual((byte)0x22, machine.Bus.ReadByte(0x080000));
+
+    byte[] ssf2Rom = new byte[0x50_0000];
+    ssf2Rom[0x080000] = 0x33;
+    ssf2Rom[0x400000] = 0x44;
+    MegaDrive ssf2Machine = new(CartridgeImage.FromBytes(ssf2Rom));
+
+    AssertEqual((byte)0x33, ssf2Machine.Bus.ReadByte(0x080000));
+    ssf2Machine.Bus.WriteByte(0xA130F3, 0x08);
+    AssertEqual((byte)0x44, ssf2Machine.Bus.ReadByte(0x080000));
+}
+
+void JCartControllerPorts()
+{
+    byte[] rom = CreateRom();
+    WriteAscii(rom, 0x150, "MICRO MACHINES II");
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Bus.Controller3.Pressed = GenesisButton.B;
+    machine.Bus.Controller4.Pressed = GenesisButton.C;
+
+    ushort high = machine.Bus.ReadWord(0x380000);
+    AssertTrue((high & 0x0010) == 0, "J-Cart player 3 B should be visible in the low byte");
+    AssertTrue((high & 0x2000) == 0, "J-Cart player 4 C should be visible in the high byte");
+    AssertTrue((high & 0x4000) == 0, "J-Cart D14 should stay low");
+
+    machine.Bus.Controller3.Pressed = GenesisButton.A | GenesisButton.Start;
+    machine.Bus.Controller4.Pressed = GenesisButton.A;
+    machine.Bus.WriteByte(0x380000, 0x00);
+    ushort low = machine.Bus.ReadWord(0x380000);
+    AssertTrue((low & 0x000C) == 0, "J-Cart player 3 should expose the low-TH controller signature");
+    AssertTrue((low & 0x0010) == 0, "J-Cart player 3 A should be visible in the low-TH phase");
+    AssertTrue((low & 0x0020) == 0, "J-Cart player 3 Start should be visible in the low-TH phase");
+    AssertTrue((low & 0x1000) == 0, "J-Cart player 4 A should be visible in the high byte low-TH phase");
+
+    byte[] eepromRom = CreateRom();
+    WriteAscii(eepromRom, 0x180, "T-120096");
+    MegaDrive eepromMachine = new(CartridgeImage.FromBytes(eepromRom));
+    AssertTrue(eepromMachine.Bus.Cartridge.Diagnostics.HasJCart, "Micro Machines 2 should enable J-Cart diagnostics");
+    byte lowByte = eepromMachine.Bus.ReadByte(0x380001);
+    AssertTrue((lowByte & 0x80) != 0, "J-Cart EEPROM SDA-out should be preserved on D7");
+}
+
+void SvpCartridgeMemoryMap()
+{
+    byte[] rom = CreateRom();
+    WriteAscii(rom, 0x150, "VIRTUA RACING");
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+
+    AssertTrue(machine.Bus.Cartridge.Diagnostics.HasSvp, "Virtua Racing should enable SVP diagnostics");
+    AssertTrue(machine.Bus.Svp is not null, "SVP device should be attached to Virtua Racing cartridges");
+
+    machine.Bus.WriteWord(0x0030_0000, 0x1234);
+    AssertEqual(0x1234, machine.Bus.ReadWord(0x0030_0000));
+    AssertEqual(0x12, machine.Bus.ReadByte(0x0030_0000));
+    AssertEqual(0x34, machine.Bus.ReadByte(0x0030_0001));
+
+    machine.Bus.WriteByte(0x0030_0001, 0x56);
+    AssertEqual(0x1256, machine.Bus.ReadWord(0x0030_0000));
+    AssertEqual(0x1256, machine.Bus.ReadWord(0x0039_0000));
+
+    machine.Bus.WriteWord(0x0030_0100, 0x5678);
+    AssertEqual(0x5678, machine.Bus.ReadWord(0x0039_0004));
+
+    machine.Bus.WriteWord(0x0030_0102, 0x9ABC);
+    AssertEqual(0x9ABC, machine.Bus.ReadWord(0x003A_0006));
+
+    machine.Bus.WriteWord(0x00A1_5000, 0xCAFE);
+    AssertEqual(0xCAFE, machine.Bus.ReadWord(0x00A1_5000));
+    AssertTrue((machine.Bus.ReadWord(0x00A1_5004) & 0x0002) != 0, "SVP status should report a pending host command");
+}
+
+void SvpPointerWritesIgnoreModuloLength()
+{
+    byte[] incrementRom = CreateRom();
+    int offset = 0x800;
+    WriteWord(incrementRom, offset, 0x0840); offset += 2; // ldi st,#$0002. Writes still post-increment the raw pointer.
+    WriteWord(incrementRom, offset, 0x0002); offset += 2;
+    WriteWord(incrementRom, offset, 0x1803); offset += 2; // ldi r0,#$03.
+    WriteWord(incrementRom, offset, 0x0C0C); offset += 2; // ldi (r0+),#$AAAA.
+    WriteWord(incrementRom, offset, 0xAAAA); offset += 2;
+    WriteWord(incrementRom, offset, 0x0C0C); offset += 2; // ldi (r0+),#$BBBB; raw pointer advances to 4.
+    WriteWord(incrementRom, offset, 0xBBBB);
+
+    SvpDevice increment = new(incrementRom);
+    increment.Run(8);
+    SvpDevice.SvpState incrementState = increment.CaptureState();
+
+    AssertEqual(0x0000, incrementState.Ram[0]);
+    AssertEqual(0xAAAA, incrementState.Ram[3]);
+    AssertEqual(0xBBBB, incrementState.Ram[4]);
+    AssertEqual((byte)5, incrementState.Pointers[0]);
+
+    byte[] decrementRom = CreateRom();
+    offset = 0x800;
+    WriteWord(decrementRom, offset, 0x0840); offset += 2; // ldi st,#$0002.
+    WriteWord(decrementRom, offset, 0x0002); offset += 2;
+    WriteWord(decrementRom, offset, 0x1800); offset += 2; // ldi r0,#$00.
+    WriteWord(decrementRom, offset, 0x0C08); offset += 2; // ldi (r0-),#$CCCC.
+    WriteWord(decrementRom, offset, 0xCCCC); offset += 2;
+    WriteWord(decrementRom, offset, 0x0C08); offset += 2; // ldi (r0-),#$DDDD; raw pointer underflows to $FF.
+    WriteWord(decrementRom, offset, 0xDDDD);
+
+    SvpDevice decrement = new(decrementRom);
+    decrement.Run(8);
+    SvpDevice.SvpState decrementState = decrement.CaptureState();
+
+    AssertEqual(0xCCCC, decrementState.Ram[0]);
+    AssertEqual(0x0000, decrementState.Ram[3]);
+    AssertEqual(0xDDDD, decrementState.Ram[0xFF]);
+    AssertEqual((byte)0xFE, decrementState.Pointers[0]);
+}
+
+void SvpImmediateOpsUseReferenceTiming()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x0830); offset += 2; // ldi a,#$1234.
+    WriteWord(rom, offset, 0x1234); offset += 2;
+    WriteWord(rom, offset, 0x0000); // nop.
+
+    SvpDevice svp = new(rom);
+    svp.Run(2);
+    SvpDevice.SvpState state = svp.CaptureState();
+
+    AssertEqual(0x1234_0000u, state.Gr[3]);
+    AssertEqual(0x0403, state.Pc);
+}
+
+void SvpOptionalMameTimingChargesImmediateCycles()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x0830); offset += 2; // ldi a,#$1234.
+    WriteWord(rom, offset, 0x1234); offset += 2;
+    WriteWord(rom, offset, 0x0000); // nop.
+
+    SvpDevice svp = new(rom)
+    {
+        UseMameCycleTiming = true
+    };
+    svp.Run(2);
+    SvpDevice.SvpState state = svp.CaptureState();
+
+    AssertEqual(0x1234_0000u, state.Gr[3]);
+    AssertEqual(0x0402, state.Pc);
+}
+
+void SvpMldClearsStatusFlagsWithoutSettingZ()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x0840); offset += 2; // ldi st,#$FFFF.
+    WriteWord(rom, offset, 0xFFFF); offset += 2;
+    WriteWord(rom, offset, 0xB600); // mld (r4),(r0),b.
+
+    SvpDevice svp = new(rom);
+    svp.Run(2);
+    SvpDevice.SvpState state = svp.CaptureState();
+
+    AssertEqual(0x0FFFu << 16, state.Gr[4]);
+}
+
+void SvpAlReadPreservesPendingPmacExceptDummyAssign()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x08E0); offset += 2; // ldi pmc,#$0005: address.
+    WriteWord(rom, offset, 0x0005); offset += 2;
+    WriteWord(rom, offset, 0x08E0); offset += 2; // ldi pmc,#$0818: DRAM linear, increment by one.
+    WriteWord(rom, offset, 0x0818); offset += 2;
+    WriteWord(rom, offset, 0x001F); offset += 2; // ld x,al: regular AL read should not discard pending PMAC.
+    WriteWord(rom, offset, 0x00C0); offset += 2; // ld pm4,gr0: blind PMAC assignment for PM4 writes.
+    WriteWord(rom, offset, 0x0830); offset += 2; // ldi a,#$CAFE.
+    WriteWord(rom, offset, 0xCAFE); offset += 2;
+    WriteWord(rom, offset, 0x00C3); // ld pm4,a: write A high word to DRAM.
+
+    SvpDevice svp = new(rom);
+    svp.Run(8);
+    SvpDevice.SvpState state = svp.CaptureState();
+
+    AssertEqual(0xCAFE, state.Dram[5]);
+}
+
+void SvpPmTraceCapturesDramWrites()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x08E0); offset += 2; // ldi pmc,#$0005: address.
+    WriteWord(rom, offset, 0x0005); offset += 2;
+    WriteWord(rom, offset, 0x08E0); offset += 2; // ldi pmc,#$0818: DRAM linear, increment by one.
+    WriteWord(rom, offset, 0x0818); offset += 2;
+    WriteWord(rom, offset, 0x00C0); offset += 2; // ld pm4,gr0: blind PMAC assignment for PM4 writes.
+    WriteWord(rom, offset, 0x0830); offset += 2; // ldi a,#$ABCD.
+    WriteWord(rom, offset, 0xABCD); offset += 2;
+    WriteWord(rom, offset, 0x00C3); // ld pm4,a: write A high word to DRAM.
+
+    List<SvpDevice.SvpPmIoTrace> traces = [];
+    SvpDevice svp = new(rom)
+    {
+        PmIoObserver = traces.Add
+    };
+
+    svp.Run(16);
+    SvpDevice.SvpState state = svp.CaptureState();
+
+    AssertEqual(0xABCD, state.Dram[5]);
+    AssertTrue(traces.Any(trace => trace.Kind == "PmacSet" && trace.Register == 4 && trace.Write && trace.PmacAfter == 0x0818_0005), "trace should include PM4 PMAC assignment");
+    SvpDevice.SvpPmIoTrace write = traces.First(trace => trace.Kind == "DramLinear" && trace.Register == 4 && trace.Write);
+    AssertEqual(0x0005, write.AddressBefore);
+    AssertEqual(0x0006, write.AddressAfter);
+    AssertEqual(0xABCD, write.Data);
+    AssertEqual(0x0000, write.PreviousValue);
+    AssertEqual(0xABCD, write.StoredValue);
+}
+
+void SvpPointerTraceCapturesRamOperands()
+{
+    byte[] rom = CreateRom();
+    int offset = 0x800;
+    WriteWord(rom, offset, 0x1801); offset += 2; // ldi r0,#$01.
+    WriteWord(rom, offset, 0x0C0C); offset += 2; // ldi (r0++),#$1234.
+    WriteWord(rom, offset, 0x1234); offset += 2;
+    WriteWord(rom, offset, 0x1801); offset += 2; // ldi r0,#$01.
+    WriteWord(rom, offset, 0x0230); // ld a,(r0).
+
+    List<SvpDevice.SvpPointerTrace> traces = [];
+    SvpDevice svp = new(rom)
+    {
+        PointerObserver = traces.Add
+    };
+
+    svp.Run(12);
+
+    SvpDevice.SvpPointerTrace write = traces.First(trace => trace.Operation == "Ptr1WriteIncrement");
+    AssertEqual(0x0802, write.Pc);
+    AssertEqual((byte)0x01, write.PointerBefore);
+    AssertEqual((byte)0x02, write.PointerAfter);
+    AssertEqual(0x001, write.RamAddress);
+    AssertEqual(0x1234, write.Value);
+
+    SvpDevice.SvpPointerTrace read = traces.First(trace => trace.Operation == "Ptr1Read");
+    AssertEqual(0x0808, read.Pc);
+    AssertEqual((byte)0x01, read.PointerBefore);
+    AssertEqual((byte)0x01, read.PointerAfter);
+    AssertEqual(0x001, read.RamAddress);
+    AssertEqual(0x1234, read.Value);
+}
+
+void SaveStateRoundTrip()
+{
+    byte[] rom = CreateRom();
+    DeclareSaveRam(rom);
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x7001); // MOVEQ #1,D0
+    WriteWord(rom, 0x202, 0x4E71); // NOP
+    WriteWord(rom, 0x204, 0x60FE); // BRA *
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.StepInstruction();
+    machine.Bus.WriteByte(0xA130F1, 0x01);
+    machine.Bus.WriteByte(0x200000, 0x44);
+    string path = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}.mdss");
+
+    SaveStateSerializer.Save(machine, path);
+    machine.StepInstruction();
+    machine.Bus.WriteByte(0x200000, 0x55);
+    SaveStateSerializer.Load(machine, path);
+
+    AssertEqual(1u, machine.MainCpu.D[0]);
+    AssertEqual((byte)0x44, machine.Bus.ReadByte(0x200000));
+    File.Delete(path);
+
+    byte[] fallbackRom = CreateRom();
+    fallbackRom[0x100] = 0x6A;
+    MegaDrive fallback = new(CartridgeImage.FromBytes(fallbackRom));
+    fallback.Bus.WriteByte(0x200100, 0x77);
+    string fallbackPath = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}.mdss");
+
+    SaveStateSerializer.Save(fallback, fallbackPath);
+    fallback.Bus.WriteByte(0x200100, 0x33);
+    SaveStateSerializer.Load(fallback, fallbackPath);
+
+    AssertEqual((byte)0x77, fallback.Bus.ReadByte(0x200100));
+    File.Delete(fallbackPath);
+
+    byte[] svpRom = CreateRom();
+    WriteAscii(svpRom, 0x150, "VIRTUA RACING");
+    MegaDrive svpMachine = new(CartridgeImage.FromBytes(svpRom));
+    svpMachine.Bus.WriteWord(0x0030_0000, 0xBEEF);
+    svpMachine.Bus.WriteWord(0x00A1_5000, 0xCAFE);
+    string svpPath = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}.mdss");
+
+    SaveStateSerializer.Save(svpMachine, svpPath);
+    svpMachine.Bus.WriteWord(0x0030_0000, 0x1234);
+    svpMachine.Bus.WriteWord(0x00A1_5000, 0x4444);
+    SaveStateSerializer.Load(svpMachine, svpPath);
+
+    AssertEqual(0xBEEF, svpMachine.Bus.ReadWord(0x0030_0000));
+    AssertEqual(0xCAFE, svpMachine.Bus.ReadWord(0x00A1_5000));
+    File.Delete(svpPath);
+}
+
+void SyntheticGenesisStartupRom()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x1039); // MOVE.B $A10001,D0
+    EmitLong(rom, ref pc, 0x00A1_0001);
+    EmitWord(rom, ref pc, 0x0200); // ANDI.B #$0F,D0
+    EmitWord(rom, ref pc, 0x000F);
+    EmitWord(rom, ref pc, 0x670A); // BEQ.S past TMSS write
+    EmitWord(rom, ref pc, 0x23FC); // MOVE.L #'SEGA',$A14000
+    EmitLong(rom, ref pc, 0x5345_4741);
+    EmitLong(rom, ref pc, 0x00A1_4000);
+    EmitWord(rom, ref pc, 0x4DF9); // LEA $C00004,A6
+    EmitLong(rom, ref pc, 0x00C0_0004);
+    EmitWord(rom, ref pc, 0x3CBC); // MOVE.W #$8F02,(A6)
+    EmitWord(rom, ref pc, 0x8F02);
+    EmitWord(rom, ref pc, 0x2CBC); // MOVE.L #$40000000,(A6)
+    EmitLong(rom, ref pc, 0x4000_0000);
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$1234,$C00000
+    EmitWord(rom, ref pc, 0x1234);
+    EmitLong(rom, ref pc, 0x00C0_0000);
+    EmitWord(rom, ref pc, 0x7E03); // MOVEQ #3,D7
+    EmitWord(rom, ref pc, 0x51CF); // DBRA D7,*
+    EmitWord(rom, ref pc, 0xFFFE);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 32; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual((byte)'S', machine.Bus.TmssRegister[0]);
+    AssertEqual((byte)'E', machine.Bus.TmssRegister[1]);
+    AssertEqual((byte)'G', machine.Bus.TmssRegister[2]);
+    AssertEqual((byte)'A', machine.Bus.TmssRegister[3]);
+    AssertEqual((byte)0x02, machine.Vdp.AutoIncrement);
+    AssertEqual((byte)0x12, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x34, machine.Vdp.Vram[1]);
+    AssertEqual(0x0000_FFFFu, machine.MainCpu.D[7] & 0xFFFF);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the startup program");
+}
+
+void SyntheticGenesisVBlankInterrupt()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x078, 0x0000_0300); // Level 6 interrupt vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2300,SR
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2300
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x60FE); // BRA *
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7C06); // MOVEQ #6,D6
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Vdp.WriteControlPort(0x8120); // Enable VBlank interrupt.
+
+    for (int i = 0; i < 2; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop before VBlank");
+    machine.RunFrame(20_000);
+    AssertEqual(6u, machine.MainCpu.D[6]);
+}
+
+void SyntheticGenesisPendingVBlankInterruptAfterUnmask()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x078, 0x0000_0300); // Level 6 interrupt vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2700,SR: mask VBlank at the scanline edge.
+    EmitWord(rom, ref pc, 0x2700);
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #12000,D0.
+    EmitWord(rom, ref pc, 12000);
+    EmitWord(rom, ref pc, 0x51C8); // DBRA D0,*: stay masked until after VBlank begins.
+    EmitWord(rom, ref pc, 0xFFFE);
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2300,SR: unmask level 6 before the frame ends.
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2300 if the pending interrupt is lost.
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x60FE); // BRA *
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7C06); // MOVEQ #6,D6
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Vdp.WriteControlPort(0x8120); // Enable VBlank interrupt.
+
+    machine.RunFrame(300_000);
+    AssertEqual(6u, machine.MainCpu.D[6]);
+}
+
+void ExpandedCpuInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x203C); // MOVE.L #$11112222,D0
+    EmitLong(rom, ref pc, 0x1111_2222);
+    EmitWord(rom, ref pc, 0x223C); // MOVE.L #$33334444,D1
+    EmitLong(rom, ref pc, 0x3333_4444);
+    EmitWord(rom, ref pc, 0x207C); // MOVEA.L #$55556666,A0
+    EmitLong(rom, ref pc, 0x5555_6666);
+    EmitWord(rom, ref pc, 0x2E7C); // MOVEA.L #$00FF2000,A7
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x48E7); // MOVEM.L D0-D1/A0,-(A7)
+    EmitWord(rom, ref pc, 0xC080);
+    EmitWord(rom, ref pc, 0x4280); // CLR.L D0
+    EmitWord(rom, ref pc, 0x4281); // CLR.L D1
+    EmitWord(rom, ref pc, 0x4CDF); // MOVEM.L (A7)+,D2-D3/A1
+    EmitWord(rom, ref pc, 0x020C);
+    EmitWord(rom, ref pc, 0x7005); // MOVEQ #5,D0
+    EmitWord(rom, ref pc, 0x5680); // ADDQ.L #3,D0
+    EmitWord(rom, ref pc, 0x5540); // SUBQ.W #2,D0
+    EmitWord(rom, ref pc, 0x7A0E); // MOVEQ #14,D5
+    EmitWord(rom, ref pc, 0xD280); // ADD.L D0,D1
+    EmitWord(rom, ref pc, 0x9280); // SUB.L D0,D1
+    EmitWord(rom, ref pc, 0x0C40); // CMPI.W #6,D0
+    EmitWord(rom, ref pc, 0x0006);
+    EmitWord(rom, ref pc, 0x0800); // BTST #1,D0
+    EmitWord(rom, ref pc, 0x0001);
+    EmitWord(rom, ref pc, 0x247C); // MOVEA.L #$260,A2
+    EmitLong(rom, ref pc, 0x0000_0260);
+    EmitWord(rom, ref pc, 0x4E92); // JSR (A2)
+    EmitWord(rom, ref pc, 0x4879); // PEA $00FF3000
+    EmitLong(rom, ref pc, 0x00FF_3000);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x260;
+    EmitWord(rom, ref pc, 0x7809); // MOVEQ #9,D4
+    EmitWord(rom, ref pc, 0x4E75); // RTS
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 40; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x1111_2222u, machine.MainCpu.D[2]);
+    AssertEqual(0x3333_4444u, machine.MainCpu.D[3]);
+    AssertEqual(0x5555_6666u, machine.MainCpu.A[1]);
+    AssertEqual(6u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual(0u, machine.MainCpu.D[1]);
+    AssertEqual(9u, machine.MainCpu.D[4]);
+    AssertEqual(0x00FF_1FFCu, machine.MainCpu.A[7]);
+    AssertEqual(0x00FF_3000u, machine.Bus.ReadLong(0x00FF_1FFC));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after expanded instruction program");
+}
+
+void MovemPredecrementStoresOriginalAddressRegister()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x2E7C); // MOVEA.L #$00FF2000,A7
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x48E7); // MOVEM.L A7,-(A7)
+    EmitWord(rom, ref pc, 0x0001);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x00FF_1FFCu, machine.MainCpu.A[7]);
+    AssertEqual(0x00FF_2000u, machine.Bus.ReadLong(0x00FF_1FFC));
+}
+
+void MultiplyInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7006); // MOVEQ #6,D0
+    EmitWord(rom, ref pc, 0x7207); // MOVEQ #7,D1
+    EmitWord(rom, ref pc, 0xC2C0); // MULU.W D0,D1
+    EmitWord(rom, ref pc, 0x7403); // MOVEQ #3,D2
+    EmitWord(rom, ref pc, 0x7600); // MOVEQ #0,D3
+    EmitWord(rom, ref pc, 0x363C); // MOVE.W #$FFFE,D3
+    EmitWord(rom, ref pc, 0xFFFE);
+    EmitWord(rom, ref pc, 0xC7C2); // MULS.W D2,D3
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(42u, machine.MainCpu.D[1]);
+    AssertEqual(0xFFFF_FFFAu, machine.MainCpu.D[3]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after multiply program");
+}
+
+void EorAndCmpmInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x700F); // MOVEQ #$0F,D0
+    EmitWord(rom, ref pc, 0x7211); // MOVEQ #$11,D1
+    EmitWord(rom, ref pc, 0xB101); // EOR.B D0,D1
+    EmitWord(rom, ref pc, 0x207C); // MOVEA.L #$00FF1000,A0
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x227C); // MOVEA.L #$00FF1002,A1
+    EmitLong(rom, ref pc, 0x00FF_1002);
+    EmitWord(rom, ref pc, 0xB348); // CMPM.W (A0)+,(A1)+.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_1000, 0x1234);
+    machine.Bus.WriteWord(0x00FF_1002, 0x1234);
+    for (int i = 0; i < 7; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x1Eu, machine.MainCpu.D[1] & 0xFF);
+    AssertEqual(0x00FF_1002u, machine.MainCpu.A[0]);
+    AssertEqual(0x00FF_1004u, machine.MainCpu.A[1]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after EOR/CMPM program");
+}
+
+void NegSccChkAndMovepInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7C01); // MOVEQ #1,D6
+    EmitWord(rom, ref pc, 0x4406); // NEG.B D6
+    EmitWord(rom, ref pc, 0x7005); // MOVEQ #5,D0
+    EmitWord(rom, ref pc, 0x7206); // MOVEQ #6,D1
+    EmitWord(rom, ref pc, 0x4181); // CHK.W D1,D0
+    EmitWord(rom, ref pc, 0x0C40); // CMPI.W #5,D0
+    EmitWord(rom, ref pc, 0x0005);
+    EmitWord(rom, ref pc, 0x57C2); // SEQ D2
+    EmitWord(rom, ref pc, 0x207C); // MOVEA.L #$00FF1000,A0
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x263C); // MOVE.L #$A1B2C3D4,D3
+    EmitLong(rom, ref pc, 0xA1B2_C3D4);
+    EmitWord(rom, ref pc, 0x07C8); // MOVEP.L D3,0(A0)
+    EmitWord(rom, ref pc, 0x0000);
+    EmitWord(rom, ref pc, 0x2810); // MOVE.L (A0),D4, proving MOVEP is interleaved not linear.
+    EmitWord(rom, ref pc, 0x2A3C); // MOVE.L #0,D5
+    EmitLong(rom, ref pc, 0x0000_0000);
+    EmitWord(rom, ref pc, 0x0B08); // MOVEP.W 0(A0),D5
+    EmitWord(rom, ref pc, 0x0000);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 16; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFu, machine.MainCpu.D[6] & 0xFF);
+    AssertEqual(0xFFu, machine.MainCpu.D[2] & 0xFF);
+    AssertEqual(0xA100B200u, machine.MainCpu.D[4]);
+    AssertEqual(0xA1B2u, machine.MainCpu.D[5] & 0xFFFF);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after NEG/Scc/CHK/MOVEP program");
+}
+
+void MoveFromSrInstruction()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x40C0); // MOVE SR,D0
+    EmitWord(rom, ref pc, 0x40F9); // MOVE SR,$FF1000
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x2700u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual((ushort)0x2700, machine.Bus.ReadWord(0x00FF_1000));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after MOVE from SR program");
+}
+
+void ExchangeTasAndBitOps()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7001); // MOVEQ #1,D0
+    EmitWord(rom, ref pc, 0x7202); // MOVEQ #2,D1
+    EmitWord(rom, ref pc, 0xC141); // EXG D0,D1
+    EmitWord(rom, ref pc, 0x7401); // MOVEQ #1,D2
+    EmitWord(rom, ref pc, 0x05C1); // BSET D2,D1
+    EmitWord(rom, ref pc, 0x0581); // BCLR D2,D1
+    EmitWord(rom, ref pc, 0x0541); // BCHG D2,D1
+    EmitWord(rom, ref pc, 0x13FC); // MOVE.B #$7F,$FF0100
+    EmitWord(rom, ref pc, 0x007F);
+    EmitLong(rom, ref pc, 0x00FF_0100);
+    EmitWord(rom, ref pc, 0x4AF9); // TAS $FF0100
+    EmitLong(rom, ref pc, 0x00FF_0100);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 12; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(2u, machine.MainCpu.D[0]);
+    AssertEqual(3u, machine.MainCpu.D[1] & 0xFF);
+    AssertEqual((byte)0xFF, machine.Bus.ReadByte(0x00FF_0100));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after exchange/TAS/bit program");
+}
+
+void ImmediateBitWriteOps()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7000); // MOVEQ #0,D0
+    EmitWord(rom, ref pc, 0x08C0); // BSET #5,D0
+    EmitWord(rom, ref pc, 0x0005);
+    EmitWord(rom, ref pc, 0x0840); // BCHG #0,D0
+    EmitWord(rom, ref pc, 0x0000);
+    EmitWord(rom, ref pc, 0x207C); // MOVEA.L #$00FF1000,A0
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x08E8); // BSET #3,$0001(A0)
+    EmitWord(rom, ref pc, 0x0003);
+    EmitWord(rom, ref pc, 0x0001);
+    EmitWord(rom, ref pc, 0x08A8); // BCLR #3,$0001(A0)
+    EmitWord(rom, ref pc, 0x0003);
+    EmitWord(rom, ref pc, 0x0001);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x21u, machine.MainCpu.D[0] & 0xFF);
+    AssertEqual((byte)0, machine.Bus.ReadByte(0x00FF_1001));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after immediate bit write program");
+}
+
+void IllegalExceptionAndRte()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x010, 0x0000_0300); // Illegal instruction vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x00C0); // Invalid ORI encoding should vector through illegal instruction.
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0 after RTE.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7205); // MOVEQ #5,D1 in exception handler.
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(5u, machine.MainCpu.D[1]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after returning from illegal exception");
+}
+
+void IllegalOpcodeVectorsWithoutExtensionWord()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x010, 0x0000_0300);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x4AFC); // ILLEGAL.
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0 must run after RTE.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7205);
+    EmitWord(rom, ref pc, 0x4E73);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(5u, machine.MainCpu.D[1]);
+    AssertTrue(machine.MainCpu.Stopped, "ILLEGAL should return to the following opcode, not consume an extension word");
+}
+
+void InvalidMoveaByteVectorsIllegal()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x010, 0x0000_0300); // Illegal instruction vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x1040); // Invalid MOVEA.B D0,A0 encoding.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7004); // MOVEQ #4,D0
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(4u, machine.MainCpu.D[0]);
+    AssertTrue(machine.MainCpu.ExceptionCounts.ContainsKey(4), "invalid MOVEA.B should enter illegal instruction vector");
+}
+
+void InvalidEffectiveAddressVectorsIllegal()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x010, 0x0000_0300);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x41C0); // LEA D0,A0 is an invalid effective-address form.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700 if exception handling fails to redirect.
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7004); // MOVEQ #4,D0
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(4u, machine.MainCpu.D[0]);
+    AssertTrue(machine.MainCpu.ExceptionCounts.ContainsKey(4), "invalid LEA effective address should enter illegal instruction vector");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should return from the exception handler and stop");
+}
+
+void RteReturnsToUserModeFromSupervisorStack()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x010, 0x0000_0300); // Illegal instruction vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x41F9); // LEA $00FE0000,A0
+    EmitLong(rom, ref pc, 0x00FE_0000);
+    EmitWord(rom, ref pc, 0x4E60); // MOVE A0,USP
+    EmitWord(rom, ref pc, 0x027C); // ANDI #$D8FF,SR, enters user mode with interrupts unmasked.
+    EmitWord(rom, ref pc, 0xD8FF);
+    EmitWord(rom, ref pc, 0x4AFC); // ILLEGAL, vectors on supervisor stack.
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0 after RTE.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7205); // MOVEQ #5,D1 in exception handler.
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(5u, machine.MainCpu.D[1]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should resume user-mode code after RTE and stop");
+}
+
+void InterruptSwitchesFromUserStackToSupervisorStack()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, (24 + 6) * 4, 0x0000_0300); // Level 6 interrupt vector.
+    WriteLong(rom, 0x020, 0x0000_0380); // Privilege violation vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x41F9); // LEA $00FE0000,A0
+    EmitLong(rom, ref pc, 0x00FE_0000);
+    EmitWord(rom, ref pc, 0x4E60); // MOVE A0,USP
+    EmitWord(rom, ref pc, 0x2E7C); // MOVEA.L #$00FD0000,A7
+    EmitLong(rom, ref pc, 0x00FD_0000);
+    EmitWord(rom, ref pc, 0x027C); // ANDI #$D8FF,SR, enters user mode with interrupts unmasked.
+    EmitWord(rom, ref pc, 0xD8FF);
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0 after interrupt returns.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x4E68); // MOVE USP,A0 proves interrupt handler is supervisor-mode.
+    EmitWord(rom, ref pc, 0x7205); // MOVEQ #5,D1
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    pc = 0x380;
+    EmitWord(rom, ref pc, 0x7409); // MOVEQ #9,D2 if interrupt handler wrongly stayed in user mode.
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    machine.MainCpu.RequestInterrupt(6);
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(5u, machine.MainCpu.D[1]);
+    AssertEqual(0u, machine.MainCpu.D[2]);
+    AssertEqual(0x00FE_0000u, machine.MainCpu.A[0]);
+    AssertEqual(0x00FE_0000u, machine.MainCpu.A[7]);
+    AssertTrue((machine.MainCpu.SR & 0x2000) == 0, "RTE should restore user mode after interrupt");
+}
+
+void MoveUspDirectionsAndPrivilege()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x020, 0x0000_0300); // Privilege violation vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x41F9); // LEA $00FE0000,A0
+    EmitLong(rom, ref pc, 0x00FE_0000);
+    EmitWord(rom, ref pc, 0x4E60); // MOVE A0,USP
+    EmitWord(rom, ref pc, 0x43F9); // LEA $00FD0000,A1
+    EmitLong(rom, ref pc, 0x00FD_0000);
+    EmitWord(rom, ref pc, 0x4E69); // MOVE USP,A1
+    EmitWord(rom, ref pc, 0x027C); // ANDI #$DFFF,SR, enters user mode.
+    EmitWord(rom, ref pc, 0xDFFF);
+    EmitWord(rom, ref pc, 0x4E60); // MOVE A0,USP is privileged in user mode.
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 7; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x00FE_0000u, machine.MainCpu.A[1]);
+    AssertTrue(machine.MainCpu.ExceptionCounts.ContainsKey(8), "user-mode MOVE USP should enter privilege violation vector");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop in the privilege violation handler");
+}
+
+void RtrRestoresCcrAndPc()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x007C); // ORI #$001F,SR
+    EmitWord(rom, ref pc, 0x001F);
+    EmitWord(rom, ref pc, 0x4879); // PEA $00000220
+    EmitLong(rom, ref pc, 0x0000_0220);
+    EmitWord(rom, ref pc, 0x3F3C); // MOVE.W #$0004,-(A7)
+    EmitWord(rom, ref pc, 0x0004);
+    EmitWord(rom, ref pc, 0x4E77); // RTR
+    EmitWord(rom, ref pc, 0x7001); // Should be skipped.
+
+    pc = 0x220;
+    EmitWord(rom, ref pc, 0x6702); // BEQ +2, proves Z was restored.
+    EmitWord(rom, ref pc, 0x7002); // Should be skipped.
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertTrue((machine.MainCpu.SR & 0x001F) != 0x001F, "RTR should replace CCR rather than leave old flags intact");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after RTR target code");
+}
+
+void ResetInstructionIsPrivilegedAndResumes()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x020, 0x0000_0300); // Privilege violation vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x4E70); // RESET is legal in supervisor mode.
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0
+    EmitWord(rom, ref pc, 0x027C); // ANDI #$DFFF,SR, enters user mode.
+    EmitWord(rom, ref pc, 0xDFFF);
+    EmitWord(rom, ref pc, 0x4E70); // RESET in user mode vectors privilege violation.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7205); // MOVEQ #5,D1 in privilege handler.
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(5u, machine.MainCpu.D[1]);
+    AssertTrue(machine.MainCpu.ExceptionCounts.ContainsKey(8), "user-mode RESET should enter privilege violation vector");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should resume after RESET privilege exception and stop");
+}
+
+void MovePostincrementToVdpAbsoluteLong()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$8F02,$C00004
+    EmitWord(rom, ref pc, 0x8F02);
+    EmitLong(rom, ref pc, 0x00C0_0004);
+    EmitWord(rom, ref pc, 0x23FC); // MOVE.L #$40000000,$C00004
+    EmitLong(rom, ref pc, 0x4000_0000);
+    EmitLong(rom, ref pc, 0x00C0_0004);
+    EmitWord(rom, ref pc, 0x287C); // MOVEA.L #$00FF0000,A4
+    EmitLong(rom, ref pc, 0x00FF_0000);
+    EmitWord(rom, ref pc, 0x33DC); // MOVE.W (A4)+,$C00000
+    EmitLong(rom, ref pc, 0x00C0_0000);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_0000, 0x1234);
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual((byte)0x12, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x34, machine.Vdp.Vram[1]);
+    AssertEqual(0x00FF_0002u, machine.MainCpu.A[4]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after MOVE.W to VDP");
+}
+
+void DbraUsesDisplacementWordOrigin()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x33FC); // MOVE.W #$8F02,$C00004
+    EmitWord(rom, ref pc, 0x8F02);
+    EmitLong(rom, ref pc, 0x00C0_0004);
+    EmitWord(rom, ref pc, 0x23FC); // MOVE.L #$40000000,$C00004
+    EmitLong(rom, ref pc, 0x4000_0000);
+    EmitLong(rom, ref pc, 0x00C0_0004);
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #2,D0
+    EmitWord(rom, ref pc, 0x0002);
+    EmitWord(rom, ref pc, 0x287C); // MOVEA.L #$00FF0000,A4
+    EmitLong(rom, ref pc, 0x00FF_0000);
+    EmitWord(rom, ref pc, 0x33DC); // MOVE.W (A4)+,$C00000
+    EmitLong(rom, ref pc, 0x00C0_0000);
+    EmitWord(rom, ref pc, 0x51C8); // DBRA D0 back to the MOVE.W.
+    EmitWord(rom, ref pc, 0xFFF8);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_0000, 0x1111);
+    machine.Bus.WriteWord(0x00FF_0002, 0x2222);
+    machine.Bus.WriteWord(0x00FF_0004, 0x3333);
+
+    for (int i = 0; i < 17; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual((byte)0x11, machine.Vdp.Vram[0]);
+    AssertEqual((byte)0x11, machine.Vdp.Vram[1]);
+    AssertEqual((byte)0x22, machine.Vdp.Vram[2]);
+    AssertEqual((byte)0x22, machine.Vdp.Vram[3]);
+    AssertEqual((byte)0x33, machine.Vdp.Vram[4]);
+    AssertEqual((byte)0x33, machine.Vdp.Vram[5]);
+    AssertEqual(0x00FF_0006u, machine.MainCpu.A[4]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after DBRA loop");
+}
+
+void BraWordUsesDisplacementWordOrigin()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x6000); // BRA.W to $0208 from extension word at $0202.
+    EmitWord(rom, ref pc, 0x0006);
+    EmitWord(rom, ref pc, 0x7001); // skipped if the displacement origin is correct.
+    EmitWord(rom, ref pc, 0x7002); // skipped if the displacement origin is PC after extension word.
+    EmitWord(rom, ref pc, 0x7003); // target.
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(3u, machine.MainCpu.D[0]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after BRA.W target");
+}
+
+void ImmediateRmwAbsoluteLongEvaluatesEaOnce()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x0639); // ADDI.B #1,$FF00FF
+    EmitWord(rom, ref pc, 0x0001);
+    EmitLong(rom, ref pc, 0x00FF_00FF);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteByte(0x00FF_00FF, 0x07);
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual((byte)0x08, machine.Bus.ReadByte(0x00FF_00FF));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after ADDI.B absolute long");
+}
+
+void AsrSignExtendsRegisterOperands()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x72E8); // MOVEQ #-24,D1
+    WriteWord(rom, 0x202, 0xEA41); // ASR.W #5,D1
+    WriteWord(rom, 0x204, 0x7480); // MOVEQ #-128,D2
+    WriteWord(rom, 0x206, 0xE202); // ASR.B #1,D2
+    WriteWord(rom, 0x208, 0x4E72);
+    WriteWord(rom, 0x20A, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFFF_FFFFu, machine.MainCpu.D[1]);
+    AssertEqual(0xFFFF_FFC0u, machine.MainCpu.D[2]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after ASR sign-extension test");
+}
+
+void RegisterShiftCountZeroIsNoOp()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7800); // MOVEQ #0,D4
+    EmitWord(rom, ref pc, 0x343C); // MOVE.W #$000E,D2
+    EmitWord(rom, ref pc, 0x000E);
+    EmitWord(rom, ref pc, 0xE86A); // LSR.W D4,D2: register count zero leaves D2 unchanged.
+    EmitWord(rom, ref pc, 0x2602); // MOVE.L D2,D3
+    EmitWord(rom, ref pc, 0x343C); // MOVE.W #$0100,D2
+    EmitWord(rom, ref pc, 0x0100);
+    EmitWord(rom, ref pc, 0xE04A); // LSR.W #8,D2: immediate count zero encodes eight.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0u, machine.MainCpu.D[4]);
+    AssertEqual(0x0000_000Eu, machine.MainCpu.D[3]);
+    AssertEqual(0x0000_0001u, machine.MainCpu.D[2]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after shift-count test");
+}
+
+void RegisterShiftCountsAboveOperandWidth()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7809); // MOVEQ #9,D4
+    EmitWord(rom, ref pc, 0x7401); // MOVEQ #1,D2
+    EmitWord(rom, ref pc, 0xE92A); // LSL.B D4,D2: count 9 must not become count 1.
+    EmitWord(rom, ref pc, 0x2A02); // MOVE.L D2,D5
+    EmitWord(rom, ref pc, 0x7600); // MOVEQ #0,D3
+    EmitWord(rom, ref pc, 0x363C); // MOVE.W #$8000,D3
+    EmitWord(rom, ref pc, 0x8000);
+    EmitWord(rom, ref pc, 0x7810); // MOVEQ #16,D4
+    EmitWord(rom, ref pc, 0xE86B); // LSR.W D4,D3.
+    EmitWord(rom, ref pc, 0x40C0); // MOVE SR,D0.
+    EmitWord(rom, ref pc, 0x0240); // ANDI.W #$001F,D0 copies CCR after LSR.W.
+    EmitWord(rom, ref pc, 0x001F);
+    EmitWord(rom, ref pc, 0x7480); // MOVEQ #-128,D2
+    EmitWord(rom, ref pc, 0x7809); // MOVEQ #9,D4
+    EmitWord(rom, ref pc, 0xE822); // ASR.B D4,D2.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 14; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0u, machine.MainCpu.D[5] & 0xFF);
+    AssertEqual(0u, machine.MainCpu.D[3] & 0xFFFF);
+    AssertEqual(0x0015u, machine.MainCpu.D[0] & 0x001F); // X, Z, and C set after LSR.W #16.
+    AssertEqual(0xFFFF_FFFFu, machine.MainCpu.D[2]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after wide shift-count test");
+}
+
+void RotateAndArithmeticShiftFlags()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2710,SR: X set.
+    EmitWord(rom, ref pc, 0x2710);
+    EmitWord(rom, ref pc, 0x7401); // MOVEQ #1,D2
+    EmitWord(rom, ref pc, 0xE31A); // ROL.B #1,D2: carry clears, X is unchanged.
+    EmitWord(rom, ref pc, 0x2A02); // MOVE.L D2,D5
+    EmitWord(rom, ref pc, 0x40C0); // MOVE SR,D0.
+    EmitWord(rom, ref pc, 0x0240); // ANDI.W #$001F,D0 copies CCR after ROL.B.
+    EmitWord(rom, ref pc, 0x001F);
+    EmitWord(rom, ref pc, 0x7440); // MOVEQ #$40,D2
+    EmitWord(rom, ref pc, 0xE302); // ASL.B #1,D2: sign changes, so V is set.
+    EmitWord(rom, ref pc, 0x40C1); // MOVE SR,D1.
+    EmitWord(rom, ref pc, 0x0241); // ANDI.W #$001F,D1 copies CCR after ASL.B.
+    EmitWord(rom, ref pc, 0x001F);
+    EmitWord(rom, ref pc, 0x7680); // MOVEQ #-128,D3
+    EmitWord(rom, ref pc, 0xE513); // ROXL.B #2,D3: the second step must see X from the first step.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 15; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x0002u, machine.MainCpu.D[5] & 0xFF);
+    AssertEqual(0x0010u, machine.MainCpu.D[0] & 0x001F);
+    AssertEqual(0x000Au, machine.MainCpu.D[1] & 0x001F); // N and V set after ASL.B $40.
+    AssertEqual(0x0001u, machine.MainCpu.D[3] & 0xFF);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after rotate flag test");
+}
+
+void AddSubXInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x2C3C); // MOVE.L #$80000000,D6
+    EmitLong(rom, ref pc, 0x8000_0000);
+    EmitWord(rom, ref pc, 0x007C); // ORI #$0014,SR: X and Z set.
+    EmitWord(rom, ref pc, 0x0014);
+    EmitWord(rom, ref pc, 0xDD86); // ADDX.L D6,D6.
+    EmitWord(rom, ref pc, 0x2C3C); // MOVE.L #0,D6
+    EmitLong(rom, ref pc, 0);
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2704,SR: Z set, X clear.
+    EmitWord(rom, ref pc, 0x2704);
+    EmitWord(rom, ref pc, 0xDD86); // ADDX.L D6,D6 preserves Z when the result is zero.
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #$0001,D0
+    EmitWord(rom, ref pc, 0x0001);
+    EmitWord(rom, ref pc, 0x323C); // MOVE.W #$0000,D1
+    EmitWord(rom, ref pc, 0x0000);
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2710,SR: X set.
+    EmitWord(rom, ref pc, 0x2710);
+    EmitWord(rom, ref pc, 0x9300); // SUBX.B D0,D1.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+
+    machine.StepInstruction();
+    machine.StepInstruction();
+    machine.StepInstruction();
+    AssertEqual(0x0000_0001u, machine.MainCpu.D[6]);
+    AssertEqual((ushort)0x2713, machine.MainCpu.SR);
+
+    machine.StepInstruction();
+    machine.StepInstruction();
+    machine.StepInstruction();
+    AssertEqual(0u, machine.MainCpu.D[6]);
+    AssertEqual((ushort)0x2704, machine.MainCpu.SR);
+
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x0000_00FEu, machine.MainCpu.D[1] & 0xFF);
+    AssertEqual((ushort)0x2719, machine.MainCpu.SR);
+    machine.StepInstruction();
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after ADDX/SUBX test");
+}
+
+void BcdArithmeticInstructions()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x2A7C); // MOVEA.L #$00FF0101,A5
+    EmitLong(rom, ref pc, 0x00FF_0101);
+    EmitWord(rom, ref pc, 0x2C7C); // MOVEA.L #$00FF0201,A6
+    EmitLong(rom, ref pc, 0x00FF_0201);
+    EmitWord(rom, ref pc, 0x13FC); // MOVE.B #$99,$00FF0100
+    EmitWord(rom, ref pc, 0x0099);
+    EmitLong(rom, ref pc, 0x00FF_0100);
+    EmitWord(rom, ref pc, 0x13FC); // MOVE.B #$01,$00FF0200
+    EmitWord(rom, ref pc, 0x0001);
+    EmitLong(rom, ref pc, 0x00FF_0200);
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2714,SR: X and Z set for multi-byte ABCD.
+    EmitWord(rom, ref pc, 0x2714);
+    EmitWord(rom, ref pc, 0xCD0D); // ABCD -(A5),-(A6): 99 + 01 + X => 01, carry set.
+    EmitWord(rom, ref pc, 0x7001); // MOVEQ #1,D0
+    EmitWord(rom, ref pc, 0x7200); // MOVEQ #0,D1
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2710,SR: X set.
+    EmitWord(rom, ref pc, 0x2710);
+    EmitWord(rom, ref pc, 0x8300); // SBCD D0,D1: 00 - 01 - X => 98, borrow set.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 10; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00FF_0200));
+    AssertEqual(0x00FF_0100u, machine.MainCpu.A[5]);
+    AssertEqual(0x00FF_0200u, machine.MainCpu.A[6]);
+    AssertEqual(0x0000_0098u, machine.MainCpu.D[1] & 0xFF);
+    AssertEqual((ushort)0x2719, machine.MainCpu.SR);
+    machine.StepInstruction();
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after BCD arithmetic test");
+}
+
+void VdpFrameRendererDrawsPlaneTiles()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+    vdp.WriteControlPort(0x8D02); // Horizontal scroll table at $0800.
+
+    vdp.WriteControlPort(0xC002); // CRAM write at color 1.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x000E); // Bright red.
+
+    vdp.WriteControlPort(0x4020); // VRAM write at tile 1 data.
+    vdp.WriteControlPort(0x0000);
+    for (int i = 0; i < 8; i++)
+    {
+        vdp.WriteDataPort(0x1111);
+        vdp.WriteDataPort(0x1111);
+    }
+
+    vdp.WriteControlPort(0x4000); // VRAM write at name table entry 0.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x0001);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "first pixel should be red");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+}
+
+void VdpPlanePixelTraceMapsTileSource()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+    vdp.WriteControlPort(0x8D02); // Horizontal scroll table at $0800.
+
+    vdp.WriteControlPort(0x4020); // VRAM write at tile 1 data.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x1234);
+
+    vdp.WriteControlPort(0x4000); // VRAM write at name table entry 0.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x0001);
+
+    Vdp.VdpPlanePixelTrace trace = vdp.TracePlanePixel(VdpDebugLayer.PlaneA, 2, 0);
+    AssertEqual((int)VdpPlaneSourceKind.Plane, (int)trace.SourceKind);
+    AssertEqual(0, trace.NameTableAddress);
+    AssertEqual(0x0001, trace.Name);
+    AssertEqual(1, trace.TileIndex);
+    AssertEqual(0x0021, trace.TileAddress);
+    AssertEqual(2, trace.PixelX);
+    AssertEqual(0, trace.PixelY);
+    AssertEqual(3, trace.ColorIndex);
+    AssertEqual((byte)0x34, trace.PackedByte);
+}
+
+void VdpInterlaceDoubleModeUsesTallTiles()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C87); // H40 mode with interlace double resolution.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteTallTile(vdp, tile: 1, topColor: 1, bottomColor: 2);
+    WriteVramWordAt(vdp, 0x0000, 0x0001);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "top half of an interlace tile should render from the first eight rows");
+    int lower = PixelOffset(0, 4);
+    AssertTrue(frame[lower + 1] > 200, "interlace mode should fetch the second eight tile rows before the next nametable cell");
+    AssertEqual((byte)0, frame[lower]);
+    AssertEqual((byte)0, frame[lower + 2]);
+}
+
+void VdpFrameRendererDrawsSprites()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    vdp.WriteControlPort(0xC002); // CRAM write at color 1.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x000E); // Bright red.
+
+    vdp.WriteControlPort(0x4020); // VRAM write at tile 1 data.
+    vdp.WriteControlPort(0x0000);
+    for (int i = 0; i < 8; i++)
+    {
+        vdp.WriteDataPort(0x1111);
+        vdp.WriteDataPort(0x1111);
+    }
+
+    vdp.WriteControlPort(0x4000); // Sprite 0: 1x1 tile at screen origin, link end.
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(0x0080);
+    vdp.WriteDataPort(0x0000);
+    vdp.WriteDataPort(0x0001);
+    vdp.WriteDataPort(0x0080);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "sprite pixel should be red");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+}
+
+void VdpH32SpritesUseActiveDisplayCoordinates()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C00); // H32 mode.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSprite(vdp, 0x0000, y: 0, x: 0, tile: 1, link: 0);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int leftBorder = PixelOffset(0, 0);
+    AssertEqual((byte)0, frame[leftBorder]);
+    AssertEqual((byte)0, frame[leftBorder + 1]);
+    AssertEqual((byte)0, frame[leftBorder + 2]);
+
+    int activeOrigin = PixelOffset(32, 0);
+    AssertTrue(frame[activeOrigin] > 200, "H32 sprite X should be relative to the 256-pixel active display, not the centered output frame");
+    AssertEqual((byte)0, frame[activeOrigin + 1]);
+    AssertEqual((byte)0, frame[activeOrigin + 2]);
+}
+
+void VdpInterlaceSpritesUseSourceCoordinates()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C87); // H40 mode with interlace double resolution.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteTallTile(vdp, tile: 1, topColor: 1, bottomColor: 1);
+    WriteInterlaceSpriteWithSize(vdp, 0x0000, y: 8, x: 0, tile: 1, sizeLink: 0);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int tooHigh = PixelOffset(0, 4);
+    AssertTrue(frame[tooHigh] > 100, "interlace sprite placement should project doubled source coordinates into display coordinates");
+    int tooLow = PixelOffset(0, 12);
+    AssertEqual((byte)0, frame[tooLow]);
+    AssertEqual((byte)0, frame[tooLow + 1]);
+    AssertEqual((byte)0, frame[tooLow + 2]);
+}
+
+void VdpSpriteYCoordinateIgnoresHighBits()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8502); // Sprite table at $0400.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSprite(vdp, 0x0400, y: 16, x: 24, tile: 1, link: 0);
+    WriteVramWordAt(vdp, 0x0400, 0xFE90); // Low nine bits still represent Y=16.
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int pixel = PixelOffset(24, 16);
+    AssertTrue(frame[pixel] > 200, "normal-mode sprite Y should ignore high attribute bits");
+    AssertEqual((byte)0, frame[pixel + 1]);
+    AssertEqual((byte)0, frame[pixel + 2]);
+}
+
+void VdpFrameRendererUsesPerLineSpriteSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C87); // H40 mode with interlace double resolution.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteTallTile(vdp, tile: 1, topColor: 1, bottomColor: 1);
+    WriteTallTile(vdp, tile: 2, topColor: 2, bottomColor: 2);
+
+    vdp.BeginFrame(pal: false);
+    WriteInterlaceSpriteWithSize(vdp, 0x0000, y: 0, x: 0, tile: 1, sizeLink: 0);
+    vdp.StepScanline(0, pal: false);
+    WriteInterlaceSpriteWithSize(vdp, 0x0000, y: 240, x: 0, tile: 2, sizeLink: 0);
+    vdp.StepScanline(120, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use the sprite table captured before the mid-frame SAT rewrite");
+    AssertEqual((byte)0, frame[1]);
+
+    int lower = PixelOffset(0, 120);
+    AssertTrue(frame[lower + 1] > 200, "later lines should use their own captured sprite table");
+    AssertEqual((byte)0, frame[lower]);
+    AssertEqual((byte)0, frame[lower + 2]);
+}
+
+void VdpFrameRendererUsesActiveFrameVramSnapshot()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+
+    vdp.BeginFrame(pal: false);
+    WriteSprite(vdp, 0x0000, y: 0, x: 0, tile: 1, link: 0);
+    vdp.StepScanline(0, pal: false);
+    vdp.StepScanline(224, pal: false);
+
+    WriteSolidTile(vdp, tile: 1, color: 2);
+    WriteSprite(vdp, 0x0000, y: 0, x: 0, tile: 2, link: 0);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "rendering after VBlank VRAM updates should use the active frame's sprite tile data");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+}
+
+void VdpFrameRendererUsesPerLinePlaneVramSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC040, 0x0001);
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    WriteSolidTile(vdp, tile: 1, color: 2);
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use plane tile data captured before the mid-frame pattern rewrite");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+
+    int lineEight = PixelOffset(0, 8);
+    AssertTrue(frame[lineEight + 1] > 200, "later lines should use their own captured plane tile data");
+    AssertEqual((byte)0, frame[lineEight]);
+    AssertEqual((byte)0, frame[lineEight + 2]);
+}
+
+void VdpDmaTimingSnapshotsPreservePartialVram()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC040, 0x0001);
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    vdp.CaptureLineVramForDmaTiming(8);
+    WriteSolidTile(vdp, tile: 1, color: 2);
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int lineEight = PixelOffset(0, 8);
+    AssertTrue(frame[lineEight] > 200, "DMA timing capture should preserve the line's earlier VRAM state");
+    AssertEqual((byte)0, frame[lineEight + 1]);
+    AssertEqual((byte)0, frame[lineEight + 2]);
+}
+
+void VdpFrameRendererUsesPerLineSpritePatternSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+
+    vdp.BeginFrame(pal: false);
+    WriteSprite(vdp, 0x0000, y: 0, x: 0, tile: 1, link: 0);
+    vdp.StepScanline(0, pal: false);
+
+    WriteSolidTile(vdp, tile: 1, color: 2);
+    vdp.StepScanline(224, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "sprite pixels already drawn on a line should not pick up later pattern table writes");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+}
+
+void VdpFrameRendererDrawsMultiCellSpritesInVdpOrder()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+    vdp.WriteControlPort(0x8500); // Sprite attribute table at $0000.
+
+    WriteCramColor(vdp, 1, 0x000E); // Red.
+    WriteCramColor(vdp, 2, 0x00E0); // Green.
+    WriteCramColor(vdp, 3, 0x0E00); // Blue.
+    WriteCramColor(vdp, 4, 0x0EEE); // White.
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteSolidTile(vdp, tile: 3, color: 3);
+    WriteSolidTile(vdp, tile: 4, color: 4);
+
+    int twoByThree = (1 << 10) | (2 << 8);
+    WriteSpriteWithSize(vdp, 0x0000, y: 0, x: 0, tile: 1, sizeLink: twoByThree);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int topRight = PixelOffset(9, 1);
+    AssertTrue(frame[topRight] > 200 && frame[topRight + 1] > 200 && frame[topRight + 2] > 200, "right column should use the fourth tile");
+
+    int lowerLeft = PixelOffset(1, 17);
+    AssertTrue(frame[lowerLeft + 2] > 200, "third row of left column should use the third tile");
+    AssertEqual((byte)0, frame[lowerLeft]);
+    AssertEqual((byte)0, frame[lowerLeft + 1]);
+}
+
+void VdpFrameRendererBlanksWhenDisplayIsDisabled()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+
+    vdp.WriteControlPort(0x4020); // VRAM write at tile 1 data.
+    vdp.WriteControlPort(0x0000);
+    for (int i = 0; i < 8; i++)
+    {
+        vdp.WriteDataPort(0x1111);
+        vdp.WriteDataPort(0x1111);
+    }
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertEqual("display-disabled", vdp.LastRenderMode);
+    AssertTrue(frame.All(value => value == 0), "disabled display should show only the background color");
+}
+
+void VdpFrameRendererAppliesScroll()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+    vdp.WriteControlPort(0x8407); // Plane B table at $E000.
+    vdp.WriteControlPort(0x8D02); // Horizontal scroll table at $0800.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0x0800, 0x0008); // Positive H-scroll moves the plane right.
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertEqual((byte)0, frame[0]);
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+    int shifted = PixelOffset(8, 0);
+    AssertTrue(frame[shifted] > 200, "positive horizontal scroll should move cell 0 right by one tile");
+    AssertEqual((byte)0, frame[shifted + 1]);
+    AssertEqual((byte)0, frame[shifted + 2]);
+}
+
+void VdpInterlaceDoubleModeIndexesHscrollByDisplayLine()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C87); // H40 mode with interlace double resolution.
+    vdp.WriteControlPort(0x8B03); // Per-line horizontal scroll mode.
+    vdp.WriteControlPort(0x8D02); // Horizontal scroll table at $0800.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteTallTile(vdp, tile: 1, topColor: 1, bottomColor: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC040, 0x0001);
+    WriteVramWordAt(vdp, 0x0800 + (8 * 4), 0x0008); // Display line 8.
+    WriteVramWordAt(vdp, 0x0800 + (16 * 4), 0x0000); // Doubled source line 16 must not be used.
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int lineEight = PixelOffset(0, 8);
+    AssertEqual((byte)0, frame[lineEight]);
+    AssertEqual((byte)0, frame[lineEight + 1]);
+    AssertEqual((byte)0, frame[lineEight + 2]);
+    int shifted = PixelOffset(8, 8);
+    AssertTrue(frame[shifted] > 200, "interlace H-scroll should use display line index, not doubled source line");
+}
+
+void VdpFrameRendererUsesPerLineHscrollSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8B03); // Per-line horizontal scroll mode.
+    vdp.WriteControlPort(0x8D02); // Horizontal scroll table at $0800.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC040, 0x0001);
+    WriteVramWordAt(vdp, 0x0800, 0x0000);
+    WriteVramWordAt(vdp, 0x0800 + (8 * 4), 0x0008);
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    WriteVramWordAt(vdp, 0x0800, 0x0008);
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use the H-scroll value captured before the mid-frame write");
+    int lineEight = PixelOffset(0, 8);
+    AssertEqual((byte)0, frame[lineEight]);
+    int shifted = PixelOffset(8, 8);
+    AssertTrue(frame[shifted] > 200, "later lines should use their own captured H-scroll values");
+}
+
+void VdpFrameRendererUsesPerLineRegisterSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xE000, 0x0002);
+    WriteVramWordAt(vdp, 0xE040, 0x0002);
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    vdp.WriteControlPort(0x8238); // Plane A table at $E000 for later lines.
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use the Plane A base captured before the mid-frame register write");
+    AssertEqual((byte)0, frame[1]);
+    int later = PixelOffset(0, 8);
+    AssertTrue(frame[later + 1] > 200, "later lines should use their own captured Plane A base register");
+    AssertEqual((byte)0, frame[later]);
+    AssertEqual((byte)0x38, vdp.Registers[2]);
+}
+
+void VdpFrameRendererUsesPerLineCramSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E); // Red.
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC040, 0x0001);
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    WriteCramColor(vdp, 1, 0x00E0); // Green after line 0 was captured.
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use the CRAM color captured before the mid-frame write");
+    AssertEqual((byte)0, frame[1]);
+    int lineEight = PixelOffset(0, 8);
+    AssertTrue(frame[lineEight + 1] > 200, "later lines should use their own captured CRAM colors");
+    AssertEqual((byte)0, frame[lineEight]);
+}
+
+void VdpFrameRendererUsesPerLineVsramSnapshots()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x00E0);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteVramWordAt(vdp, 0xC000, 0x0001);
+    WriteVramWordAt(vdp, 0xC080, 0x0002); // Plane row 2.
+
+    vdp.BeginFrame(pal: false);
+    vdp.StepScanline(0, pal: false);
+    WriteVsramWordAt(vdp, 0, 0x0008);
+    vdp.StepScanline(8, pal: false);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "line zero should use the VSRAM value captured before the mid-frame write");
+    int lineEight = PixelOffset(0, 8);
+    AssertTrue(frame[lineEight + 1] > 200, "later lines should use the updated VSRAM snapshot");
+    AssertEqual((byte)0, frame[lineEight]);
+    AssertEqual((byte)0, frame[lineEight + 2]);
+}
+
+void VdpFrameRendererAppliesWindowPlane()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+    vdp.WriteControlPort(0x8304); // Window table at $1000.
+    vdp.WriteControlPort(0x9102); // Window covers the left 16 pixels.
+    vdp.WriteControlPort(0x9200);
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x0E00);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteVramWordAt(vdp, 0x0000, 0x0002); // Plane A is blue.
+    WriteVramWordAt(vdp, 0x0002, 0x0002);
+    WriteVramWordAt(vdp, 0x0004, 0x0002);
+    WriteVramWordAt(vdp, 0x0006, 0x0002);
+    WriteVramWordAt(vdp, 0x1000, 0x0001); // Window is red.
+    WriteVramWordAt(vdp, 0x1002, 0x0001);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "window pixel should be red");
+    int outside = 24 * 3;
+    AssertTrue(frame[outside + 2] > 200, "outside the window should show plane A");
+}
+
+void VdpH40WindowUsesSixtyFourCellStride()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8304); // Window table at $1000.
+    vdp.WriteControlPort(0x9180); // Window covers the whole screen horizontally.
+    vdp.WriteControlPort(0x9200); // Window covers the top of the screen vertically.
+
+    WriteCramColor(vdp, 1, 0x000E); // Red.
+    WriteCramColor(vdp, 2, 0x00E0); // Green.
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteVramWordAt(vdp, 0x1000, 0x0001);
+    WriteVramWordAt(vdp, 0x1000 + (64 * 2), 0x0002);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "first H40 window row should read entry 0");
+    int secondRow = PixelOffset(0, 8);
+    AssertTrue(frame[secondRow + 1] > 200, "second H40 window row should read entry 64, not entry 40");
+    AssertEqual((byte)0, frame[secondRow]);
+    AssertEqual((byte)0, frame[secondRow + 2]);
+}
+
+  void VdpFrameRendererAppliesPriority()
+  {
+      Vdp vdp = new();
+      vdp.WriteControlPort(0x8140); // Display enable.
+      vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+    vdp.WriteControlPort(0x8401); // Plane B table at $2000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 2, 0x0E00);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 2);
+    WriteVramWordAt(vdp, 0x0000, 0x0001);
+    WriteVramWordAt(vdp, 0x2000, 0x8002);
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[2] > 200, "high-priority plane B should cover low-priority plane A");
+      AssertEqual((byte)0, frame[0]);
+      AssertEqual((byte)0, frame[1]);
+  }
+
+  void VdpSpriteLinkPriorityFeedsLayerPriority()
+  {
+      Vdp vdp = new();
+      vdp.WriteControlPort(0x8140); // Display enable.
+      vdp.WriteControlPort(0x8C81); // H40 mode.
+      vdp.WriteControlPort(0x9000); // 32x32 plane size.
+      vdp.WriteControlPort(0x8200); // Plane A table at $0000.
+      vdp.WriteControlPort(0x8502); // Sprite table at $0400.
+
+      WriteCramColor(vdp, 1, 0x000E); // Red plane.
+      WriteCramColor(vdp, 2, 0x00E0); // Green low-priority sprite.
+      WriteCramColor(vdp, 3, 0x0E00); // Blue high-priority sprite.
+      WriteSolidTile(vdp, tile: 1, color: 1);
+      WriteSolidTile(vdp, tile: 2, color: 2);
+      WriteSolidTile(vdp, tile: 3, color: 3);
+      WriteVramWordAt(vdp, 0x0000, 0x8001); // High-priority Plane A should cover a low-priority sprite pixel.
+      WriteSprite(vdp, 0x0400, y: 0, x: 0, tile: 2, link: 1);
+      WriteSprite(vdp, 0x0408, y: 0, x: 0, tile: 3, link: 0);
+      WriteVramWordAt(vdp, 0x0408 + 4, 0x8003); // Later sprite has high display priority but lower link priority.
+
+      byte[] frame = vdp.RenderFrameRgb();
+      AssertTrue(frame[0] > 200, "earlier low-priority sprites should occupy the sprite layer before layer priority is applied");
+      AssertEqual((byte)0, frame[1]);
+      AssertEqual((byte)0, frame[2]);
+  }
+
+void VdpFrameRendererAppliesShadowHighlight()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.WriteControlPort(0x8C89); // H40 mode with shadow/highlight enabled.
+    vdp.WriteControlPort(0x9000); // 32x32 plane size.
+    vdp.WriteControlPort(0x8230); // Plane A table at $C000.
+    vdp.WriteControlPort(0x8407); // Plane B table at $E000.
+    vdp.WriteControlPort(0x8568); // Sprite attribute table at $D000.
+
+    WriteCramColor(vdp, 1, 0x000E);
+    WriteCramColor(vdp, 46, 0x000E);
+    WriteCramColor(vdp, 47, 0x000E);
+    WriteSolidTile(vdp, tile: 1, color: 1);
+    WriteSolidTile(vdp, tile: 2, color: 15);
+    WriteVramWordAt(vdp, 0xC000, 0x0001); // Low-priority red is shadowed by the priority rule.
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 80 && frame[0] < 180, $"low-priority plane pixels should be shadowed in shadow/highlight mode, got RGB {frame[0]},{frame[1]},{frame[2]}");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+
+    WriteVramWordAt(vdp, 0xE000, 0x0001); // Low-priority Plane B is red.
+    WriteVramWordAt(vdp, 0xC000, 0x8000); // Transparent high-priority Plane A cancels automatic shadow.
+    frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "transparent high-priority plane pixels should still affect shadow/highlight priority");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+
+    WriteVramWordAt(vdp, 0xC000, 0x8001); // High-priority red.
+    frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "high-priority plane pixels should render normally without an effect sprite");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+
+    WriteSpriteWithSize(vdp, 0xD000, y: 0, x: 0, tile: 2, sizeLink: 0);
+    WriteVramWordAt(vdp, 0xD004, 0x6002); // Palette 3, color 15 acts as a shadow sprite pixel.
+    frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 200, "low-priority shadow sprite pixels should not affect high-priority plane pixels");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+
+    WriteVramWordAt(vdp, 0xD004, 0xE002); // High-priority shadow sprite can affect high-priority planes.
+    frame = vdp.RenderFrameRgb();
+    AssertTrue(frame[0] > 80 && frame[0] < 180, "high-priority palette-3 color-15 sprite pixels should shadow the underlying plane");
+    AssertEqual((byte)0, frame[1]);
+    AssertEqual((byte)0, frame[2]);
+}
+
+  void VdpSpriteMaskPreservesHighPrioritySprites()
+  {
+      Vdp vdp = new();
+      vdp.WriteControlPort(0x8140); // Display enable.
+      vdp.WriteControlPort(0x8C81); // H40 mode.
+    vdp.WriteControlPort(0x8502); // Sprite table at $0400.
+
+    WriteCramColor(vdp, 1, 0x000E); // Red.
+    WriteCramColor(vdp, 2, 0x00E0); // Green.
+      WriteSolidTile(vdp, tile: 1, color: 1);
+      WriteSolidTile(vdp, tile: 2, color: 2);
+      WriteSprite(vdp, 0x0400, y: 0, x: 8, tile: 1, link: 1);
+      WriteSprite(vdp, 0x0408, y: 0, x: -128, tile: 1, link: 2); // X=0 mask after one visible sprite.
+      WriteSprite(vdp, 0x0410, y: 0, x: 16, tile: 1, link: 3); // Later low-priority sprite is masked.
+      WriteSprite(vdp, 0x0418, y: 0, x: 24, tile: 2, link: 0);
+      WriteVramWordAt(vdp, 0x0418 + 4, 0x8002); // Later high-priority sprite is preserved.
+
+    byte[] frame = vdp.RenderFrameRgb();
+    int beforeMask = PixelOffset(8, 0);
+    AssertTrue(frame[beforeMask] > 200, "sprites before a mask should still render");
+    int lowPriorityAfterMask = PixelOffset(16, 0);
+    AssertEqual((byte)0, frame[lowPriorityAfterMask]);
+      AssertEqual((byte)0, frame[lowPriorityAfterMask + 1]);
+      AssertEqual((byte)0, frame[lowPriorityAfterMask + 2]);
+      int highPriorityAfterMask = PixelOffset(24, 0);
+      AssertTrue(frame[highPriorityAfterMask + 1] > 200, "high-priority sprites after a mask should still render");
+      AssertEqual((byte)0, frame[highPriorityAfterMask]);
+      AssertEqual((byte)0, frame[highPriorityAfterMask + 2]);
+  }
+
+  void VdpSpriteDotLimitClipsFinalSprite()
+  {
+      Vdp vdp = new();
+      vdp.WriteControlPort(0x8140); // Display enable.
+      vdp.WriteControlPort(0x8C81); // H40 mode.
+      vdp.WriteControlPort(0x8502); // Sprite table at $0400.
+
+      WriteCramColor(vdp, 1, 0x000E);
+      WriteCramColor(vdp, 2, 0x00E0);
+      WriteSolidTile(vdp, tile: 1, color: 1);
+      WriteSolidTile(vdp, tile: 2, color: 2);
+      WriteSolidTile(vdp, tile: 3, color: 2);
+      WriteSolidTile(vdp, tile: 4, color: 2);
+      WriteSolidTile(vdp, tile: 5, color: 2);
+
+      for (int i = 0; i < 9; i++)
+      {
+          int link = i + 1;
+          WriteSpriteWithSize(vdp, 0x0400 + (i * 8), y: 0, x: 320, tile: 1, sizeLink: (3 << 10) | link);
+      }
+
+      WriteSpriteWithSize(vdp, 0x0448, y: 0, x: 320, tile: 1, sizeLink: (1 << 10) | 10);
+      WriteSpriteWithSize(vdp, 0x0450, y: 0, x: 32, tile: 2, sizeLink: (3 << 10));
+
+      byte[] frame = vdp.RenderFrameRgb();
+      int visibleStart = PixelOffset(32, 0);
+      AssertTrue(frame[visibleStart + 1] > 200, "remaining sprite-dot budget should draw the start of the final sprite");
+      int visibleEnd = PixelOffset(47, 0);
+      AssertTrue(frame[visibleEnd + 1] > 200, "the final in-budget column should still render");
+      int clipped = PixelOffset(48, 0);
+      AssertEqual((byte)0, frame[clipped]);
+      AssertEqual((byte)0, frame[clipped + 1]);
+      AssertEqual((byte)0, frame[clipped + 2]);
+  }
+
+void VdpSpriteStatusFlags()
+{
+    Vdp collision = new();
+    collision.WriteControlPort(0x8140); // Display enable.
+    collision.WriteControlPort(0x8C81); // H40 mode.
+    collision.WriteControlPort(0x8502); // Sprite table at $0400.
+    WriteCramColor(collision, 1, 0x000E);
+    WriteSolidTile(collision, tile: 1, color: 1);
+    WriteSprite(collision, 0x0400, y: 0, x: 0, tile: 1, link: 1);
+    WriteSprite(collision, 0x0408, y: 0, x: 0, tile: 1, link: 0);
+
+    _ = collision.RenderFrameRgb();
+    AssertTrue((collision.Status & 0x0020) != 0, "overlapping opaque sprites should set collision");
+
+    Vdp overflow = new();
+    overflow.WriteControlPort(0x8140); // Display enable.
+    overflow.WriteControlPort(0x8C81); // H40 mode.
+    overflow.WriteControlPort(0x8502); // Sprite table at $0400.
+    WriteCramColor(overflow, 1, 0x000E);
+    WriteSolidTile(overflow, tile: 1, color: 1);
+    for (int i = 0; i < 21; i++)
+    {
+        WriteSprite(overflow, 0x0400 + (i * 8), y: 0, x: i * 8, tile: 1, link: i == 20 ? 0 : i + 1);
+    }
+
+    byte[] overflowFrame = overflow.RenderFrameRgb();
+    AssertTrue((overflow.Status & 0x0040) != 0, "more than twenty H40 sprites on one line should set overflow");
+    int twentieth = PixelOffset(19 * 8, 0);
+    AssertTrue(overflowFrame[twentieth] > 200, "the twentieth H40 sprite on a line should still render");
+    int twentyFirst = PixelOffset(20 * 8, 0);
+    AssertEqual((byte)0, overflowFrame[twentyFirst]);
+    AssertEqual((byte)0, overflowFrame[twentyFirst + 1]);
+    AssertEqual((byte)0, overflowFrame[twentyFirst + 2]);
+}
+
+void VdpDirectColorDmaCaptureRendersFrame()
+{
+    Vdp vdp = new();
+    vdp.WriteControlPort(0x8140); // Display enable.
+    vdp.BeginDmaMemoryCopy(new Vdp.DmaRequest(0, Vdp.ScreenHeight * 160, 0x23, 0, 0));
+    for (int y = 0; y < Vdp.ScreenHeight; y++)
+    {
+        for (int x = 0; x < 160; x++)
+        {
+            ushort color = x < 80 ? (ushort)0x000E : (ushort)0x0E00;
+            vdp.WriteDmaWord(color);
+        }
+    }
+
+    byte[] frame = vdp.RenderFrameRgb();
+    AssertEqual("direct-color-dma", vdp.LastRenderMode);
+    AssertTrue(frame[0] > 200, "left direct-color pixel should be red");
+    int right = (200 * 3) + 2;
+    AssertTrue(frame[right] > 200, "right direct-color pixel should be blue");
+}
+
+byte[] CreateRom()
+{
+    return new byte[512 * 1024];
+}
+
+void DeclareSaveRam(byte[] data, uint start = 0x0020_0000, uint end = 0x0020_FFFF, byte lanes = 0x60)
+{
+    WriteAscii(data, 0x1B0, "RA");
+    data[0x1B2] = 0xF8;
+    data[0x1B3] = lanes;
+    WriteLong(data, 0x1B4, start);
+    WriteLong(data, 0x1B8, end);
+}
+
+void DeclareEeprom(byte[] data)
+{
+    WriteAscii(data, 0x1B0, "RA");
+    data[0x1B2] = 0xE8;
+    data[0x1B3] = 0x40;
+    WriteLong(data, 0x1B4, 0x0020_0001);
+    WriteLong(data, 0x1B8, 0x0020_0001);
+}
+
+void EepromWriteBytes(MegaDrive machine, EepromPins pins, byte command, byte[] addressBytes, byte[] data)
+{
+    EepromStart(machine, pins);
+    EepromSendByte(machine, pins, command);
+    EepromAckClock(machine, pins);
+    foreach (byte addressByte in addressBytes)
+    {
+        EepromSendByte(machine, pins, addressByte);
+        EepromAckClock(machine, pins);
+    }
+
+    foreach (byte value in data)
+    {
+        EepromSendByte(machine, pins, value);
+        EepromAckClock(machine, pins);
+    }
+
+    EepromStop(machine, pins);
+}
+
+byte EepromReadAt(MegaDrive machine, EepromPins pins, byte writeCommand, byte readCommand, byte[] addressBytes)
+{
+    EepromStart(machine, pins);
+    EepromSendByte(machine, pins, writeCommand);
+    EepromAckClock(machine, pins);
+    foreach (byte addressByte in addressBytes)
+    {
+        EepromSendByte(machine, pins, addressByte);
+        EepromAckClock(machine, pins);
+    }
+
+    EepromStart(machine, pins);
+    EepromSendByte(machine, pins, readCommand);
+    EepromAckClock(machine, pins);
+    byte value = EepromReadByte(machine, pins, ack: false);
+    EepromStop(machine, pins);
+    return value;
+}
+
+void EepromStart(MegaDrive machine, EepromPins pins)
+{
+    EepromWriteLines(machine, pins, sda: true, scl: true);
+    EepromWriteLines(machine, pins, sda: false, scl: true);
+    EepromWriteLines(machine, pins, sda: false, scl: false);
+}
+
+void EepromStop(MegaDrive machine, EepromPins pins)
+{
+    EepromWriteLines(machine, pins, sda: false, scl: false);
+    EepromWriteLines(machine, pins, sda: false, scl: true);
+    EepromWriteLines(machine, pins, sda: true, scl: true);
+}
+
+void EepromSendByte(MegaDrive machine, EepromPins pins, byte value)
+{
+    for (int bit = 7; bit >= 0; bit--)
+    {
+        bool sda = ((value >> bit) & 1) != 0;
+        EepromWriteLines(machine, pins, sda, scl: false);
+        EepromWriteLines(machine, pins, sda, scl: true);
+        EepromWriteLines(machine, pins, sda, scl: false);
+    }
+}
+
+void EepromAckClock(MegaDrive machine, EepromPins pins)
+{
+    EepromWriteLines(machine, pins, sda: true, scl: false);
+    EepromWriteLines(machine, pins, sda: true, scl: true);
+    AssertEqual((byte)0, (byte)(machine.Bus.ReadByte(pins.SdaOutAddress) & (1 << pins.SdaOutBit)));
+    EepromWriteLines(machine, pins, sda: true, scl: false);
+}
+
+byte EepromReadByte(MegaDrive machine, EepromPins pins, bool ack)
+{
+    byte value = 0;
+    for (int bit = 7; bit >= 0; bit--)
+    {
+        EepromWriteLines(machine, pins, sda: true, scl: false);
+        EepromWriteLines(machine, pins, sda: true, scl: true);
+        value = (byte)((value << 1) | ((machine.Bus.ReadByte(pins.SdaOutAddress) >> pins.SdaOutBit) & 0x01));
+        EepromWriteLines(machine, pins, sda: true, scl: false);
+    }
+
+    EepromWriteLines(machine, pins, sda: ack ? false : true, scl: false);
+    EepromWriteLines(machine, pins, sda: ack ? false : true, scl: true);
+    EepromWriteLines(machine, pins, sda: ack ? false : true, scl: false);
+    return value;
+}
+
+void EepromWriteLines(MegaDrive machine, EepromPins pins, bool sda, bool scl)
+{
+    if (pins.WordAccess)
+    {
+        if (pins.SclAddress + 1 != pins.SdaInAddress)
+        {
+            throw new InvalidOperationException("word EEPROM helper expects SCL on the high byte and SDA on the low byte");
+        }
+
+        ushort value = (ushort)((scl ? 1 << (pins.SclBit + 8) : 0) | (sda ? 1 << pins.SdaInBit : 0));
+        machine.Bus.WriteWord(pins.SclAddress, value);
+        return;
+    }
+
+    if (pins.SdaInAddress == pins.SclAddress)
+    {
+        int value = (sda ? 1 << pins.SdaInBit : 0) | (scl ? 1 << pins.SclBit : 0);
+        machine.Bus.WriteByte(pins.SdaInAddress, (byte)value);
+        return;
+    }
+
+    machine.Bus.WriteByte(pins.SdaInAddress, (byte)(sda ? 1 << pins.SdaInBit : 0));
+    machine.Bus.WriteByte(pins.SclAddress, (byte)(scl ? 1 << pins.SclBit : 0));
+}
+
+void WriteAscii(byte[] data, int offset, string text)
+{
+    for (int i = 0; i < text.Length; i++)
+    {
+        data[offset + i] = (byte)text[i];
+    }
+}
+
+void WriteWord(byte[] data, int offset, ushort value)
+{
+    data[offset] = (byte)(value >> 8);
+    data[offset + 1] = (byte)value;
+}
+
+void WriteLong(byte[] data, int offset, uint value)
+{
+    WriteWord(data, offset, (ushort)(value >> 16));
+    WriteWord(data, offset + 2, (ushort)value);
+}
+
+void EmitWord(byte[] data, ref int offset, ushort value)
+{
+    WriteWord(data, offset, value);
+    offset += 2;
+}
+
+void EmitLong(byte[] data, ref int offset, uint value)
+{
+    WriteLong(data, offset, value);
+    offset += 4;
+}
+
+void ConfigureDma(Vdp vdp, int lengthWords, uint sourceAddress, byte mode)
+{
+    int sourceHigh = (int)((sourceAddress >> 17) & 0x7F);
+    int modeAndSource = mode <= 1 ? sourceHigh : ((int)mode << 6) | (sourceHigh & 0x3F);
+    vdp.WriteControlPort((ushort)(0x9300 | (lengthWords & 0xFF)));
+    vdp.WriteControlPort((ushort)(0x9400 | ((lengthWords >> 8) & 0xFF)));
+    vdp.WriteControlPort((ushort)(0x9500 | ((sourceAddress >> 1) & 0xFF)));
+    vdp.WriteControlPort((ushort)(0x9600 | ((sourceAddress >> 9) & 0xFF)));
+    vdp.WriteControlPort((ushort)(0x9700 | modeAndSource));
+    vdp.WriteControlPort(0x8110); // DMA enable.
+    vdp.WriteControlPort(0x8F02); // Auto-increment by one word.
+}
+
+void WriteCramColor(Vdp vdp, int index, ushort value)
+{
+    vdp.WriteControlPort((ushort)(0xC000 | ((index * 2) & 0x3FFF)));
+    vdp.WriteControlPort(0x0000);
+    vdp.WriteDataPort(value);
+}
+
+void WriteVramWordAt(Vdp vdp, int address, ushort value)
+{
+    vdp.WriteControlPort((ushort)(0x4000 | (address & 0x3FFF)));
+    vdp.WriteControlPort((ushort)((address >> 14) & 0x0003));
+    vdp.WriteDataPort(value);
+}
+
+void WriteVsramWordAt(Vdp vdp, int address, ushort value)
+{
+    vdp.WriteControlPort((ushort)(0x4000 | (address & 0x3FFF)));
+    vdp.WriteControlPort((ushort)(0x0010 | ((address >> 14) & 0x0003)));
+    vdp.WriteDataPort(value);
+}
+
+void WriteSolidTile(Vdp vdp, int tile, int color)
+{
+    ushort word = (ushort)((color << 12) | (color << 8) | (color << 4) | color);
+    int address = tile * 32;
+    for (int i = 0; i < 16; i++)
+    {
+        WriteVramWordAt(vdp, address + (i * 2), word);
+    }
+}
+
+void WriteTallTile(Vdp vdp, int tile, int topColor, int bottomColor)
+{
+    int address = tile * 64;
+    for (int y = 0; y < 16; y++)
+    {
+        int color = y < 8 ? topColor : bottomColor;
+        ushort word = (ushort)((color << 12) | (color << 8) | (color << 4) | color);
+        WriteVramWordAt(vdp, address + (y * 4), word);
+        WriteVramWordAt(vdp, address + (y * 4) + 2, word);
+    }
+}
+
+void WriteSprite(Vdp vdp, int address, int y, int x, int tile, int link)
+{
+    WriteSpriteWithSize(vdp, address, y, x, tile, link & 0x7F);
+}
+
+void WriteSpriteWithSize(Vdp vdp, int address, int y, int x, int tile, int sizeLink)
+{
+    WriteVramWordAt(vdp, address, (ushort)(y + 128));
+    WriteVramWordAt(vdp, address + 2, (ushort)sizeLink);
+    WriteVramWordAt(vdp, address + 4, (ushort)(tile & 0x07FF));
+    WriteVramWordAt(vdp, address + 6, (ushort)(x + 128));
+}
+
+void WriteInterlaceSpriteWithSize(Vdp vdp, int address, int y, int x, int tile, int sizeLink)
+{
+    WriteVramWordAt(vdp, address, (ushort)(y + 256));
+    WriteVramWordAt(vdp, address + 2, (ushort)sizeLink);
+    WriteVramWordAt(vdp, address + 4, (ushort)(tile & 0x07FF));
+    WriteVramWordAt(vdp, address + 6, (ushort)(x + 128));
+}
+
+int PixelOffset(int x, int y)
+{
+    return ((y * Vdp.ScreenWidth) + x) * 3;
+}
+
+void AssertEqual<T>(T expected, T actual)
+    where T : IEquatable<T>
+{
+    if (!expected.Equals(actual))
+    {
+        throw new InvalidOperationException($"expected {expected}, got {actual}");
+    }
+}
+
+void AssertTrue(bool condition, string message)
+{
+    if (!condition)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
+readonly record struct EepromPins(uint SdaInAddress, int SdaInBit, uint SdaOutAddress, int SdaOutBit, uint SclAddress, int SclBit, bool WordAccess = false);
