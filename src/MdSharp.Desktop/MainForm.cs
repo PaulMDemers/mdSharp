@@ -10,6 +10,8 @@ namespace MdSharp.Desktop;
 
 internal sealed class MainForm : Form
 {
+    private static readonly string AppTitle = $"{AppInfo.Name} {AppInfo.DisplayVersion}";
+
     private readonly VideoSurface _video = new() { Dock = DockStyle.Fill };
     private readonly StatusStrip _status = new();
     private readonly ToolStripStatusLabel _statusText = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -58,7 +60,7 @@ internal sealed class MainForm : Form
 
     public MainForm(string? initialRom)
     {
-        Text = "mdSharp";
+        Text = AppTitle;
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? Icon;
         _settings.NormalizeSession();
         ClientSize = new Size(_settings.WindowWidth, _settings.WindowHeight);
@@ -158,6 +160,8 @@ internal sealed class MainForm : Form
 
         ToolStripMenuItem help = new("&Help");
         help.DropDownItems.Add("&Controls", null, (_, _) => ShowControls());
+        help.DropDownItems.Add(new ToolStripSeparator());
+        help.DropDownItems.Add($"&About {AppInfo.Name}", null, (_, _) => ShowAbout());
 
         menu.Items.Add(file);
         menu.Items.Add(emulation);
@@ -194,7 +198,7 @@ internal sealed class MainForm : Form
             _settings.LastRomDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
             _settings.Save();
             _paused = false;
-            Text = $"mdSharp - {Path.GetFileName(path)}";
+            Text = $"{AppTitle} - {Path.GetFileName(path)}";
             SetStatus($"Loaded {Path.GetFileName(path)} | {DisplayName(_cartridge!)}");
             UpdateMenus();
         }
@@ -498,7 +502,7 @@ internal sealed class MainForm : Form
             _playbackMovie = movie;
             _playbackFrame = 0;
             _paused = false;
-            Text = $"mdSharp - {Path.GetFileName(targetRomPath)}";
+            Text = $"{AppTitle} - {Path.GetFileName(targetRomPath)}";
             UpdateMenus();
             SetStatus($"Playing input movie {Path.GetFileName(path)} ({movie.FrameCount:N0} frames).");
         }
@@ -697,6 +701,12 @@ internal sealed class MainForm : Form
             "Controls",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
+    }
+
+    private void ShowAbout()
+    {
+        using AboutForm dialog = new(Icon);
+        dialog.ShowDialog(this);
     }
 
     private void ShowInputConfig()

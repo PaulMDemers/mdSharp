@@ -1,0 +1,21 @@
+# Changelog
+
+All notable project changes are tracked here. mdSharp uses semantic version tags for public releases.
+
+## Unreleased
+
+- Started the `0.2.0` development cycle.
+- Added shared assembly version metadata.
+- Added desktop `Help -> About mdSharp` dialog with version, license, and repository links.
+- Added `mdsharp --version` to the CLI.
+- Updated release packaging to stamp binaries with the requested package version.
+
+## 0.1.0 - 2026-05-17
+
+- Published the first GitHub release.
+- Added reusable C# Genesis/Mega Drive emulation core, WinForms desktop frontend, and CLI diagnostics.
+- Added desktop ROM loading, recent files, keyboard/gamepad input, input configuration, fullscreen, save states, SRAM/EEPROM persistence, and input movie recording/playback.
+- Added VDP rendering support for planes, sprites, scrolling, windowing, DMA, CRAM/VSRAM snapshots, shadow/highlight, interlace, and raster-sensitive behavior.
+- Added PSG/YM2612 audio, audio diagnostics, stem rendering, and reference comparison tooling.
+- Added deterministic `.mdmovie` sample and checkpoint workflow.
+- Added local screenshot showcase, documentation set, MIT license, desktop icon, release packaging script, and GitHub issue/PR templates.

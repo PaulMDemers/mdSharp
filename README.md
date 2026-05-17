@@ -68,6 +68,8 @@ docs/
   ROADMAP.md         Current status and next priorities
 ```
 
+Project history is tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Requirements
 
 - .NET 10 SDK
@@ -92,6 +94,12 @@ dotnet run --project src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -- "p
 ```
 
 The desktop app can also be launched without an argument; ROMs can then be opened from the File menu.
+
+Print the CLI/app version:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --version
+```
 
 Default player 1 keyboard controls:
 
@@ -233,6 +241,7 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 - [Release notes draft](docs/RELEASE_NOTES_DRAFT.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Changelog](CHANGELOG.md)
 
 ## Legal
 

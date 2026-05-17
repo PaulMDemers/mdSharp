@@ -6,7 +6,7 @@ Release packages are created with:
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version <version>
 ```
 
-The script performs a clean Release build, runs tests by default, publishes the desktop frontend, copies release documentation into each package folder, and writes zip files under `artifacts/packages/`.
+The script performs a clean Release build, stamps assemblies with the requested version, runs tests by default, publishes the desktop frontend, copies release documentation into each package folder, and writes zip files under `artifacts/packages/`.
 
 ## Outputs
 

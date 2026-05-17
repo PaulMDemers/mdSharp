@@ -122,6 +122,7 @@ Do not include ROMs, save files, save states, reference audio, or generated regr
 ## GitHub Release Draft
 
 Use [RELEASE_NOTES_DRAFT.md](RELEASE_NOTES_DRAFT.md) as the starting point for the first GitHub release description. Replace `<version>` placeholders, add current verification results, and summarize compatibility changes since the previous tag.
+Update [CHANGELOG.md](../CHANGELOG.md) before tagging a new release.
 
 ## Clean Clone Check
 

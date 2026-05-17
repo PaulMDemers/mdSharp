@@ -16,10 +16,17 @@ const int DefaultInstructionBudget = 100_000;
 const int SonicTitleMusicStartFrame = 559;
 string[] romExtensions = [".bin", ".md", ".gen", ".smd", ".rom"];
 
+if (args.Length == 1 && args[0] is "--version" or "-v")
+{
+    Console.WriteLine($"{AppInfo.Name} {AppInfo.DisplayVersion}");
+    return;
+}
+
 if (args.Length == 0)
 {
-    Console.WriteLine("mdSharp - Sega Genesis/Mega Drive emulator prototype");
+    Console.WriteLine($"{AppInfo.Name} {AppInfo.DisplayVersion} - Sega Genesis/Mega Drive emulator prototype");
     Console.WriteLine("Usage:");
+    Console.WriteLine("  mdsharp --version");
     Console.WriteLine("  mdsharp <rom-file> [instructions]");
     Console.WriteLine("  mdsharp --sweep <rom-folder> [instructions]");
     Console.WriteLine("  mdsharp --cart-info <rom-file>");

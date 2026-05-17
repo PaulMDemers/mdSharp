@@ -13,6 +13,13 @@ $artifactsRoot = Join-Path $repoRoot "artifacts"
 $packageRoot = Join-Path $artifactsRoot "packages"
 $desktopProject = Join-Path $repoRoot "src\MdSharp.Desktop\MdSharp.Desktop.csproj"
 $nugetSource = "https://api.nuget.org/v3/index.json"
+$buildVersion = if ($Version -match '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') { $Version } else { "0.0.0-$Version" }
+$assemblyVersion = ($buildVersion -replace '[-+].*$', '')
+$versionProperties = @(
+    "/p:Version=$buildVersion",
+    "/p:AssemblyVersion=${assemblyVersion}.0",
+    "/p:FileVersion=${assemblyVersion}.0"
+)
 
 function Invoke-Checked([string]$file, [string[]]$arguments) {
     & $file @arguments
@@ -56,28 +63,31 @@ try {
     New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 
     Invoke-Checked "dotnet" @("clean", "mdSharp.sln", "-c", $Configuration)
-    Invoke-Checked "dotnet" @("build", "mdSharp.sln", "-c", $Configuration)
+    $buildArgs = @("build", "mdSharp.sln", "-c", $Configuration) + $versionProperties
+    Invoke-Checked "dotnet" $buildArgs
     if (-not $SkipTests) {
         Invoke-Checked "dotnet" @("test", "mdSharp.sln", "-c", $Configuration, "--no-build")
     }
 
     $frameworkFolder = Join-Path $artifactsRoot "mdSharp-desktop-$Version-framework-dependent"
     Remove-IfExists $frameworkFolder
-    Invoke-Checked "dotnet" @("publish", $desktopProject, "-c", $Configuration, "-o", $frameworkFolder)
+    $frameworkPublishArgs = @("publish", $desktopProject, "-c", $Configuration, "-o", $frameworkFolder) + $versionProperties
+    Invoke-Checked "dotnet" $frameworkPublishArgs
     Copy-ReleaseDocs $frameworkFolder
     New-Zip $frameworkFolder (Join-Path $packageRoot "mdSharp-desktop-$Version-framework-dependent.zip")
 
     if (-not $SkipSelfContained) {
         $selfContainedFolder = Join-Path $artifactsRoot "mdSharp-desktop-$Version-$Runtime"
         Remove-IfExists $selfContainedFolder
-        Invoke-Checked "dotnet" @(
+        $selfContainedPublishArgs = @(
             "publish", $desktopProject,
             "-c", $Configuration,
             "-r", $Runtime,
             "--self-contained", "true",
             "-o", $selfContainedFolder,
             "--source", $nugetSource
-        )
+        ) + $versionProperties
+        Invoke-Checked "dotnet" $selfContainedPublishArgs
         Copy-ReleaseDocs $selfContainedFolder
         New-Zip $selfContainedFolder (Join-Path $packageRoot "mdSharp-desktop-$Version-$Runtime.zip")
     }
