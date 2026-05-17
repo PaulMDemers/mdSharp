@@ -46,7 +46,7 @@ The project is in active development. It can boot and play a growing set of reta
 - PSG and YM2612 audio
 - WinForms desktop UI with keyboard and XInput gamepad support
 - Four-player input configuration with named profiles
-- Preferences, default ROM folder, reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
+- Preferences, display scaling options, default ROM folder, reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
 - Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
 
@@ -144,7 +144,7 @@ Other shortcuts:
 - `F11`: fullscreen
 - `Esc`: exit fullscreen
 
-The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. The File menu includes Preferences for the default ROM folder, save RAM folder, save-state folder, audio mute, and instruction-budget defaults. Save RAM and quick states default to `%APPDATA%\mdSharp\` folders unless custom folders are configured.
+The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. The File menu includes Preferences for display aspect/scaling, default ROM folder, save RAM folder, save-state folder, audio mute, and instruction-budget defaults. Save RAM and quick states default to `%APPDATA%\mdSharp\` folders unless custom folders are configured.
 
 ## Command-Line Examples
 

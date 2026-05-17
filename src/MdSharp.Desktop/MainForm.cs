@@ -70,6 +70,7 @@ internal sealed class MainForm : Form
         KeyPreview = true;
         _muted = _settings.Muted;
         _instructionsPerFrame = _settings.InstructionBudget;
+        ApplyVideoSettings();
         if (_settings.WindowLeft.HasValue && _settings.WindowTop.HasValue)
         {
             StartPosition = FormStartPosition.Manual;
@@ -248,11 +249,15 @@ internal sealed class MainForm : Form
         _settings.SaveRamDirectory = dialog.SaveRamDirectory;
         _settings.StateDirectory = dialog.StateDirectory;
         _settings.InstructionBudget = dialog.InstructionBudget;
+        _settings.VideoAspectMode = dialog.VideoAspectMode;
+        _settings.VideoIntegerScale = dialog.VideoIntegerScale;
+        _settings.VideoSmoothing = dialog.VideoSmoothing;
         _settings.Muted = dialog.Muted;
         _settings.NormalizeSession();
 
         _instructionsPerFrame = _settings.InstructionBudget;
         _muted = _settings.Muted;
+        ApplyVideoSettings();
         if (_muted)
         {
             _audio?.Dispose();
@@ -266,6 +271,11 @@ internal sealed class MainForm : Form
         _settings.Save();
         UpdateMenus();
         SetStatus("Preferences saved.");
+    }
+
+    private void ApplyVideoSettings()
+    {
+        _video.Configure(_settings.VideoAspectMode, _settings.VideoIntegerScale, _settings.VideoSmoothing);
     }
 
     private void TickEmulation()

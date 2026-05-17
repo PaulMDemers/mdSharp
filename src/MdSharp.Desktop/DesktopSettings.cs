@@ -32,6 +32,9 @@ internal sealed class DesktopSettings
     public bool StartFullscreen { get; set; }
     public bool Muted { get; set; }
     public int InstructionBudget { get; set; } = 300_000;
+    public VideoAspectMode VideoAspectMode { get; set; } = VideoAspectMode.Native;
+    public bool VideoIntegerScale { get; set; }
+    public bool VideoSmoothing { get; set; }
     public InputSettings Input { get; set; } = InputSettings.Default();
     public List<InputProfileSettings> InputProfiles { get; set; } = [];
 
@@ -109,6 +112,10 @@ internal sealed class DesktopSettings
             200_000 or 300_000 or 500_000 => InstructionBudget,
             _ => 300_000,
         };
+        if (!Enum.IsDefined(VideoAspectMode))
+        {
+            VideoAspectMode = VideoAspectMode.Native;
+        }
 
         if (!string.IsNullOrWhiteSpace(LastRomPath))
         {
@@ -168,6 +175,13 @@ internal sealed class InputProfileSettings
             Input = Input.Clone(),
         };
     }
+}
+
+internal enum VideoAspectMode
+{
+    Native,
+    FourThree,
+    Stretch,
 }
 
 internal sealed class InputSettings

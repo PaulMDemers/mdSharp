@@ -8,6 +8,9 @@ namespace MdSharp.Desktop;
 internal sealed class VideoSurface : Control
 {
     private readonly Bitmap _bitmap = new(Vdp.ScreenWidth, Vdp.ScreenHeight, PixelFormat.Format24bppRgb);
+    private VideoAspectMode _aspectMode = VideoAspectMode.Native;
+    private bool _integerScale;
+    private bool _smoothing;
 
     public VideoSurface()
     {
@@ -15,6 +18,14 @@ internal sealed class VideoSurface : Control
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         BackColor = Color.Black;
         MinimumSize = new Size(Vdp.ScreenWidth, Vdp.ScreenHeight);
+    }
+
+    public void Configure(VideoAspectMode aspectMode, bool integerScale, bool smoothing)
+    {
+        _aspectMode = Enum.IsDefined(aspectMode) ? aspectMode : VideoAspectMode.Native;
+        _integerScale = integerScale;
+        _smoothing = smoothing;
+        Invalidate();
     }
 
     public void SetFrame(byte[] bgr)
@@ -51,7 +62,7 @@ internal sealed class VideoSurface : Control
 
     public bool TryClientToFrame(Point point, out int x, out int y)
     {
-        Rectangle target = Fit(ClientRectangle, Vdp.ScreenWidth, Vdp.ScreenHeight);
+        Rectangle target = TargetRectangle(ClientRectangle);
         if (target.Width <= 0 || target.Height <= 0 || !target.Contains(point))
         {
             x = 0;
@@ -68,10 +79,10 @@ internal sealed class VideoSurface : Control
     {
         base.OnPaint(e);
         e.Graphics.Clear(Color.Black);
-        e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
-        e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
+        e.Graphics.InterpolationMode = _smoothing ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
+        e.Graphics.PixelOffsetMode = _smoothing ? PixelOffsetMode.HighQuality : PixelOffsetMode.Half;
 
-        Rectangle target = Fit(ClientRectangle, Vdp.ScreenWidth, Vdp.ScreenHeight);
+        Rectangle target = TargetRectangle(ClientRectangle);
         e.Graphics.DrawImage(_bitmap, target);
     }
 
@@ -85,16 +96,71 @@ internal sealed class VideoSurface : Control
         base.Dispose(disposing);
     }
 
-    private static Rectangle Fit(Rectangle bounds, int sourceWidth, int sourceHeight)
+    private Rectangle TargetRectangle(Rectangle bounds)
+    {
+        return _aspectMode switch
+        {
+            VideoAspectMode.Stretch => bounds.Width <= 0 || bounds.Height <= 0 ? Rectangle.Empty : bounds,
+            VideoAspectMode.FourThree => FitAspect(bounds, 4.0 / 3.0, _integerScale),
+            _ => FitNative(bounds, _integerScale),
+        };
+    }
+
+    private static Rectangle FitNative(Rectangle bounds, bool integerScale)
+    {
+        if (integerScale)
+        {
+            return FitInteger(bounds, Vdp.ScreenWidth, Vdp.ScreenHeight);
+        }
+
+        return FitAspect(bounds, Vdp.ScreenWidth / (double)Vdp.ScreenHeight, integerScale: false);
+    }
+
+    private static Rectangle FitAspect(Rectangle bounds, double aspect, bool integerScale)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
             return Rectangle.Empty;
         }
 
-        double scale = Math.Min(bounds.Width / (double)sourceWidth, bounds.Height / (double)sourceHeight);
-        int width = Math.Max(1, (int)Math.Round(sourceWidth * scale));
-        int height = Math.Max(1, (int)Math.Round(sourceHeight * scale));
+        if (integerScale)
+        {
+            int scale = Math.Max(1, bounds.Height / Vdp.ScreenHeight);
+            int scaledWidth = (int)Math.Round(Vdp.ScreenHeight * scale * aspect);
+            while (scale > 1 && scaledWidth > bounds.Width)
+            {
+                scale--;
+                scaledWidth = (int)Math.Round(Vdp.ScreenHeight * scale * aspect);
+            }
+
+            int scaledHeight = Vdp.ScreenHeight * scale;
+            return Center(bounds, Math.Min(scaledWidth, bounds.Width), Math.Min(scaledHeight, bounds.Height));
+        }
+
+        int width = bounds.Width;
+        int height = (int)Math.Round(width / aspect);
+        if (height > bounds.Height)
+        {
+            height = bounds.Height;
+            width = (int)Math.Round(height * aspect);
+        }
+
+        return Center(bounds, Math.Max(1, width), Math.Max(1, height));
+    }
+
+    private static Rectangle FitInteger(Rectangle bounds, int sourceWidth, int sourceHeight)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        int scale = Math.Max(1, Math.Min(bounds.Width / sourceWidth, bounds.Height / sourceHeight));
+        return Center(bounds, sourceWidth * scale, sourceHeight * scale);
+    }
+
+    private static Rectangle Center(Rectangle bounds, int width, int height)
+    {
         int x = bounds.Left + ((bounds.Width - width) / 2);
         int y = bounds.Top + ((bounds.Height - height) / 2);
         return new Rectangle(x, y, width, height);
