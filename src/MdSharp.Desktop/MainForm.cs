@@ -59,6 +59,7 @@ internal sealed class MainForm : Form
     public MainForm(string? initialRom)
     {
         Text = "mdSharp";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? Icon;
         _settings.NormalizeSession();
         ClientSize = new Size(_settings.WindowWidth, _settings.WindowHeight);
         MinimumSize = new Size(640, 480);
