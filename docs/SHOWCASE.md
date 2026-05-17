@@ -1,6 +1,6 @@
 # Showcase
 
-This page documents the screenshot gallery used to sanity-check mdSharp visually. A curated set of PNGs is committed under `docs/assets/showcase/` so the README and GitHub docs render correctly. The larger regression outputs that feed these images still live under `render-output/` and remain ignored by git.
+This document describes the screenshot gallery used to sanity-check mdSharp visually. A curated set of PNGs is committed under `docs/assets/showcase/` so the README and GitHub docs render correctly. The larger regression outputs that feed these images still live under `render-output/` and remain ignored by git.
 
 To refresh the committed gallery after running the release gate or visual checkpoints:
 

@@ -1,10 +1,10 @@
 # Compatibility
 
-mdSharp is compatibility-driven. The goal is to turn every visible issue into a repeatable test, movie, trace, or dashboard entry.
+mdSharp is compatibility-driven. Each visible issue should become a repeatable test, movie, trace, or dashboard entry.
 
 ## Current High-Value Targets
 
-These games and scenarios have been used heavily during development:
+These games and scenarios have been used frequently during development:
 
 - Sonic the Hedgehog
 - Sonic the Hedgehog 2, including split-screen idle/demo behavior
@@ -62,7 +62,7 @@ Inspect:
 
 Prioritize issues that appear across many games or point to shared hardware behavior.
 
-Near-blank final frames need a second pass before treating them as failures. Some games are simply in a blank transition at the sampled frame. Use:
+Near-blank final frames require a second pass before being treated as failures. Some games are simply in a blank transition at the sampled frame. Use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\classify-near-blank.ps1 -CompatibilityCsv render-output\compat\compatibility.csv -RomFolder roms -OutputFolder render-output\near-blank -Frames "3000,6001,9000"

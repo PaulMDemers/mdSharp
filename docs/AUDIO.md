@@ -7,7 +7,7 @@ mdSharp emulates Genesis audio through:
 - Z80-driven sound programs
 - final mixer, filtering, bass shelf, and soft limiting
 
-Audio is currently good enough for many games, but it is still an active development area. The YM2612 implementation is practical and improving; it is not yet a bit-perfect chip model.
+Audio is functional across many games, but it remains an active development area. The YM2612 implementation is practical and improving; it is not yet a bit-perfect chip model.
 
 ## Current Audio Regression Set
 
@@ -60,7 +60,7 @@ Any root audio file with `streets` in the filename can also be detected.
 
 ## Generic Compare
 
-Use this for any game:
+Use the generic comparison path for any game:
 
 ```powershell
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --audio-compare "roms\Streets of Rage (USA) (Rev-A).md" streets-title.flac render-output\streets-audio streets-title 900 300000 0
@@ -86,7 +86,7 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --audio-fi
 
 ## Reference Suites
 
-Use a manifest when iterating toward final audio quality so the same reference segments run every time:
+Use a manifest when iterating on audio quality so the same reference segments run every time:
 
 ```powershell
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --audio-reference-suite docs\audio-reference-manifest.sample.json roms render-output\audio-reference-suite 300000
@@ -118,7 +118,7 @@ By default the Nuked side renders YM2612 pin output. To compare against Nuked's 
 powershell -ExecutionPolicy Bypass -File tools\ymref\run-ymref.ps1 -OutputRoot render-output\ymref-suite-internal -ReferenceOutput internal
 ```
 
-Current probe intent:
+Probe coverage:
 
 - `single-operator-carrier`: isolates base operator phase, level, and envelope behavior
 - `single-carrier`: stresses algorithm 7 parallel carrier summing
@@ -126,7 +126,7 @@ Current probe intent:
 - `attack-decay`: checks envelope attack/decay behavior
 - `dac-step`: checks YM DAC shape and filtering
 
-Treat the raw chip probe metrics as diagnostics, not as the final audible score. Nuked pin output includes the YM2612's external ladder/pin behavior, while internal output is better for isolating oscillator, envelope, algorithm, and feedback differences. Normal mdSharp game audio also goes through the emulator mixer and output filtering. Use these probes to locate chip-core mistakes, then validate audible changes with the Sonic/Streets reference suites.
+Treat the raw chip probe metrics as diagnostics rather than final audible scores. Nuked pin output includes the YM2612's external ladder/pin behavior, while internal output is better for isolating oscillator, envelope, algorithm, and feedback differences. Normal mdSharp game audio also goes through the emulator mixer and output filtering. These probes help locate chip-core mistakes; audible changes should still be validated with the Sonic and Streets reference suites.
 
 ## Metrics
 

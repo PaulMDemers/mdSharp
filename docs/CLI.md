@@ -29,12 +29,12 @@ Arguments:
 - frame count
 - instructions per frame
 
-Useful flags:
+Common flags:
 
 - `--trace-cpu`
 - `--trace-vdp`
 
-SVP-focused scripted renders also accept compatibility probes:
+SVP-focused scripted renders also accept compatibility probe flags:
 
 - `--svp-mld-z`: use the older MAME-style `mld` zero-flag behavior.
 - `--svp-al-broad`: clear pending PMAC state on any `AL` read instead of dummy `AL` reads only.
@@ -63,7 +63,7 @@ Outputs:
 - `index.html`
 - optional screenshots in `screenshots/`
 
-Useful options:
+Common options:
 
 - `--screenshots`: write final-frame screenshots
 - `--resume`: skip already completed cases
@@ -85,7 +85,7 @@ Scan a full folder without running emulation:
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --cart-scan roms render-output\cartridges.csv
 ```
 
-The CSV is useful before a broad compatibility run because it highlights save hardware, bank-switched games, known unsupported hardware, SVP cartridges, and cartridge input devices such as J-Cart extra controller ports.
+The CSV is helpful before a broad compatibility run because it highlights save hardware, bank-switched games, known unsupported hardware, SVP cartridges, and cartridge input devices such as J-Cart extra controller ports.
 
 ## Compatibility Summary
 
@@ -198,7 +198,7 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --vgm-stem
 
 ## Traces
 
-Useful focused traces:
+Focused trace examples:
 
 ```powershell
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --z80-trace "roms\Sonic the Hedgehog (USA).md" render-output\z80.csv 120
@@ -215,7 +215,7 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --svp-vdp-
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --virtua-racing-layout-check "roms\Virtua Racing (USA).md" render-output\virtua-layout virtua-racing-drive 7200 300000 render-output\svp-research\svp_bsd\svp\imageformat.txt
 ```
 
-`--svp-trace` captures selected SVP instruction PCs with before/after register snapshots. `--svp-pm-trace` captures PMAC/PM I/O reads and writes, including DRAM cell writes, modes, addresses, values, and pointer movement. `--svp-pointer-trace` captures SSP1601 internal RAM pointer operands, including pointer index, modifier, RAM address/value, post-operation pointer value, and indirect IRAM targets for `((r))` reads. `--svp-write-history` watches specific SVP DRAM word addresses and dumps the recent instruction window before each matching write. `--svp-bus-trace` captures 68k and DMA reads/writes against SVP-mapped external addresses, which is useful for correlating `$30FE02/$30FE04` handshakes with tile-buffer DMA. `--dma-word-trace` captures the words copied by 68k-to-VDP DMA with requested/effective source and destination addresses; pass a source prefix such as `$300000` to focus on SVP DRAM transfers. SVP-sourced VDP DMA reports both addresses because Virtua Racing's SVP buffers are observed one word behind the 68k command source on the DMA path. `--vdp-plane-trace` maps screen pixels to plane/window source coordinates, name-table entries, tile data addresses, and color nibbles. `--svp-vdp-correlate` combines the VDP pixel source, latest SVP-sourced DMA word, and latest SVP DRAM writer in one CSV. `--virtua-racing-layout-check` encodes notaz's documented Virtua Racing SVP DMA chunks and optionally compares the `$C000` name table against `imageformat.txt`; add `--fail-on-mismatch` to make the command exit nonzero when the DMA, VRAM, MAME transfer, or name-table invariants fail. In PowerShell, wrap arguments containing `$` in single quotes.
+`--svp-trace` captures selected SVP instruction PCs with before/after register snapshots. `--svp-pm-trace` captures PMAC/PM I/O reads and writes, including DRAM cell writes, modes, addresses, values, and pointer movement. `--svp-pointer-trace` captures SSP1601 internal RAM pointer operands, including pointer index, modifier, RAM address/value, post-operation pointer value, and indirect IRAM targets for `((r))` reads. `--svp-write-history` watches specific SVP DRAM word addresses and dumps the recent instruction window before each matching write. `--svp-bus-trace` captures 68k and DMA reads/writes against SVP-mapped external addresses, which helps correlate `$30FE02/$30FE04` handshakes with tile-buffer DMA. `--dma-word-trace` captures the words copied by 68k-to-VDP DMA with requested/effective source and destination addresses; pass a source prefix such as `$300000` to focus on SVP DRAM transfers. SVP-sourced VDP DMA reports both addresses because Virtua Racing's SVP buffers are observed one word behind the 68k command source on the DMA path. `--vdp-plane-trace` maps screen pixels to plane/window source coordinates, name-table entries, tile data addresses, and color nibbles. `--svp-vdp-correlate` combines the VDP pixel source, latest SVP-sourced DMA word, and latest SVP DRAM writer in one CSV. `--virtua-racing-layout-check` encodes notaz's documented Virtua Racing SVP DMA chunks and optionally compares the `$C000` name table against `imageformat.txt`; add `--fail-on-mismatch` to make the command exit nonzero when the DMA, VRAM, MAME transfer, or name-table invariants fail. In PowerShell, wrap arguments containing `$` in single quotes.
 
 For a known-good Virtua Racing video reference, use MAME after placing the SVP internal ROM where MAME expects it:
 
@@ -223,7 +223,7 @@ For a known-good Virtua Racing video reference, use MAME after placing the SVP i
 powershell -ExecutionPolicy Bypass -File tools\capture-mame-reference.ps1 -RomPath "roms\Virtua Racing (USA).md" -SnapshotFrame 7200
 ```
 
-The helper checks for `svp.bin` and reports the required CRC/SHA1 plus the exact destination path when it is missing. If the file is elsewhere, pass `-SvpBinPath C:\path\to\svp.bin` and the helper will verify the SHA1 before staging it for MAME. It drives MAME with Lua using the same `virtua-racing-drive` timing and saves a PNG at `-SnapshotFrame`; pass `-RecordAvi` if you also want a video. Pass `-DumpMemory` to also write `virtua-racing-mame-svp-dram.bin`, `virtua-racing-mame-vdp-vram.bin`, `virtua-racing-mame-vdp-vsram.bin`, `virtua-racing-mame-vdp-regs.bin`, and a MAME device/memory inventory for reference comparisons. BlastEm is useful for many Genesis references, but the current Windows nightly does not enable SVP for this loose Virtua Racing ROM without additional mapper support.
+The helper checks for `svp.bin` and reports the required CRC/SHA1 plus the exact destination path when it is missing. If the file is elsewhere, pass `-SvpBinPath C:\path\to\svp.bin` and the helper will verify the SHA1 before staging it for MAME. It drives MAME with Lua using the same `virtua-racing-drive` timing and saves a PNG at `-SnapshotFrame`; pass `-RecordAvi` to record a video as well. Pass `-DumpMemory` to also write `virtua-racing-mame-svp-dram.bin`, `virtua-racing-mame-vdp-vram.bin`, `virtua-racing-mame-vdp-vsram.bin`, `virtua-racing-mame-vdp-regs.bin`, and a MAME device/memory inventory for reference comparisons. BlastEm is useful for many Genesis references, but the current Windows nightly does not enable SVP for this loose Virtua Racing ROM without additional mapper support.
 
 Compare a reference PNG/BMP against mdSharp output:
 
@@ -233,7 +233,7 @@ powershell -ExecutionPolicy Bypass -File tools\compare-reference-images.ps1 -Ref
 
 The comparison helper uses Windows image codecs, so it can read MAME PNG snapshots and mdSharp BMP frames without extra tools. It writes a diff image, side-by-side image, and markdown report with pixel-difference metrics.
 
-There are also game-specific trace and bench commands used while developing known-sensitive cases. They are useful but less stable than the general commands above.
+Game-specific trace and bench commands also exist for known-sensitive cases. They are less stable than the general commands above.
 
 ## Performance
 

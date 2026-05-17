@@ -56,7 +56,7 @@ The runtime also models a few shared bus timing costs. 68000 accesses to periphe
 
 VDP interrupt delivery is split by interrupt type. VBlank requests are queued so a masked level 6 interrupt can still be delivered if the CPU unmasks it while the VDP pending flag is still active. HBlank requests are delivered at the scanline event without creating stale masked requests. When the 68000 accepts a level 4 or level 6 interrupt, the VDP pending flag is acknowledged so the same request is not repeatedly serviced.
 
-Typical frontend flow:
+A typical frontend integration flow is:
 
 1. Load a `CartridgeImage`.
 2. Create a `MegaDrive`.
@@ -71,7 +71,7 @@ Typical frontend flow:
 - Keep the core deterministic. Given the same ROM, save data, settings, and input movie, the same frame should produce the same video, audio, and machine state.
 - Keep frontend responsibilities at the edge. Desktop code handles menus, input devices, audio playback, files, and presentation; the core handles hardware behavior.
 - Prefer hardware-shaped fixes. Game-specific diagnostics are useful, but compatibility fixes should normally explain a VDP, CPU, bus, cartridge, or audio behavior.
-- Make bugs replayable. A frame number, screenshot, trace, or input movie is much more valuable than a one-off visual report.
+- Make defects replayable. A frame number, screenshot, trace, or input movie is much more valuable than a one-off visual report.
 - Use generated output as evidence, not source. Screenshots, WAVs, traces, ROMs, saves, and dashboards stay local unless there is a deliberate reason to publish a sanitized artifact.
 
 ## CPU And Bus
@@ -134,7 +134,7 @@ Input movies store:
 - optional initial SRAM snapshot
 - per-frame player 1 and player 2 inputs
 
-This allows a user-observed issue at a specific frame to become a repeatable regression case.
+This allows an observed issue at a specific frame to become a repeatable regression case.
 
 ## Save Data
 
@@ -156,7 +156,7 @@ Save states use `SaveStateSerializer` and capture CPU, bus, cartridge, VDP, audi
 - CPU, Z80, VDP, IO, and audio traces
 - targeted game diagnostics used during development
 
-The CLI is not a stable public API yet. Prefer documenting important workflows in `docs/CLI.md` when commands become part of normal development.
+The CLI is not a stable public API yet. Important workflows should be documented in `docs/CLI.md` when commands become part of normal development.
 
 ## Documentation Map
 

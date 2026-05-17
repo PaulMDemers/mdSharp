@@ -69,7 +69,7 @@ docs/
 
 - .NET 10 SDK
 - Windows for `MdSharp.Desktop`
-- ROM images you are legally permitted to use
+- Legally usable ROM images
 
 `MdSharp.Core`, `MdSharp.App`, and `MdSharp.Tests` target `net10.0`. The desktop frontend targets `net10.0-windows` and uses Windows Forms plus XInput for gamepads.
 
@@ -88,7 +88,7 @@ The test project is a console-based verification harness. Running it through `do
 dotnet run --project src\MdSharp.Desktop\MdSharp.Desktop.csproj -c Release -- "path\to\game.md"
 ```
 
-You can also launch the desktop app without an argument and open a ROM from the File menu.
+The desktop app can also be launched without an argument; ROMs can then be opened from the File menu.
 
 Default player 1 keyboard controls:
 
@@ -193,7 +193,7 @@ Recommended local-only folders/files:
 - `TestRoms/` for public or homebrew test ROMs
 - `movies/` for local input movie captures
 - `render-output/` for generated screenshots, audio, traces, dashboards, and regression reports
-- `svp.bin` for a local Virtua Racing SVP coprocessor blob, if you have one
+- `svp.bin` for a local Virtua Racing SVP coprocessor blob, when available
 - local `.wav`, `.flac`, `.mp3`, or `.ogg` reference audio used for diagnostics
 
 These paths are ignored by the release-oriented `.gitignore`, with only `.gitkeep` placeholders tracked for empty local folders.
@@ -215,6 +215,6 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 
 ## Legal
 
-mdSharp does not include Sega code, game ROMs, or copyrighted game assets. Use only ROM images and reference material that you have the right to use.
+mdSharp does not include Sega code, game ROMs, or copyrighted game assets. Use only legally obtained ROM images and reference material.
 
-No license has been selected in this working tree yet. Choose and add a `LICENSE` file before publishing the repository publicly.
+No license has been selected in this working tree yet. Add a `LICENSE` file before publishing the repository publicly.

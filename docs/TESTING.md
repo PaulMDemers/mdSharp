@@ -10,7 +10,7 @@ mdSharp uses a layered testing strategy:
 - visual checkpoints
 - audio regression against reference recordings
 
-Public diagnostic ROMs are not committed. See [TEST_ROMS.md](TEST_ROMS.md) for source links used to recreate the local `TestRoms/` folder.
+Public diagnostic ROMs are not committed. See [TEST_ROMS.md](TEST_ROMS.md) for source links that can be used to recreate the local `TestRoms/` folder.
 
 ## Fast Verification
 
@@ -19,7 +19,7 @@ dotnet build mdSharp.sln -c Release
 dotnet test mdSharp.sln -c Release --no-build
 ```
 
-Run this before and after focused emulator changes.
+Run these commands before and after focused emulator changes.
 
 ## Core Test Harness
 
@@ -27,7 +27,7 @@ Run this before and after focused emulator changes.
 
 When fixing a bug, add a test when the behavior can be isolated without a full retail ROM.
 
-Good test candidates:
+Suitable test candidates:
 
 - opcode semantics
 - flags

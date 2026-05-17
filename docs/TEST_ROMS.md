@@ -2,7 +2,7 @@
 
 mdSharp does not commit ROM images. Keep local ROM copies under `TestRoms/` or `roms/`; both folders are ignored except for their `.gitkeep` placeholders.
 
-Use this page to recreate the public diagnostic ROM set used during development. Only download and use ROMs you are legally permitted to use. Retail games used for compatibility checks must come from your own cartridges, discs, or other lawful sources and must stay local.
+This document lists sources for recreating the public diagnostic ROM set used during development. Only download and use legally permitted ROMs. Retail games used for compatibility checks must come from lawful local sources and must stay local.
 
 ## Public Diagnostic ROMs
 
@@ -28,7 +28,7 @@ That page links to many of the public/homebrew diagnostics used while building m
 | `TEST1536.zip` | 1536-color shadow/highlight palette demo | [Exodus list](https://techdocs.exodusemulator.com/Console/SegaMegaDrive/Software.html) |
 | `Window Test by Fonzie (PD).zip` | Window plane and hscroll edge cases | [Exodus list](https://techdocs.exodusemulator.com/Console/SegaMegaDrive/Software.html) |
 | `Window distortion bug.zip` | Window/hscroll distortion behavior | [Exodus list](https://techdocs.exodusemulator.com/Console/SegaMegaDrive/Software.html) |
-| `titan-overdrive2.zip` / `titan-overdrivemegademo-v1.1-final.zip` | Hardware-stress demo content used as brutal compatibility targets | [Exodus list](https://techdocs.exodusemulator.com/Console/SegaMegaDrive/Software.html) |
+| `titan-overdrive2.zip` / `titan-overdrivemegademo-v1.1-final.zip` | Hardware-stress demo content used as demanding compatibility targets | [Exodus list](https://techdocs.exodusemulator.com/Console/SegaMegaDrive/Software.html) |
 
 ## Retail Compatibility ROMs
 
@@ -44,4 +44,3 @@ Common local compatibility targets have included:
 - Virtua Racing, with a local `svp.bin` coprocessor blob when needed
 
 The repo intentionally tracks only source code, docs, placeholders, scripts, and test harness code. It does not track commercial ROMs, BIOS/coproc blobs, save RAM, save states, generated audio, screenshots, or reference emulator captures.
-

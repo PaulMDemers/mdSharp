@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this before loading the repository publicly or cutting a binary release.
+Run this checklist before publishing the repository or cutting a binary release.
 
 ## Repository Hygiene
 
@@ -40,7 +40,7 @@ The gate runs:
 - movie regression when a local `movies/` folder exists
 - `release-gate-summary.md` with links to generated reports
 
-Useful variants:
+Common variants:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\run-release-gate.ps1 -SkipAudio
@@ -93,7 +93,7 @@ After the visual checkpoints have run, refresh the committed screenshot gallery:
 powershell -ExecutionPolicy Bypass -File tools\build-showcase-gallery.ps1
 ```
 
-Review [SHOWCASE.md](SHOWCASE.md), the generated images under `docs\assets\showcase\`, and the README screenshot grid. Keep arbitrary regression output under `render-output\` out of git.
+Review [SHOWCASE.md](SHOWCASE.md), the generated images under `docs\assets\showcase\`, and the README screenshot grid. Keep ad hoc regression output under `render-output\` out of git.
 
 ## Publish Desktop Build
 

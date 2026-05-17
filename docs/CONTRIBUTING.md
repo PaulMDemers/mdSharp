@@ -1,6 +1,6 @@
 # Contributing
 
-mdSharp is early-stage emulator work. The best contributions are small, testable, and tied to a specific hardware behavior or repeatable game issue.
+mdSharp is early-stage emulator work. Strong contributions are small, testable, and tied to a specific hardware behavior or repeatable game issue.
 
 ## Development Loop
 
@@ -34,7 +34,7 @@ For audio changes, run `--audio-regression`.
 
 ## Reporting Issues
 
-Good issue reports include:
+Effective issue reports include:
 
 - game title and region/revision
 - ROM hash if possible

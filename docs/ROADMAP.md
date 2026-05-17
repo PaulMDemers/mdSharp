@@ -1,6 +1,6 @@
 # Roadmap
 
-This is a working roadmap, not a promise of exact release order.
+This roadmap is a planning document, not a promise of exact release order.
 
 ## Current Status
 
