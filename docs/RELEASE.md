@@ -8,7 +8,7 @@ Run this checklist before publishing the repository or cutting a binary release.
 - Ensure no copyrighted reference music is tracked.
 - Ensure `render-output/`, `roms/`, `TestRoms/`, `movies/`, local audio references, `svp.bin`, `cfg/`, `nvram/`, `snap/`, `bin/`, and `obj/` are ignored.
 - Remove temporary screenshots, traces, WAVs, and generated compatibility dashboards from the working tree.
-- Add a `LICENSE` file before publishing.
+- Confirm the MIT `LICENSE` file is present.
 - Keep public test ROM binaries out of the public repo by default and link to their sources from [TEST_ROMS.md](TEST_ROMS.md).
 
 ## Build

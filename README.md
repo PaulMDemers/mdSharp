@@ -234,4 +234,4 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 
 mdSharp does not include Sega code, game ROMs, or copyrighted game assets. Use only legally obtained ROM images and reference material.
 
-No license has been selected in this working tree yet. Add a `LICENSE` file before publishing the repository publicly.
+mdSharp is licensed under the MIT License. See [LICENSE](LICENSE).
