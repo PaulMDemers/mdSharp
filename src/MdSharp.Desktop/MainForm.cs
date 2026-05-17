@@ -4,6 +4,7 @@ using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Input;
 using MdSharp.Core.State;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace MdSharp.Desktop;
@@ -24,6 +25,7 @@ internal sealed class MainForm : Form
 
     private ToolStripMenuItem _pauseMenu = null!;
     private ToolStripMenuItem _muteMenu = null!;
+    private ToolStripMenuItem _openLastMenu = null!;
     private ToolStripMenuItem _recentMenu = null!;
     private ToolStripMenuItem _quickSaveMenu = null!;
     private ToolStripMenuItem _quickLoadMenu = null!;
@@ -115,7 +117,16 @@ internal sealed class MainForm : Form
     {
         MenuStrip menu = new();
         ToolStripMenuItem file = new("&File");
-        file.DropDownItems.Add("&Open ROM...", null, (_, _) => OpenRomDialog());
+        ToolStripMenuItem openRomMenu = new("&Open ROM...", null, (_, _) => OpenRomDialog())
+        {
+            ShortcutKeys = Keys.Control | Keys.O,
+        };
+        file.DropDownItems.Add(openRomMenu);
+        _openLastMenu = new ToolStripMenuItem("Reopen &Last ROM", null, (_, _) => ReopenLastRom())
+        {
+            ShortcutKeys = Keys.Control | Keys.R,
+        };
+        file.DropDownItems.Add(_openLastMenu);
         _recentMenu = new ToolStripMenuItem("Open &Recent");
         _recentMenu.DropDownOpening += (_, _) => PopulateRecentMenu();
         file.DropDownItems.Add(_recentMenu);
@@ -209,6 +220,18 @@ internal sealed class MainForm : Form
             SetStatus("ROM load failed.");
             UpdateMenus();
         }
+    }
+
+    private void ReopenLastRom()
+    {
+        if (TryGetLastRomPath(out string? path))
+        {
+            LoadRom(path);
+            return;
+        }
+
+        SetStatus("No last ROM is available.");
+        UpdateMenus();
     }
 
     private void TickEmulation()
@@ -993,6 +1016,7 @@ internal sealed class MainForm : Form
         _stopRecordingMenu.Enabled = _recordingMovie is not null;
         _playMovieMenu.Enabled = _recordingMovie is null && _playbackMovie is null;
         _stopMovieMenu.Enabled = _playbackMovie is not null;
+        _openLastMenu.Enabled = TryGetLastRomPath(out _);
         _recentMenu.Enabled = _settings.RecentRoms.Count > 0;
         _quickSaveMenu.Enabled = _machine is not null;
         _quickLoadMenu.Enabled = _machine is not null && File.Exists(QuickStatePathOrEmpty(_settings.CurrentStateSlot));
@@ -1030,9 +1054,19 @@ internal sealed class MainForm : Form
         _recentMenu.DropDownItems.Add("&Clear Recent Files", null, (_, _) =>
         {
             _settings.RecentRoms.Clear();
+            _settings.LastRomPath = null;
             _settings.Save();
             PopulateRecentMenu();
+            UpdateMenus();
         });
+    }
+
+    private bool TryGetLastRomPath([NotNullWhen(true)] out string? path)
+    {
+        path = !string.IsNullOrWhiteSpace(_settings.LastRomPath) && File.Exists(_settings.LastRomPath)
+            ? _settings.LastRomPath
+            : _settings.RecentRoms.FirstOrDefault(File.Exists);
+        return path is not null;
     }
 
     private void PopulateStateSlotMenu()

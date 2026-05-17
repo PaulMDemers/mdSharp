@@ -46,7 +46,7 @@ The project is in active development. It can boot and play a growing set of reta
 - PSG and YM2612 audio
 - WinForms desktop UI with keyboard and XInput gamepad support
 - Two-player input configuration
-- Recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
+- Reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
 - Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
 
@@ -134,6 +134,8 @@ The same dialog can switch port 1 to Sega Team Player or EA 4-Way Play multitap 
 
 Other shortcuts:
 
+- `Ctrl+O`: open ROM
+- `Ctrl+R`: reopen last ROM
 - `P`: pause
 - `M`: mute
 - `F5`: quick save current state slot
