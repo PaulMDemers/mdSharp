@@ -26,14 +26,17 @@ internal sealed class InputConfigForm : Form
     private readonly CheckBox[] _keyboardEnabledBoxes = new CheckBox[InputSettings.ControllerCount];
     private readonly CheckBox[] _sixButtonEnabledBoxes = new CheckBox[InputSettings.ControllerCount];
     private readonly Label[] _gamepadStatusLabels = new Label[InputSettings.ControllerCount];
+    private readonly List<InputProfileSettings> _profiles;
+    private ComboBox _profileBox = null!;
     private ComboBox _port1DeviceBox = null!;
     private ComboBox _port2DeviceBox = null!;
-    private readonly InputSettings _settings;
+    private InputSettings _settings;
 
-    public InputConfigForm(InputSettings settings)
+    public InputConfigForm(InputSettings settings, IEnumerable<InputProfileSettings>? profiles = null)
     {
-        _settings = Clone(settings);
+        _settings = settings.Clone();
         _settings.EnsureDefaults();
+        _profiles = profiles?.Select(profile => profile.Clone()).ToList() ?? [];
 
         Text = "Input Configuration";
         StartPosition = FormStartPosition.CenterParent;
@@ -47,7 +50,9 @@ internal sealed class InputConfigForm : Form
         CancelButton = Controls.Find("cancelButton", searchAllChildren: true).OfType<Button>().FirstOrDefault();
     }
 
-    public InputSettings Settings => Clone(_settings);
+    public InputSettings Settings => _settings.Clone();
+
+    public List<InputProfileSettings> Profiles => _profiles.Select(profile => profile.Clone()).ToList();
 
     private Control BuildLayout()
     {
@@ -55,13 +60,16 @@ internal sealed class InputConfigForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Padding = new Padding(12),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        root.Controls.Add(BuildProfileRow(), 0, 0);
 
         Label hint = new()
         {
@@ -69,7 +77,7 @@ internal sealed class InputConfigForm : Form
             Text = "Click a keyboard cell and press a key. Backspace clears a key. Each player can use a keyboard profile and a specific XInput controller.",
             Margin = new Padding(0, 0, 0, 10),
         };
-        root.Controls.Add(hint, 0, 0);
+        root.Controls.Add(hint, 0, 1);
 
         FlowLayoutPanel hardware = new()
         {
@@ -112,7 +120,7 @@ internal sealed class InputConfigForm : Form
             }
         };
         hardware.Controls.Add(_port2DeviceBox);
-        root.Controls.Add(hardware, 0, 1);
+        root.Controls.Add(hardware, 0, 2);
 
         TabControl tabs = new()
         {
@@ -129,7 +137,7 @@ internal sealed class InputConfigForm : Form
             tabs.TabPages.Add(page);
         }
 
-        root.Controls.Add(tabs, 0, 2);
+        root.Controls.Add(tabs, 0, 3);
 
         FlowLayoutPanel buttons = new()
         {
@@ -149,9 +157,48 @@ internal sealed class InputConfigForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(refresh);
         buttons.Controls.Add(defaults);
-        root.Controls.Add(buttons, 0, 3);
+        root.Controls.Add(buttons, 0, 4);
 
         return root;
+    }
+
+    private Control BuildProfileRow()
+    {
+        FlowLayoutPanel profiles = new()
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 10),
+        };
+
+        profiles.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "Profile:",
+            Margin = new Padding(0, 8, 6, 0),
+        });
+
+        _profileBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDown,
+            Width = 190,
+            Margin = new Padding(0, 4, 6, 4),
+        };
+        RefreshProfileBox();
+        profiles.Controls.Add(_profileBox);
+
+        Button load = new() { Text = "Load", Width = 72, Margin = new Padding(0, 3, 6, 3) };
+        Button save = new() { Text = "Save", Width = 72, Margin = new Padding(0, 3, 6, 3) };
+        Button delete = new() { Text = "Delete", Width = 72, Margin = new Padding(0, 3, 6, 3) };
+        load.Click += (_, _) => LoadProfile();
+        save.Click += (_, _) => SaveProfile();
+        delete.Click += (_, _) => DeleteProfile();
+        profiles.Controls.Add(load);
+        profiles.Controls.Add(save);
+        profiles.Controls.Add(delete);
+
+        return profiles;
     }
 
     private Control BuildPlayerPage(int playerIndex)
@@ -316,8 +363,6 @@ internal sealed class InputConfigForm : Form
         InputSettings defaults = InputSettings.Default();
         _settings.Port1Device = defaults.Port1Device;
         _settings.Port2Device = defaults.Port2Device;
-        _port1DeviceBox.SelectedItem = _settings.Port1Device;
-        _port2DeviceBox.SelectedItem = _settings.Port2Device;
 
         for (int playerIndex = 0; playerIndex < InputSettings.ControllerCount; playerIndex++)
         {
@@ -328,20 +373,9 @@ internal sealed class InputConfigForm : Form
             player.GamepadIndex = defaultPlayer.GamepadIndex;
             player.Keyboard = new Dictionary<GenesisButton, Keys>(defaultPlayer.Keyboard);
             player.Gamepad = new Dictionary<GenesisButton, GamepadControl>(defaultPlayer.Gamepad);
-
-            _keyboardEnabledBoxes[playerIndex].Checked = player.KeyboardEnabled;
-            _sixButtonEnabledBoxes[playerIndex].Checked = player.SixButtonEnabled;
-            _gamepadIndexBoxes[playerIndex].SelectedItem = _gamepadIndexBoxes[playerIndex].Items
-                .OfType<GamepadDeviceItem>()
-                .First(item => item.Index == player.GamepadIndex);
-            RefreshGamepadStatus(playerIndex);
-
-            foreach (GenesisButton button in ConfigurableButtons)
-            {
-                _keyBoxes[playerIndex][button].Text = KeyName(player.Keyboard[button]);
-                _gamepadBoxes[playerIndex][button].SelectedItem = player.Gamepad[button];
-            }
         }
+
+        ApplySettingsToControls();
     }
 
     private static void AddHeader(TableLayoutPanel grid, string text, int column)
@@ -382,17 +416,110 @@ internal sealed class InputConfigForm : Form
         return key == Keys.None ? "None" : key.ToString();
     }
 
-    private static InputSettings Clone(InputSettings source)
+    private void LoadProfile()
     {
-        source.EnsureDefaults();
-        InputSettings clone = new()
+        string? name = SelectedProfileName();
+        if (name is null)
         {
-            Port1Device = source.Port1Device,
-            Port2Device = source.Port2Device,
-            Controllers = source.Controllers.Select(controller => controller.Clone()).ToList(),
-        };
-        clone.EnsureDefaults();
-        return clone;
+            return;
+        }
+
+        InputProfileSettings? profile = _profiles.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            return;
+        }
+
+        _settings = profile.Input.Clone();
+        ApplySettingsToControls();
+    }
+
+    private void SaveProfile()
+    {
+        string? name = SelectedProfileName();
+        if (name is null)
+        {
+            MessageBox.Show(this, "Enter a profile name before saving.", "Input Profile", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        InputProfileSettings? existing = _profiles.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            _profiles.Add(new InputProfileSettings { Name = name, Input = _settings.Clone() });
+        }
+        else
+        {
+            existing.Name = name;
+            existing.Input = _settings.Clone();
+        }
+
+        RefreshProfileBox(name);
+    }
+
+    private void DeleteProfile()
+    {
+        string? name = SelectedProfileName();
+        if (name is null)
+        {
+            return;
+        }
+
+        _profiles.RemoveAll(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        RefreshProfileBox();
+    }
+
+    private string? SelectedProfileName()
+    {
+        string name = _profileBox.Text.Trim();
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    private void RefreshProfileBox(string? selectedName = null)
+    {
+        if (_profileBox is null)
+        {
+            return;
+        }
+
+        _profileBox.Items.Clear();
+        foreach (InputProfileSettings profile in _profiles.OrderBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _profileBox.Items.Add(profile.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedName))
+        {
+            _profileBox.Text = selectedName;
+        }
+        else
+        {
+            _profileBox.Text = string.Empty;
+        }
+    }
+
+    private void ApplySettingsToControls()
+    {
+        _settings.EnsureDefaults();
+        _port1DeviceBox.SelectedItem = _settings.Port1Device;
+        _port2DeviceBox.SelectedItem = _settings.Port2Device;
+
+        for (int playerIndex = 0; playerIndex < InputSettings.ControllerCount; playerIndex++)
+        {
+            ControllerInputSettings player = _settings.Controller(playerIndex);
+            _keyboardEnabledBoxes[playerIndex].Checked = player.KeyboardEnabled;
+            _sixButtonEnabledBoxes[playerIndex].Checked = player.SixButtonEnabled;
+            _gamepadIndexBoxes[playerIndex].SelectedItem = _gamepadIndexBoxes[playerIndex].Items
+                .OfType<GamepadDeviceItem>()
+                .First(item => item.Index == player.GamepadIndex);
+            RefreshGamepadStatus(playerIndex);
+
+            foreach (GenesisButton button in ConfigurableButtons)
+            {
+                _keyBoxes[playerIndex][button].Text = KeyName(player.Keyboard[button]);
+                _gamepadBoxes[playerIndex][button].SelectedItem = player.Gamepad[button];
+            }
+        }
     }
 
     private sealed record GamepadDeviceItem(int Index, string Label)

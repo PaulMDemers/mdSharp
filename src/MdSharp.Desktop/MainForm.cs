@@ -773,11 +773,13 @@ internal sealed class MainForm : Form
             UpdateMenus();
         }
 
-        using InputConfigForm dialog = new(_settings.Input);
+        using InputConfigForm dialog = new(_settings.Input, _settings.InputProfiles);
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             _settings.Input = dialog.Settings;
+            _settings.InputProfiles = dialog.Profiles;
             _settings.Input.EnsureDefaults();
+            _settings.NormalizeSession();
             ApplyControllerSettings();
             _settings.Save();
             SetStatus("Input configuration saved.");

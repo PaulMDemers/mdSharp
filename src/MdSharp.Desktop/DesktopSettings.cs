@@ -7,6 +7,7 @@ namespace MdSharp.Desktop;
 internal sealed class DesktopSettings
 {
     private const int MaxRecentRoms = 10;
+    private const int MaxInputProfiles = 25;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -30,6 +31,7 @@ internal sealed class DesktopSettings
     public bool Muted { get; set; }
     public int InstructionBudget { get; set; } = 300_000;
     public InputSettings Input { get; set; } = InputSettings.Default();
+    public List<InputProfileSettings> InputProfiles { get; set; } = [];
 
     public static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -46,6 +48,7 @@ internal sealed class DesktopSettings
                 if (settings is not null)
                 {
                     settings.Input.EnsureDefaults();
+                    settings.NormalizeInputProfiles();
                     settings.NormalizeRecentRoms();
                     settings.NormalizeSession();
                     return settings;
@@ -119,6 +122,39 @@ internal sealed class DesktopSettings
         {
             LastRomDirectory = Path.GetFullPath(LastRomDirectory);
         }
+
+        NormalizeInputProfiles();
+    }
+
+    private void NormalizeInputProfiles()
+    {
+        InputProfiles = InputProfiles
+            .Where(profile => profile is not null && !string.IsNullOrWhiteSpace(profile.Name) && profile.Input is not null)
+            .Select(profile =>
+            {
+                profile.Name = profile.Name.Trim();
+                profile.Input.EnsureDefaults();
+                return profile;
+            })
+            .GroupBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(MaxInputProfiles)
+            .ToList();
+    }
+}
+
+internal sealed class InputProfileSettings
+{
+    public string Name { get; set; } = string.Empty;
+    public InputSettings Input { get; set; } = InputSettings.Default();
+
+    public InputProfileSettings Clone()
+    {
+        return new InputProfileSettings
+        {
+            Name = Name,
+            Input = Input.Clone(),
+        };
     }
 }
 
@@ -193,6 +229,19 @@ internal sealed class InputSettings
     {
         EnsureDefaults();
         return Controllers[Math.Clamp(playerIndex, 0, ControllerCount - 1)];
+    }
+
+    public InputSettings Clone()
+    {
+        EnsureDefaults();
+        InputSettings clone = new()
+        {
+            Port1Device = Port1Device,
+            Port2Device = Port2Device,
+            Controllers = Controllers.Select(controller => controller.Clone()).ToList(),
+        };
+        clone.EnsureDefaults();
+        return clone;
     }
 }
 

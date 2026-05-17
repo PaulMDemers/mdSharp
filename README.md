@@ -45,7 +45,7 @@ The project is in active development. It can boot and play a growing set of reta
 - VDP rendering with planes, sprites, scrolling, windowing, CRAM/VSRAM snapshots, shadow/highlight, interlace, DMA, and raster-sensitive behavior
 - PSG and YM2612 audio
 - WinForms desktop UI with keyboard and XInput gamepad support
-- Two-player input configuration
+- Four-player input configuration with named profiles
 - Preferences, default ROM folder, reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
 - Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
@@ -128,7 +128,7 @@ Default player 2 keyboard controls:
 - `U`, `I`, `O`: X, Y, Z
 - `H`: Mode
 
-The desktop input configuration dialog can switch each player between three-button and six-button pad behavior and can remap keyboard or XInput controls.
+The desktop input configuration dialog can switch each player between three-button and six-button pad behavior, remap keyboard or XInput controls, and save/load named input profiles.
 Players 3 and 4 are available for cartridge hardware such as J-Cart and default to XInput controllers 3 and 4 with keyboard bindings unset.
 The same dialog can switch port 1 to Sega Team Player or EA 4-Way Play multitap adapters and can switch port 2 to Menacer or Konami Justifier light gun behavior. For light gun games, aim with the mouse over the video surface; left-click maps to trigger and right-click maps to Start. Screen-position HV timing is implemented approximately and still needs calibration against more games.
 
