@@ -3,6 +3,8 @@ namespace MdSharp.Desktop;
 internal sealed class PreferencesForm : Form
 {
     private readonly TextBox _romFolderBox = new();
+    private readonly TextBox _saveRamFolderBox = new();
+    private readonly TextBox _stateFolderBox = new();
     private readonly ComboBox _budgetBox = new();
     private readonly CheckBox _mutedBox = new();
 
@@ -13,10 +15,12 @@ internal sealed class PreferencesForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(560, 250);
+        ClientSize = new Size(620, 370);
         Font = SystemFonts.MessageBoxFont;
 
         _romFolderBox.Text = settings.DefaultRomDirectory ?? string.Empty;
+        _saveRamFolderBox.Text = settings.SaveRamDirectory ?? string.Empty;
+        _stateFolderBox.Text = settings.StateDirectory ?? string.Empty;
         _mutedBox.Checked = settings.Muted;
 
         _budgetBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -49,6 +53,10 @@ internal sealed class PreferencesForm : Form
 
     public bool Muted => _mutedBox.Checked;
 
+    public string? SaveRamDirectory => TextOrNull(_saveRamFolderBox);
+
+    public string? StateDirectory => TextOrNull(_stateFolderBox);
+
     private Control BuildLayout()
     {
         TableLayoutPanel root = new()
@@ -56,54 +64,28 @@ internal sealed class PreferencesForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 9,
         };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        root.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "Default ROM folder",
-            Margin = new Padding(0, 0, 0, 4),
-        }, 0, 0);
-
-        FlowLayoutPanel folderRow = new()
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            WrapContents = false,
-            Margin = new Padding(0, 0, 0, 14),
-        };
-        _romFolderBox.Width = 390;
-        _romFolderBox.Margin = new Padding(0, 3, 8, 3);
-        Button browse = new()
-        {
-            AutoSize = true,
-            Text = "Browse...",
-            Margin = new Padding(0, 0, 8, 0),
-        };
-        browse.Click += (_, _) => BrowseRomFolder();
-        Button clear = new()
-        {
-            AutoSize = true,
-            Text = "Clear",
-        };
-        clear.Click += (_, _) => _romFolderBox.Clear();
-        folderRow.Controls.Add(_romFolderBox);
-        folderRow.Controls.Add(browse);
-        folderRow.Controls.Add(clear);
-        root.Controls.Add(folderRow, 0, 1);
+        AddFolderSetting(root, 0, "Default ROM folder", _romFolderBox, "Choose the default ROM folder");
+        AddFolderSetting(root, 2, "Save RAM folder", _saveRamFolderBox, "Choose the save RAM folder");
+        AddFolderSetting(root, 4, "Save-state folder", _stateFolderBox, "Choose the save-state folder");
 
         FlowLayoutPanel emulationRow = new()
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             WrapContents = false,
-            Margin = new Padding(0, 0, 0, 14),
+            Margin = new Padding(0, 2, 0, 14),
         };
         emulationRow.Controls.Add(new Label
         {
@@ -113,11 +95,11 @@ internal sealed class PreferencesForm : Form
         });
         _budgetBox.Width = 220;
         emulationRow.Controls.Add(_budgetBox);
-        root.Controls.Add(emulationRow, 0, 2);
+        root.Controls.Add(emulationRow, 0, 6);
 
         _mutedBox.AutoSize = true;
         _mutedBox.Text = "Mute audio";
-        root.Controls.Add(_mutedBox, 0, 3);
+        root.Controls.Add(_mutedBox, 0, 7);
 
         FlowLayoutPanel buttons = new()
         {
@@ -141,20 +123,57 @@ internal sealed class PreferencesForm : Form
         };
         buttons.Controls.Add(ok);
         buttons.Controls.Add(cancel);
-        root.Controls.Add(buttons, 0, 4);
+        root.Controls.Add(buttons, 0, 8);
 
         return root;
     }
 
-    private void BrowseRomFolder()
+    private void AddFolderSetting(TableLayoutPanel root, int row, string label, TextBox textBox, string description)
+    {
+        root.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = label,
+            Margin = new Padding(0, 0, 0, 4),
+        }, 0, row);
+
+        FlowLayoutPanel folderRow = new()
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 12),
+        };
+        textBox.Width = 440;
+        textBox.Margin = new Padding(0, 3, 8, 3);
+        Button browse = new()
+        {
+            AutoSize = true,
+            Text = "Browse...",
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        browse.Click += (_, _) => BrowseFolder(textBox, description);
+        Button clear = new()
+        {
+            AutoSize = true,
+            Text = "Clear",
+        };
+        clear.Click += (_, _) => textBox.Clear();
+        folderRow.Controls.Add(textBox);
+        folderRow.Controls.Add(browse);
+        folderRow.Controls.Add(clear);
+        root.Controls.Add(folderRow, 0, row + 1);
+    }
+
+    private void BrowseFolder(TextBox textBox, string description)
     {
         using FolderBrowserDialog dialog = new()
         {
-            Description = "Choose the default ROM folder",
+            Description = description,
             UseDescriptionForTitle = true,
         };
 
-        string? current = DefaultRomDirectory;
+        string? current = TextOrNull(textBox);
         if (!string.IsNullOrWhiteSpace(current) && Directory.Exists(current))
         {
             dialog.SelectedPath = current;
@@ -162,8 +181,14 @@ internal sealed class PreferencesForm : Form
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            _romFolderBox.Text = dialog.SelectedPath;
+            textBox.Text = dialog.SelectedPath;
         }
+    }
+
+    private static string? TextOrNull(TextBox textBox)
+    {
+        string path = textBox.Text.Trim();
+        return string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
     private sealed record BudgetOption(string Text, int Value)

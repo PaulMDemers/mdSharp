@@ -14,6 +14,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added desktop shortcuts for opening a ROM and reopening the last ROM.
 - Added desktop Preferences for default ROM folder, mute state, and instruction budget.
 - Added named desktop input profiles for controller and port-device settings.
+- Added desktop Preferences for save RAM and save-state storage folders.
 
 ## 0.1.0 - 2026-05-17
 

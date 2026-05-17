@@ -245,6 +245,8 @@ internal sealed class MainForm : Form
         }
 
         _settings.DefaultRomDirectory = dialog.DefaultRomDirectory;
+        _settings.SaveRamDirectory = dialog.SaveRamDirectory;
+        _settings.StateDirectory = dialog.StateDirectory;
         _settings.InstructionBudget = dialog.InstructionBudget;
         _settings.Muted = dialog.Muted;
         _settings.NormalizeSession();
@@ -592,7 +594,7 @@ internal sealed class MainForm : Form
             Title = "Save State",
             FileName = DefaultStateName(),
         };
-        ApplyInitialDirectory(dialog);
+        ApplyStateInitialDirectory(dialog);
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
@@ -649,7 +651,7 @@ internal sealed class MainForm : Form
             Filter = "mdSharp save states|*.mdss|All files|*.*",
             Title = "Load State",
         };
-        ApplyInitialDirectory(dialog);
+        ApplyStateInitialDirectory(dialog);
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
@@ -694,7 +696,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            SramStore.Save(_romPath, _cartridge);
+            SramStore.Save(_romPath, _cartridge, _settings.SaveRamDirectory);
         }
         catch
         {
@@ -719,7 +721,7 @@ internal sealed class MainForm : Form
         }
         else if (loadSram)
         {
-            SramStore.Load(path, cartridge);
+            SramStore.Load(path, cartridge, _settings.SaveRamDirectory);
         }
 
         MegaDrive machine = new(cartridge);
@@ -1151,9 +1153,7 @@ internal sealed class MainForm : Form
         string romName = SafeFileName(Path.GetFileNameWithoutExtension(_romPath ?? "rom"));
         string hash = _cartridge is null ? "unknown" : InputMovie.ComputeRomSha256(_cartridge)[..8];
         return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "mdSharp",
-            "states",
+            StateStorageDirectory(),
             $"{romName}-{hash}-slot{Math.Clamp(slot, 1, 10)}.mdss");
     }
 
@@ -1246,6 +1246,27 @@ internal sealed class MainForm : Form
         {
             dialog.InitialDirectory = directory;
         }
+    }
+
+    private void ApplyStateInitialDirectory(FileDialog dialog)
+    {
+        string? directory = !string.IsNullOrWhiteSpace(_settings.StateDirectory) && Directory.Exists(_settings.StateDirectory)
+            ? _settings.StateDirectory
+            : CurrentFileDialogDirectory();
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            dialog.InitialDirectory = directory;
+        }
+    }
+
+    private string StateStorageDirectory()
+    {
+        return !string.IsNullOrWhiteSpace(_settings.StateDirectory)
+            ? Path.GetFullPath(_settings.StateDirectory)
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "mdSharp",
+                "states");
     }
 
     private string? CurrentFileDialogDirectory()
