@@ -104,21 +104,27 @@ Public mode redacts local ROM filenames and screenshot links. Keep the full loca
 
 ## Recent Local Sweep Snapshot
 
-The latest local 600-frame sweep over `roms/` completed after the scanline timing and initial bus-wait pass with:
+The latest local 600-frame sweep over `roms/` completed after the Z80 audio timing continuity pass with:
 
 - 571 ROMs
 - 571 `ok`
 - 0 failed
 - 0 CPU fault vector cases
-- 38 near-blank final frames at the initial 600-frame sample
+- 46 near-blank final frames at the initial 600-frame sample
 - 0 fallback render modes
+- average emulation speed of 376.6 FPS
 
-Near-blank follow-up at frames `3000`, `6001`, and `9000` classified 36 of those 38 as visible later. The remaining no-input still-blank follow-up candidates are:
+Near-blank follow-up at frames `3000`, `6001`, and `9000` classified 41 of those 46 as visible later. The remaining no-input still-blank follow-up candidates are:
 
-- `Super Hydlide (USA).md`
+- `Ex-Mutants (USA).md`
+- `Pac-Man 2 - The New Adventures (USA).md`
+- `Shadow of the Beast (USA).md`
+- `Tyrants - Fight Through Time (USA).md`
 - `Zany Golf (USA).md`
 
-`Super Hydlide` has been checked with a single early Start input and reaches visible gameplay; it is tracked by the `super-hydlide-gameplay` visual checkpoint. `Zany Golf` has been checked with repeated Start input and reaches a visible instruction/gameplay screen; it is tracked by the `zany-golf-instructions` visual checkpoint.
+Some no-input still-blank cases are expected to require title/input setup or longer per-game movies. `Zany Golf` has been checked with repeated Start input and reaches a visible instruction/gameplay screen; it is tracked by the `zany-golf-instructions` visual checkpoint.
+
+The focused visual checkpoint set completed 50/50 `ok` over current high-value scenes, including Sonic 2 split-view idle, Aladdin Genie animation, Toy Story Traveler's Tales, Zero Wing idle gameplay, and Virtua Racing SVP gameplay.
 
 This snapshot is local and depends on the ROM set in `roms/`; regenerate it before publishing compatibility claims.
 

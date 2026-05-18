@@ -29,6 +29,15 @@ It also compares against local references when present:
 - Sonic Green Hill reference passed as an argument
 - Streets reference in the repo root
 
+The latest post-Z80-timing guardrail run kept the MAME-backed reference suite stable:
+
+- Sonic 1 Sega voice: `A`, envelope correlation `0.982598`
+- Sonic 1 title: `C`, envelope correlation `0.891258`
+- Sonic 1 Green Hill: `B`, envelope correlation `0.894490`
+- Streets of Rage intro: `A`, envelope correlation `0.874047`
+
+The broader audio regression rendered Sonic 1, Sonic 2, Streets of Rage, Castlevania: Bloodlines, and Toy Story checkpoints without near clipping.
+
 Example:
 
 ```powershell
