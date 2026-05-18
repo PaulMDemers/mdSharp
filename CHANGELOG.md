@@ -13,6 +13,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Classified the current no-input blank follow-up set further: `Zany Golf` reaches visible output with repeated Start, while `Ex-Mutants`, `Pac-Man 2`, `Shadow of the Beast`, and `Tyrants` remain focused suspects.
 - Corrected VDP V interrupt status latching across 68k interrupt acknowledge, allowing `Pac-Man 2` to leave its TRAP-based VBlank wait and render.
 - Returned high unused bits from the Z80 bus request status byte so byte-sized whole-register polls work; `Shadow of the Beast` now reaches its intro splash.
+- Refreshed the 571-ROM local compatibility dashboard and near-blank follow-up; all runs completed `ok`, 41 of 42 near-blank samples became visible later, and the remaining `Zany Golf` case is input-gated.
 
 ## 0.2.0 - 2026-05-18
 

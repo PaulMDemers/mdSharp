@@ -104,25 +104,22 @@ Public mode redacts local ROM filenames and screenshot links. Keep the full loca
 
 ## Recent Local Sweep Snapshot
 
-The latest local 600-frame sweep over `roms/` completed after the Z80 audio timing continuity pass with:
+The latest local 600-frame sweep over `roms/` completed after the VDP/Z80 status polling pass with:
 
 - 571 ROMs
 - 571 `ok`
 - 0 failed
 - 0 CPU fault vector cases
-- 46 near-blank final frames at the initial 600-frame sample
+- 42 near-blank final frames at the initial 600-frame sample
+- 1 never-visible no-input 600-frame sample
 - 0 fallback render modes
-- average emulation speed of 376.6 FPS
+- average emulation speed of 456.1 FPS
 
-Near-blank follow-up at frames `3000`, `6001`, and `9000` classified 41 of those 46 as visible later. The remaining no-input still-blank follow-up candidates are:
+Near-blank follow-up at frames `3000`, `6001`, and `9000` classified 41 of those 42 as visible later. The remaining no-input still-blank follow-up candidate is:
 
-- `Ex-Mutants (USA).md`
-- `Pac-Man 2 - The New Adventures (USA).md`
-- `Shadow of the Beast (USA).md`
-- `Tyrants - Fight Through Time (USA).md`
 - `Zany Golf (USA).md`
 
-Some no-input still-blank cases are expected to require title/input setup or longer per-game movies. `Zany Golf` has been checked with repeated Start input and reaches a visible instruction/gameplay screen; it is tracked by the `zany-golf-instructions` visual checkpoint.
+`Zany Golf` has been checked separately with repeated Start input and reaches a visible instruction/gameplay screen at 15,000 frames, so it is currently treated as input-gated rather than a no-input boot failure.
 
 The focused visual checkpoint set completed 50/50 `ok` over current high-value scenes, including Sonic 2 split-view idle, Aladdin Genie animation, Toy Story Traveler's Tales, Zero Wing idle gameplay, and Virtua Racing SVP gameplay.
 
@@ -138,9 +135,7 @@ After those fixes:
 - `Shadow of the Beast (USA).md`
 - `Tyrants - Fight Through Time (USA).md`
 
-all reach visible output in focused renders. `Pac-Man 2` and `Tyrants` reach visible intro/game screens by roughly 1,200-1,500 frames; `Shadow of the Beast` reaches the Psygnosis splash by 5,000 frames.
-
-These snapshots should still be regenerated before publishing compatibility claims.
+all reach visible output in focused renders and the broad 600-frame sweep. `Pac-Man 2` and `Tyrants` reach visible intro/game screens by roughly 600-1,500 frames; `Shadow of the Beast` reaches the Psygnosis splash by 5,000 frames.
 
 This snapshot is local and depends on the ROM set in `roms/`; regenerate it before publishing compatibility claims.
 
