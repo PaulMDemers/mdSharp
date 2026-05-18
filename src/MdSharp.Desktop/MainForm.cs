@@ -31,10 +31,12 @@ internal sealed class MainForm : Form
     private ToolStripMenuItem _quickLoadMenu = null!;
     private ToolStripMenuItem _stateSlotMenu = null!;
     private ToolStripMenuItem _fullscreenMenu = null!;
+    private ToolStripMenuItem _developerOptionsMenu = null!;
     private ToolStripMenuItem _startRecordingMenu = null!;
     private ToolStripMenuItem _stopRecordingMenu = null!;
     private ToolStripMenuItem _playMovieMenu = null!;
     private ToolStripMenuItem _stopMovieMenu = null!;
+    private ToolStripSeparator _developerSeparator = null!;
     private ToolStripMenuItem _budget200Menu = null!;
     private ToolStripMenuItem _budget300Menu = null!;
     private ToolStripMenuItem _budget500Menu = null!;
@@ -164,13 +166,18 @@ internal sealed class MainForm : Form
         emulation.DropDownItems.Add(_stopMovieMenu);
         _fullscreenMenu = new ToolStripMenuItem("&Fullscreen", null, (_, _) => ToggleFullscreen()) { ShortcutKeyDisplayString = "F11" };
         emulation.DropDownItems.Add(_fullscreenMenu);
-        emulation.DropDownItems.Add(new ToolStripSeparator());
-        _budget200Menu = new ToolStripMenuItem("Instruction budget: &200k", null, (_, _) => SetInstructionBudget(200_000));
-        _budget300Menu = new ToolStripMenuItem("Instruction budget: &300k", null, (_, _) => SetInstructionBudget(300_000));
-        _budget500Menu = new ToolStripMenuItem("Instruction budget: &500k", null, (_, _) => SetInstructionBudget(500_000));
+        _developerSeparator = new ToolStripSeparator();
+        emulation.DropDownItems.Add(_developerSeparator);
+        _budget200Menu = new ToolStripMenuItem("Frame safety budget: &200k", null, (_, _) => SetInstructionBudget(200_000));
+        _budget300Menu = new ToolStripMenuItem("Frame safety budget: &300k", null, (_, _) => SetInstructionBudget(300_000));
+        _budget500Menu = new ToolStripMenuItem("Frame safety budget: &500k", null, (_, _) => SetInstructionBudget(500_000));
         emulation.DropDownItems.Add(_budget200Menu);
         emulation.DropDownItems.Add(_budget300Menu);
         emulation.DropDownItems.Add(_budget500Menu);
+
+        ToolStripMenuItem view = new("&View");
+        _developerOptionsMenu = new ToolStripMenuItem("&Developer Options", null, (_, _) => ToggleDeveloperOptions());
+        view.DropDownItems.Add(_developerOptionsMenu);
 
         ToolStripMenuItem help = new("&Help");
         help.DropDownItems.Add("&Controls", null, (_, _) => ShowControls());
@@ -179,9 +186,11 @@ internal sealed class MainForm : Form
 
         menu.Items.Add(file);
         menu.Items.Add(emulation);
+        menu.Items.Add(view);
         menu.Items.Add(help);
         PopulateRecentMenu();
         PopulateStateSlotMenu();
+        UpdateMenus();
         return menu;
     }
 
@@ -271,6 +280,14 @@ internal sealed class MainForm : Form
         _settings.Save();
         UpdateMenus();
         SetStatus("Preferences saved.");
+    }
+
+    private void ToggleDeveloperOptions()
+    {
+        _settings.ShowDeveloperOptions = !_settings.ShowDeveloperOptions;
+        _settings.Save();
+        UpdateMenus();
+        SetStatus(_settings.ShowDeveloperOptions ? "Developer options enabled." : "Developer options hidden.");
     }
 
     private void ApplyVideoSettings()
@@ -1058,6 +1075,7 @@ internal sealed class MainForm : Form
         _pauseMenu.Checked = _paused;
         _muteMenu.Checked = _muted;
         _fullscreenMenu.Checked = _fullscreen;
+        _developerOptionsMenu.Checked = _settings.ShowDeveloperOptions;
         _startRecordingMenu.Enabled = _machine is not null && _recordingMovie is null && _playbackMovie is null;
         _stopRecordingMenu.Enabled = _recordingMovie is not null;
         _playMovieMenu.Enabled = _recordingMovie is null && _playbackMovie is null;
@@ -1067,6 +1085,10 @@ internal sealed class MainForm : Form
         _quickSaveMenu.Enabled = _machine is not null;
         _quickLoadMenu.Enabled = _machine is not null && File.Exists(QuickStatePathOrEmpty(_settings.CurrentStateSlot));
         _stateSlotMenu.Text = $"State S&lot: {_settings.CurrentStateSlot}";
+        _developerSeparator.Visible = _settings.ShowDeveloperOptions;
+        _budget200Menu.Visible = _settings.ShowDeveloperOptions;
+        _budget300Menu.Visible = _settings.ShowDeveloperOptions;
+        _budget500Menu.Visible = _settings.ShowDeveloperOptions;
         _budget200Menu.Checked = _instructionsPerFrame == 200_000;
         _budget300Menu.Checked = _instructionsPerFrame == 300_000;
         _budget500Menu.Checked = _instructionsPerFrame == 500_000;

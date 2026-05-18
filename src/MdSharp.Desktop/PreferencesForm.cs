@@ -10,15 +10,17 @@ internal sealed class PreferencesForm : Form
     private readonly CheckBox _integerScaleBox = new();
     private readonly CheckBox _smoothingBox = new();
     private readonly CheckBox _mutedBox = new();
+    private readonly bool _showDeveloperOptions;
 
     public PreferencesForm(DesktopSettings settings)
     {
+        _showDeveloperOptions = settings.ShowDeveloperOptions;
         Text = "Preferences";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(620, 470);
+        ClientSize = new Size(620, _showDeveloperOptions ? 470 : 430);
         Font = SystemFonts.MessageBoxFont;
 
         _romFolderBox.Text = settings.DefaultRomDirectory ?? string.Empty;
@@ -137,11 +139,12 @@ internal sealed class PreferencesForm : Form
             AutoSize = true,
             WrapContents = false,
             Margin = new Padding(0, 0, 0, 14),
+            Visible = _showDeveloperOptions,
         };
         emulationRow.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "Instruction budget:",
+            Text = "Frame safety budget:",
             Margin = new Padding(0, 7, 8, 0),
         });
         _budgetBox.Width = 220;
