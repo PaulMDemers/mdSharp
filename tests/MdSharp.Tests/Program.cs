@@ -432,8 +432,11 @@ void VdpM68kInterruptAcknowledgeClearsPendingFlags()
     _ = vdp.StepScanline(224, pal: false);
     AssertTrue(vdp.VInterruptPending, "VBlank should set the V interrupt pending flag");
     vdp.AcknowledgeM68kInterrupt(6);
-    AssertTrue(!vdp.VInterruptPending, "level 6 acknowledge should clear the V interrupt pending flag");
-    AssertTrue((vdp.Status & 0x0080) == 0, "acknowledge should update the visible V interrupt status bit");
+    AssertTrue(vdp.VInterruptPending, "level 6 acknowledge should leave the status-port V interrupt latch visible");
+    AssertTrue((vdp.Status & 0x0080) != 0, "acknowledge should not clear the visible V interrupt status bit");
+    _ = vdp.StepScanline(Vdp.NtscScanlines - 1, pal: false);
+    _ = vdp.ReadControlPort();
+    AssertTrue(!vdp.VInterruptPending, "status read after VBlank should clear the V interrupt status latch");
 }
 
 void VdpHvCounterAdvancesHorizontally()
@@ -2271,17 +2274,19 @@ void Z80ControlWordWritesUseEvenByte()
 
     machine.Bus.WriteWord(0x00A1_1100, 0x0100);
     AssertTrue(machine.Bus.Z80BusRequested, "word write #$0100 should request the Z80 bus");
-    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+    AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(0x00A1_1100) & 0x01));
     machine.Bus.CurrentMasterCycle += 128;
-    AssertEqual((byte)0x00, machine.Bus.ReadByte(0x00A1_1100));
+    byte grantedStatus = machine.Bus.ReadByte(0x00A1_1100);
+    AssertEqual((byte)0x00, (byte)(grantedStatus & 0x01));
+    AssertTrue(grantedStatus != 0, "unused bits should keep byte-sized bus grant polls from reading as zero");
 
     machine.Bus.WriteWord(0x00A1_1200, 0x0000);
     AssertTrue(machine.Bus.Z80ResetAsserted, "word write #$0000 should assert Z80 reset");
-    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+    AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(0x00A1_1100) & 0x01));
 
     machine.Bus.WriteWord(0x00A1_1100, 0x0000);
     AssertTrue(!machine.Bus.Z80BusRequested, "word write #$0000 should release the Z80 bus");
-    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x00A1_1100));
+    AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(0x00A1_1100) & 0x01));
 }
 
 void Z80BusGrantIsDelayedAfterRequest()

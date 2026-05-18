@@ -11,6 +11,8 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Re-ran the post-Z80 timing audio, visual, compatibility, and near-blank guardrails and recorded the current local snapshot.
 - Corrected VDP DMA fill to perform the trigger data-port word write followed by byte fills using the VDP auto-increment.
 - Classified the current no-input blank follow-up set further: `Zany Golf` reaches visible output with repeated Start, while `Ex-Mutants`, `Pac-Man 2`, `Shadow of the Beast`, and `Tyrants` remain focused suspects.
+- Corrected VDP V interrupt status latching across 68k interrupt acknowledge, allowing `Pac-Man 2` to leave its TRAP-based VBlank wait and render.
+- Returned high unused bits from the Z80 bus request status byte so byte-sized whole-register polls work; `Shadow of the Beast` now reaches its intro splash.
 
 ## 0.2.0 - 2026-05-18
 

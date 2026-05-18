@@ -689,12 +689,13 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
     private byte ReadZ80BusRequestStatus()
     {
+        const byte unusedBitsHigh = 0xFE;
         if (!_z80BusRequested || _z80ResetAsserted)
         {
-            return 0x01;
+            return 0x01 | unusedBitsHigh;
         }
 
-        return CurrentMasterCycle < _z80BusGrantReadyCycle ? (byte)0x01 : (byte)0x00;
+        return CurrentMasterCycle < _z80BusGrantReadyCycle ? (byte)(0x01 | unusedBitsHigh) : unusedBitsHigh;
     }
 
     private void WriteIo(uint address, byte value)

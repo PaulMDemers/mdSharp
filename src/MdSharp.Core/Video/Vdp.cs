@@ -481,7 +481,8 @@ public sealed class Vdp
                 _hInterruptPending = false;
                 break;
             case 6:
-                _vInterruptPending = false;
+                // The 68k interrupt acknowledge accepts the IRQ line, but software can
+                // still observe the V interrupt status latch through the control port.
                 break;
             default:
                 return;

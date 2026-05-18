@@ -126,14 +126,21 @@ Some no-input still-blank cases are expected to require title/input setup or lon
 
 The focused visual checkpoint set completed 50/50 `ok` over current high-value scenes, including Sonic 2 split-view idle, Aladdin Genie animation, Toy Story Traveler's Tales, Zero Wing idle gameplay, and Virtua Racing SVP gameplay.
 
-A follow-up pass after correcting VDP DMA fill confirmed `Zany Golf` remains input-gated and visible with repeated Start at 15,000 frames. The remaining focused suspects stayed blank with no input, Start, repeated Start, and Start+C scripts at 15,000 frames:
+A follow-up pass after correcting VDP DMA fill confirmed `Zany Golf` remains input-gated and visible with repeated Start at 15,000 frames. A later focused pass corrected two shared hardware details:
+
+- VDP V interrupt status remains software-visible after 68k interrupt acknowledge until status-port polling observes it.
+- Z80 bus request status byte reads keep unused bits high so whole-byte polling does not collapse granted status to `$00`.
+
+After those fixes:
 
 - `Ex-Mutants (USA).md`
 - `Pac-Man 2 - The New Adventures (USA).md`
 - `Shadow of the Beast (USA).md`
 - `Tyrants - Fight Through Time (USA).md`
 
-These should be investigated with per-game traces or recorded input movies before being treated as broad compatibility regressions.
+all reach visible output in focused renders. `Pac-Man 2` and `Tyrants` reach visible intro/game screens by roughly 1,200-1,500 frames; `Shadow of the Beast` reaches the Psygnosis splash by 5,000 frames.
+
+These snapshots should still be regenerated before publishing compatibility claims.
 
 This snapshot is local and depends on the ROM set in `roms/`; regenerate it before publishing compatibility claims.
 
