@@ -22,7 +22,11 @@ function Invoke-Step {
 
     Write-Host ""
     Write-Host "== $Name =="
+    $global:LASTEXITCODE = 0
     & $Command
+    if ($global:LASTEXITCODE -ne 0) {
+        throw "$Name failed with exit code $global:LASTEXITCODE"
+    }
 }
 
 function Add-ReportPath {
@@ -130,8 +134,8 @@ try {
     Add-ReportPath $summary "Compatibility dashboard" (Join-Path $OutputFolder "compat\index.html")
     Add-ReportPath $summary "Near-blank classification" (Join-Path $OutputFolder "near-blank\near-blank-classification.md")
     Add-ReportPath $summary "Audio regression" (Join-Path $OutputFolder "audio-regression\audio-regression.md")
-    Add-ReportPath $summary "Movie regression" (Join-Path $OutputFolder "movie-regress\movie-visual-checkpoints.md")
-    Add-ReportPath $summary "Virtua Racing SVP gate" (Join-Path $OutputFolder "virtua-racing\virtua-racing-drive.md")
+    Add-ReportPath $summary "Movie regression" (Join-Path $OutputFolder "movie-regress\index.html")
+    Add-ReportPath $summary "Virtua Racing SVP gate" (Join-Path $OutputFolder "virtua-racing\virtua-racing-layout-report.md")
     Set-Content -Path $summaryPath -Value $summary.ToString() -Encoding UTF8
 
     Write-Host ""

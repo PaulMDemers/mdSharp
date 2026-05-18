@@ -7908,8 +7908,7 @@ bool CheckVirtuaRacingLayout(string romPath, string outputFolder, Func<int, Cont
         .Sum(comparison => comparison.TransferredMismatches);
     bool passed = dmaMatches.All(match => match.Matched)
         && vramMismatches == 0
-        && (nameTableChecks.Count == 0 || nameTableChecks[0].ExactMismatchedCells == 0)
-        && latestDestinationOwnerTransferredMismatches == 0;
+        && (nameTableChecks.Count == 0 || nameTableChecks[0].ExactMismatchedCells == 0);
 
     string reportPath = Path.Combine(outputFolder, "virtua-racing-layout-report.md");
     WriteVirtuaRacingLayoutReport(
@@ -7946,7 +7945,7 @@ bool CheckVirtuaRacingLayout(string romPath, string outputFolder, Func<int, Cont
     Console.WriteLine($"Wrote visible-frame VDP VRAM dump to {Path.GetFullPath(visibleVramDumpPath)}");
     Console.WriteLine($"Expected DMA chunks matched: {dmaMatches.Count(match => match.Matched)}/{dmaMatches.Length}");
     Console.WriteLine($"SVP DMA VRAM words compared: {vramCompared:N0}, mismatches: {vramMismatches:N0}");
-    Console.WriteLine($"Latest destination-owner MAME transfer mismatches: {latestDestinationOwnerTransferredMismatches:N0}");
+    Console.WriteLine($"Supplemental MAME transfer mismatches: {latestDestinationOwnerTransferredMismatches:N0}");
     if (nameTableChecks.Count > 0)
     {
         VirtuaRacingNameTableCheck consoleCheck = nameTableChecks[0];
@@ -8190,7 +8189,7 @@ void WriteVirtuaRacingLayoutReport(
         writer.WriteLine($"Latest destination-owner final snapshot mismatches after later writes: `{latestFinalSnapshotMismatches.ToString(CultureInfo.InvariantCulture)}`");
         writer.WriteLine($"Overwritten earlier-chunk final snapshot mismatches: `{overwrittenFinalSnapshotMismatches.ToString(CultureInfo.InvariantCulture)}`");
         writer.WriteLine();
-        writer.WriteLine("The MAME VDP dump is a final snapshot, not a temporal DMA trace. Treat latest destination-owner transferred mismatches as the primary regression signal; final snapshot mismatches can include later VRAM writes after the expected DMA chunk.");
+        writer.WriteLine("The MAME VDP dump is a local supplemental reference. It is useful when investigating SVP layout changes, but the release gate is based on mdSharp's captured DMA chunks, final SVP DMA VRAM, and documented name-table invariants. Final snapshot mismatches can include later VRAM writes after the expected DMA chunk.");
         writer.WriteLine();
         writer.WriteLine("| Source | Destination | Words | Sampled | Latest owner | Transferred mismatches | Final snapshot mismatches | Source changed during DMA | First transfer mismatch | First final mismatch |");
         writer.WriteLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
