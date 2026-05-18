@@ -4,6 +4,10 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 
 ## Unreleased
 
+- No unreleased changes yet.
+
+## 0.2.0 - 2026-05-18
+
 - Started the `0.2.0` development cycle.
 - Added shared assembly version metadata.
 - Added desktop `Help -> About mdSharp` dialog with version, license, and repository links.
