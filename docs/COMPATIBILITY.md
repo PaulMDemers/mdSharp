@@ -70,6 +70,38 @@ powershell -ExecutionPolicy Bypass -File tools\classify-near-blank.ps1 -Compatib
 
 The follow-up report classifies each near-blank candidate as visible, still blank, missing, or errored and links the later screenshots.
 
+## Publishing A Matrix
+
+After a sweep, export the CSV to a stable JSON artifact and a docs-ready Markdown table:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --compat-export render-output\compat\compatibility.csv render-output\compat\published
+```
+
+Outputs:
+
+- `compatibility-matrix.json`
+- `compatibility-matrix.md`
+
+The matrix is derived from sampled emulator behavior and should be treated as a triage aid, not a promise that a game is complete. Ratings are intentionally coarse:
+
+| Rating | Meaning |
+| --- | --- |
+| `A` | Visible frame, sprite activity, audio activity, no fallback rendering or CPU fault activity in the sampled run |
+| `B` | Boots visibly but has suspicious sampled audio or sprite activity |
+| `C` | Boots visibly with CPU fault-vector activity or fallback rendering |
+| `Boots` | Run completed but sampled frames were near-blank |
+| `Broken` | Emulator error or 68000 exception stopped the run |
+| `Unsupported Hardware` | Cartridge declares unsupported hardware |
+
+Use `--public` when creating artifacts for a public repository page:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --compat-export render-output\compat\compatibility.csv render-output\compat\public --public
+```
+
+Public mode redacts local ROM filenames and screenshot links. Keep the full local export under `render-output/`.
+
 ## Recent Local Sweep Snapshot
 
 The latest local 600-frame sweep over `roms/` completed after the scanline timing and initial bus-wait pass with:

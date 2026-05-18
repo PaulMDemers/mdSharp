@@ -95,6 +95,32 @@ dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --compat-s
 
 Summarizes an existing compatibility CSV.
 
+## Compatibility Matrix Export
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --compat-export render-output\compat-300\compatibility.csv render-output\compat-300\published
+```
+
+Exports an existing compatibility CSV to:
+
+- `compatibility-matrix.json`
+- `compatibility-matrix.md`
+
+The matrix assigns coarse ratings from the automated sweep data:
+
+- `A`: visible frame, sprite activity, audio activity, no fallback rendering or CPU fault activity
+- `B`: boots visibly but has suspicious sampled audio or sprite activity
+- `C`: boots visibly with CPU fault-vector activity or fallback rendering
+- `Boots`: run completed but sampled frames were near-blank
+- `Broken`: emulator error or 68000 exception stopped the run
+- `Unsupported Hardware`: cartridge declares unsupported hardware
+
+For a public-safe artifact that redacts local ROM filenames and screenshot links:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --compat-export render-output\compat-300\compatibility.csv render-output\compat-300\public --public
+```
+
 ## Input Movies
 
 See [INPUT_MOVIES.md](INPUT_MOVIES.md) for the full recording, replay, checkpoint, and publishing workflow.

@@ -16,6 +16,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added named desktop input profiles for controller and port-device settings.
 - Added desktop Preferences for save RAM and save-state storage folders.
 - Added desktop display Preferences for aspect mode, integer scaling, and smoothing.
+- Added CLI compatibility matrix export to JSON and Markdown, with public redaction mode.
 
 ## 0.1.0 - 2026-05-17
 

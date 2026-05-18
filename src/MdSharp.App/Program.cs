@@ -47,6 +47,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --visual-checkpoints <rom-folder> <output-folder> [instructions-per-frame] [--update-baseline]");
     Console.WriteLine("  mdsharp --movie-checkpoints <movie-folder> <rom-folder> <output-folder> [instructions-per-frame] [--update-baseline]");
     Console.WriteLine("  mdsharp --compat-summary <compatibility.csv> [output.md]");
+    Console.WriteLine("  mdsharp --compat-export <compatibility.csv> <output-folder> [--public]");
     Console.WriteLine("  mdsharp --movie-regress <movie-folder> <rom-folder> <output-folder> [instructions-per-frame]");
     Console.WriteLine("  mdsharp --compare <baseline.csv> <current.csv>");
     Console.WriteLine("  mdsharp --perf-compare <baseline-perf.csv> <current-perf.csv> [output.md]");
@@ -350,6 +351,19 @@ if (args[0].Equals("--compat-summary", StringComparison.OrdinalIgnoreCase))
     }
 
     SummarizeCompatibilityReport(args[1], args.Length > 2 ? args[2] : null);
+    return;
+}
+
+if (args[0].Equals("--compat-export", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --compat-export <compatibility.csv> <output-folder> [--public]");
+        return;
+    }
+
+    bool publicMode = args.Any(arg => arg.Equals("--public", StringComparison.OrdinalIgnoreCase));
+    ExportCompatibilityMatrix(args[1], args[2], publicMode);
     return;
 }
 
@@ -3105,6 +3119,234 @@ void SummarizeCompatibilityReport(string csvPath, string? outputMarkdownPath, bo
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputMarkdownPath)) ?? ".");
         File.WriteAllText(outputMarkdownPath, summary, Encoding.UTF8);
         Console.WriteLine($"Wrote summary to {Path.GetFullPath(outputMarkdownPath)}");
+    }
+}
+
+void ExportCompatibilityMatrix(string csvPath, string outputFolder, bool publicMode)
+{
+    List<CompatibilityCsvRow> rows = LoadCompatibilityRows(csvPath);
+    string fullOutputFolder = Path.GetFullPath(outputFolder);
+    Directory.CreateDirectory(fullOutputFolder);
+
+    string generatedAtUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+    string? commit = ResolveGitCommit();
+    CompatibilityExportEntry[] entries = rows
+        .OrderBy(row => row.Rom, StringComparer.OrdinalIgnoreCase)
+        .Select((row, index) => BuildCompatibilityExportEntry(row, index + 1, csvPath, fullOutputFolder, publicMode))
+        .ToArray();
+
+    CompatibilityExportReport report = new(
+        generatedAtUtc,
+        publicMode ? Path.GetFileName(csvPath) : Path.GetFullPath(csvPath),
+        commit,
+        publicMode,
+        entries.Length,
+        entries.GroupBy(entry => entry.Rating).OrderBy(group => group.Key).ToDictionary(group => group.Key, group => group.Count()),
+        entries);
+
+    JsonSerializerOptions jsonOptions = new()
+    {
+        WriteIndented = true,
+    };
+    string jsonPath = Path.Combine(fullOutputFolder, "compatibility-matrix.json");
+    string markdownPath = Path.Combine(fullOutputFolder, "compatibility-matrix.md");
+    File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, jsonOptions), Encoding.UTF8);
+    File.WriteAllText(markdownPath, BuildCompatibilityMatrixMarkdown(report, markdownPath), Encoding.UTF8);
+    Console.WriteLine($"Wrote compatibility matrix JSON to {jsonPath}");
+    Console.WriteLine($"Wrote compatibility matrix Markdown to {markdownPath}");
+}
+
+CompatibilityExportEntry BuildCompatibilityExportEntry(CompatibilityCsvRow row, int index, string csvPath, string outputFolder, bool publicMode)
+{
+    string rating = RateCompatibility(row);
+    string displayName = publicMode ? $"ROM {index:000}" : row.Rom;
+    string screenshot = publicMode || string.IsNullOrWhiteSpace(row.BmpPath)
+        ? string.Empty
+        : NormalizeReportPath(row.BmpPath, outputFolder);
+    string notes = BuildCompatibilityNotes(row);
+
+    return new CompatibilityExportEntry(
+        displayName,
+        publicMode ? string.Empty : row.Rom,
+        rating,
+        row.Status,
+        row.Frames,
+        row.Fps,
+        $"${row.Pc:X8}",
+        row.RenderMode,
+        row.NonBackgroundPixels,
+        row.MaxNonBackgroundPixels,
+        row.Sprites,
+        row.AudioPeak,
+        row.Sha256,
+        screenshot,
+        notes);
+}
+
+string RateCompatibility(CompatibilityCsvRow row)
+{
+    if (row.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+    {
+        return "Unsupported Hardware";
+    }
+
+    if (!row.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+    {
+        return "Broken";
+    }
+
+    if (row.MaxNonBackgroundPixels <= 64 || row.NonBackgroundPixels <= 64)
+    {
+        return "Boots";
+    }
+
+    if (HasFaultExceptions(row.Exceptions) || row.RenderMode.Contains("fallback", StringComparison.OrdinalIgnoreCase))
+    {
+        return "C";
+    }
+
+    if (row.AudioPeak == 0 || row.Sprites == 0)
+    {
+        return "B";
+    }
+
+    return "A";
+}
+
+string BuildCompatibilityNotes(CompatibilityCsvRow row)
+{
+    List<string> notes = [];
+    if (!string.IsNullOrWhiteSpace(row.Detail))
+    {
+        notes.Add(row.Detail);
+    }
+
+    if (!row.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+    {
+        return string.Join(" ", notes.Distinct(StringComparer.Ordinal));
+    }
+
+    if (row.MaxNonBackgroundPixels <= 64)
+    {
+        notes.Add("No visible sampled frame.");
+    }
+    else if (row.NonBackgroundPixels <= 64)
+    {
+        notes.Add("Final frame is near-blank.");
+    }
+
+    if (row.AudioPeak == 0)
+    {
+        notes.Add("No audio activity sampled.");
+    }
+
+    if (row.Sprites == 0)
+    {
+        notes.Add("No sprites detected.");
+    }
+
+    if (HasFaultExceptions(row.Exceptions))
+    {
+        notes.Add($"CPU fault activity: {row.Exceptions}");
+    }
+
+    if (row.RenderMode.Contains("fallback", StringComparison.OrdinalIgnoreCase))
+    {
+        notes.Add($"Fallback render mode: {row.RenderMode}");
+    }
+
+    return string.Join(" ", notes.Distinct(StringComparer.Ordinal));
+}
+
+string BuildCompatibilityMatrixMarkdown(CompatibilityExportReport report, string markdownPath)
+{
+    StringBuilder builder = new();
+    builder.AppendLine("# mdSharp Compatibility Matrix");
+    builder.AppendLine();
+    builder.AppendLine($"Generated: `{report.GeneratedAtUtc}`");
+    builder.AppendLine($"Source CSV: `{report.SourceCsv}`");
+    if (!string.IsNullOrWhiteSpace(report.LastTestedCommit))
+    {
+        builder.AppendLine($"Commit: `{report.LastTestedCommit}`");
+    }
+
+    if (report.PublicMode)
+    {
+        builder.AppendLine();
+        builder.AppendLine("Public mode redacts ROM filenames and screenshot links. Use the JSON artifact from a local export for private debugging.");
+    }
+
+    builder.AppendLine();
+    builder.AppendLine($"- Rows: `{report.TotalRows:N0}`");
+    foreach ((string rating, int count) in report.RatingCounts.OrderBy(pair => CompatibilityRatingSort(pair.Key)).ThenBy(pair => pair.Key))
+    {
+        builder.AppendLine($"- `{rating}`: `{count:N0}`");
+    }
+
+    builder.AppendLine();
+    builder.AppendLine("| ROM | Rating | Status | Frames | FPS | PC | Pixels | Max Pixels | Sprites | Audio | Mode | Screenshot | Notes |");
+    builder.AppendLine("| --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- | --- |");
+    foreach (CompatibilityExportEntry entry in report.Entries)
+    {
+        string screenshot = string.IsNullOrWhiteSpace(entry.Screenshot)
+            ? string.Empty
+            : $"[bmp]({EscapeMarkdown(RelativeMarkdownPath(markdownPath, entry.Screenshot))})";
+        builder.AppendLine($"| {EscapeMarkdown(entry.DisplayName)} | `{EscapeMarkdown(entry.Rating)}` | `{EscapeMarkdown(entry.Status)}` | {entry.Frames:N0} | {entry.Fps:0.0} | `{EscapeMarkdown(entry.Pc)}` | {entry.NonBackgroundPixels:N0} | {entry.MaxNonBackgroundPixels:N0} | {entry.Sprites:N0} | {entry.AudioPeak:N0} | `{EscapeMarkdown(entry.RenderMode)}` | {screenshot} | {EscapeMarkdown(entry.Notes)} |");
+    }
+
+    return builder.ToString();
+}
+
+int CompatibilityRatingSort(string rating)
+{
+    return rating switch
+    {
+        "A" => 0,
+        "B" => 1,
+        "C" => 2,
+        "Boots" => 3,
+        "Broken" => 4,
+        "Unsupported Hardware" => 5,
+        _ => 6,
+    };
+}
+
+string NormalizeReportPath(string path, string outputFolder)
+{
+    string fullPath = Path.GetFullPath(path);
+    string fullOutput = Path.GetFullPath(outputFolder);
+    return Path.GetRelativePath(fullOutput, fullPath).Replace('\\', '/');
+}
+
+string RelativeMarkdownPath(string markdownPath, string relativeToOutput)
+{
+    string baseFolder = Path.GetDirectoryName(Path.GetFullPath(markdownPath)) ?? ".";
+    string fullPath = Path.GetFullPath(Path.Combine(baseFolder, relativeToOutput));
+    return Path.GetRelativePath(baseFolder, fullPath).Replace('\\', '/');
+}
+
+string? ResolveGitCommit()
+{
+    try
+    {
+        using System.Diagnostics.Process process = new();
+        process.StartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = "rev-parse --short HEAD",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        process.Start();
+        string output = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit(2000);
+        return process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output) ? output : null;
+    }
+    catch
+    {
+        return null;
     }
 }
 
@@ -9253,6 +9495,32 @@ file sealed record CompatibilityCsvRow(
     string Sha256,
     string BmpPath,
     string Detail);
+
+file sealed record CompatibilityExportReport(
+    string GeneratedAtUtc,
+    string SourceCsv,
+    string? LastTestedCommit,
+    bool PublicMode,
+    int TotalRows,
+    IReadOnlyDictionary<string, int> RatingCounts,
+    IReadOnlyList<CompatibilityExportEntry> Entries);
+
+file sealed record CompatibilityExportEntry(
+    string DisplayName,
+    string LocalRom,
+    string Rating,
+    string Status,
+    int Frames,
+    double Fps,
+    string Pc,
+    string RenderMode,
+    int NonBackgroundPixels,
+    int MaxNonBackgroundPixels,
+    int Sprites,
+    long AudioPeak,
+    string Sha256,
+    string Screenshot,
+    string Notes);
 
 file sealed class CapturedDmaChunk(int frame, uint sourceAddress, uint destinationAddress, byte code)
 {
