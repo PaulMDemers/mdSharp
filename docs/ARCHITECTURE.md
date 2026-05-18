@@ -123,6 +123,7 @@ Important pieces:
 
 - PSG tone/noise channels with frame-timestamped writes
 - YM2612 FM channels, DAC channel, timers, key-on state, panning, channel 3 special mode, detune, SSG-EG, LFO, and frame-timestamped writes
+- a persistent Z80 master-cycle cursor that timestamps Z80-driven YM/PSG writes continuously across video frames
 - output filters and soft limiting in `AudioConstants` and `MegaDrive`
 - stem and trace helpers in `MdSharp.App` for audio diagnostics
 

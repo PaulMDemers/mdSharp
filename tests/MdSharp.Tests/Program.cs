@@ -85,6 +85,7 @@ Run("Z80 bus exposes banked 68k window", Z80BusExposesBanked68kWindow);
 Run("Z80 reset and bus request word writes use even byte", Z80ControlWordWritesUseEvenByte);
 Run("Z80 bus grant is delayed after request", Z80BusGrantIsDelayedAfterRequest);
 Run("Z80 runs during short 68k bus release windows", Z80RunsDuringShortBusReleaseWindows);
+Run("Z80 audio timestamps remain monotonic across frames", Z80AudioTimestampsRemainMonotonicAcrossFrames);
 Run("Z80 receives VBlank interrupt pulse", Z80ReceivesVBlankInterruptPulse);
 Run("Z80 VBlank interrupt is independent of 68k VBlank enable", Z80VBlankInterruptIgnores68kEnable);
 Run("Sonic 1 startup streams YM DAC sample", Sonic1StartupStreamsYmDacSample);
@@ -2343,6 +2344,66 @@ void Z80RunsDuringShortBusReleaseWindows()
     AssertEqual(1u, machine.MainCpu.D[0]);
     AssertEqual((byte)0x00, machine.Bus.ReadZ80Byte(0x1FFD));
     AssertTrue(machine.Z80.Halted, "Z80 should run and halt during the brief bus release");
+}
+
+void Z80AudioTimestampsRemainMonotonicAcrossFrames()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteWord(rom, 0x200, 0x4E71); // NOP
+    WriteWord(rom, 0x202, 0x60FC); // BRA -4
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    byte[] z80Program =
+    [
+        0x3E, 0x2B,       // LD A,$2B
+        0x32, 0x00, 0x40, // LD ($4000),A
+        0x3E, 0x80,       // LD A,$80
+        0x32, 0x01, 0x40, // LD ($4001),A ; enable DAC
+        0x3E, 0x2A,       // LD A,$2A
+        0x32, 0x00, 0x40, // LD ($4000),A
+        0x3E, 0x20,       // LD A,$20
+        0x32, 0x01, 0x40, // LD ($4001),A
+        0x3E, 0xE0,       // LD A,$E0
+        0x32, 0x01, 0x40, // LD ($4001),A
+        0x18, 0xEF        // JR back to the DAC sample loop
+    ];
+
+    for (int i = 0; i < z80Program.Length; i++)
+    {
+        machine.Bus.WriteZ80Byte((ushort)i, z80Program[i]);
+    }
+
+    long lastDacCycle = -1;
+    int dacWrites = 0;
+    int backwardTimestamps = 0;
+    machine.Bus.AudioObserver = access =>
+    {
+        if (access.Chip != AudioChip.Ym2612 || access.Kind != AudioAccessKind.Data || access.Port != 0 || access.Register != 0x2A)
+        {
+            return;
+        }
+
+        if (lastDacCycle > access.MasterCycle)
+        {
+            backwardTimestamps++;
+        }
+
+        lastDacCycle = access.MasterCycle;
+        dacWrites++;
+    };
+
+    machine.Bus.WriteWord(0x00A1_1200, 0x0100); // release Z80 reset
+    for (int frame = 0; frame < 20; frame++)
+    {
+        machine.RunFrameCycles(200_000);
+    }
+
+    machine.Bus.AudioObserver = null;
+    AssertTrue(dacWrites > 100, "test Z80 program should continuously stream DAC samples");
+    AssertEqual(0, backwardTimestamps);
 }
 
 void Z80ReceivesVBlankInterruptPulse()

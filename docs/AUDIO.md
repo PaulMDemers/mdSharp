@@ -204,6 +204,7 @@ Recent audio work improved:
 - Sonic title MAME comparison stability by forcing the title windows near 8.00s and letting the comparer fine-align locally; the current MAME suite refines Sonic title to about reference 7.93s / emulator 7.89s and raises the title correlation to roughly 0.895
 - Sonic Sega voice smoothness by lowering the YM DAC low-pass default to 6 kHz and disabling the DAC high-pass stage by default; this removes the small DC-recovery tremor while keeping the setting overrideable with `MDSHARP_YM_DAC_LOW_PASS_HZ` and `MDSHARP_YM_DAC_HIGH_PASS_HZ`
 - 0.3.0 guardrail pass lowered the default PSG mix from 1.05 to 0.90 after the local Sonic/Streets MAME reference suite improved average correlation, RMS delta, and band-error score while keeping the case ratings stable
+- Sonic Sega voice PCM continuity by running the Z80 up to the current master-cycle slice with a persistent cursor instead of recreating its audio timing at each video frame; this keeps DAC writes from folding backward or bunching at frame ends
 
 Current known rough spots:
 

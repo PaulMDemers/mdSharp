@@ -50,6 +50,7 @@ public sealed class MegaDrive
     private short[] _psgMixBuffer = new short[1024];
     private short[] _ymMixBuffer = new short[2048];
     private FramePerformanceAccumulator _framePerformance;
+    private long _z80MasterCycleCursor;
 
     public void Reset()
     {
@@ -69,6 +70,7 @@ public sealed class MegaDrive
         _audioFilterLeft = 0.0;
         _audioFilterRight = 0.0;
         _audioFadeInSamplesRemaining = ResetAudioFadeInSamples;
+        _z80MasterCycleCursor = 0;
     }
 
     public void StepInstruction()
@@ -95,8 +97,11 @@ public sealed class MegaDrive
         Psg.BeginAudioFrame(Scheduler.MasterCycles, Scheduler.MasterCycles + Scheduler.MasterCyclesPerFrame);
         Ym2612.BeginAudioFrame(Scheduler.MasterCycles, Scheduler.MasterCycles + Scheduler.MasterCyclesPerFrame);
         Scheduler.BeginFrame();
-        int z80MasterCycleAccumulator = 0;
-        long z80MasterCycleCursor = Scheduler.MasterCycles;
+        if (_z80MasterCycleCursor < Scheduler.MasterCycles)
+        {
+            _z80MasterCycleCursor = Scheduler.MasterCycles;
+        }
+
         bool z80InterruptPending = false;
         Bus.MasterCyclesPerScanline = Scheduler.MasterCyclesPerScanline;
         Bus.BeginLightGunFrame();
@@ -139,12 +144,12 @@ public sealed class MegaDrive
             int hblankLineCycles = Math.Max(1, Scheduler.M68kCyclesPerScanline - activeLineCycles);
             int activeDmaDebt = Vdp.ConsumeDmaCycleDebt(activeLineCycles);
             int activeBudget = Math.Max(0, activeLineCycles - activeDmaDebt);
-            int consumed = RunCpuSlice(activeBudget, 0, ref remainingInstructions, ref z80MasterCycleAccumulator, ref z80MasterCycleCursor, ref z80InterruptPending);
+            int consumed = RunCpuSlice(activeBudget, 0, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending);
 
             Vdp.SetHBlank(true);
             int hblankDmaDebt = Vdp.ConsumeDmaCycleDebt(hblankLineCycles);
             int hblankBudget = Math.Max(0, hblankLineCycles - hblankDmaDebt);
-            consumed += RunCpuSlice(hblankBudget, activeLineCycles, ref remainingInstructions, ref z80MasterCycleAccumulator, ref z80MasterCycleCursor, ref z80InterruptPending);
+            consumed += RunCpuSlice(hblankBudget, activeLineCycles, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending);
             Vdp.SetHBlank(false);
 
             int elapsedLineCycles = Scheduler.M68kCyclesPerScanline;
@@ -175,7 +180,7 @@ public sealed class MegaDrive
         Frames++;
     }
 
-    private int RunCpuSlice(int cycleBudget, int lineCycleOffset, ref int remainingInstructions, ref int z80MasterCycleAccumulator, ref long z80MasterCycleCursor, ref bool z80InterruptPending)
+    private int RunCpuSlice(int cycleBudget, int lineCycleOffset, ref int remainingInstructions, ref long z80MasterCycleCursor, ref bool z80InterruptPending)
     {
         if (cycleBudget <= 0 || remainingInstructions <= 0)
         {
@@ -214,56 +219,46 @@ public sealed class MegaDrive
                 remainingInstructions--;
             }
 
-            z80MasterCycleAccumulator += elapsedM68kCycles * GenesisScheduler.M68kDivider;
             long sliceEndMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
-            int z80Cycles = z80MasterCycleAccumulator / GenesisScheduler.Z80Divider;
-            if (z80Cycles >= 4)
+            if (z80MasterCycleCursor < lineStartMasterCycle)
             {
-                int consumedZ80Cycles = 0;
-                while (consumedZ80Cycles < z80Cycles)
+                z80MasterCycleCursor = lineStartMasterCycle;
+            }
+
+            while (z80MasterCycleCursor < sliceEndMasterCycle)
+            {
+                Bus.CurrentMasterCycle = z80MasterCycleCursor;
+                Bus.CurrentScanlineMasterCycleOffset = (int)Math.Clamp(z80MasterCycleCursor - lineStartMasterCycle, 0, Scheduler.MasterCyclesPerScanline - 1);
+                Z80.SetLines(Bus.Z80ResetAsserted, Bus.Z80BusGranted);
+                ushort z80Pc = z80Observer is null ? (ushort)0 : Z80.PC;
+                Bus.CurrentZ80Pc = Z80.PC;
+                byte z80Opcode = z80Observer is null ? (byte)0 : Bus.ReadZ80Byte(z80Pc);
+                int stepped;
+                if (CollectFramePerformance)
                 {
-                    if (z80MasterCycleCursor < lineStartMasterCycle)
-                    {
-                        z80MasterCycleCursor = lineStartMasterCycle;
-                    }
-
-                    Bus.CurrentMasterCycle = z80MasterCycleCursor;
-                    Bus.CurrentScanlineMasterCycleOffset = (int)Math.Clamp(z80MasterCycleCursor - lineStartMasterCycle, 0, Scheduler.MasterCyclesPerScanline - 1);
-                    Z80.SetLines(Bus.Z80ResetAsserted, Bus.Z80BusGranted);
-                    ushort z80Pc = z80Observer is null ? (ushort)0 : Z80.PC;
-                    Bus.CurrentZ80Pc = Z80.PC;
-                    byte z80Opcode = z80Observer is null ? (byte)0 : Bus.ReadZ80Byte(z80Pc);
-                    int stepped;
-                    if (CollectFramePerformance)
-                    {
-                        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-                        long start = System.Diagnostics.Stopwatch.GetTimestamp();
-                        stepped = Z80.StepInstruction(Bus, z80InterruptPending);
-                        _framePerformance.Z80Ticks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-                        _framePerformance.Z80AllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-                    }
-                    else
-                    {
-                        stepped = Z80.StepInstruction(Bus, z80InterruptPending);
-                    }
-
-                    if (Z80.LastStepAcceptedInterrupt)
-                    {
-                        z80InterruptPending = false;
-                    }
-                    z80Observer?.Invoke(new Z80InstructionTrace(Bus.CurrentMasterCycle, z80Pc, z80Opcode, stepped, Z80.PC, Z80.A, Z80.B, Z80.C, Z80.D, Z80.E, Z80.H, Z80.L, Z80.IX, Z80.IY, Z80.BusRequested, Z80.ResetAsserted));
-                    if (stepped <= 0)
-                    {
-                        z80MasterCycleCursor = sliceEndMasterCycle;
-                        consumedZ80Cycles = z80Cycles;
-                        break;
-                    }
-
-                    consumedZ80Cycles += stepped;
-                    z80MasterCycleCursor += stepped * GenesisScheduler.Z80Divider;
+                    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    stepped = Z80.StepInstruction(Bus, z80InterruptPending);
+                    _framePerformance.Z80Ticks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+                    _framePerformance.Z80AllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                }
+                else
+                {
+                    stepped = Z80.StepInstruction(Bus, z80InterruptPending);
                 }
 
-                z80MasterCycleAccumulator -= consumedZ80Cycles * GenesisScheduler.Z80Divider;
+                if (Z80.LastStepAcceptedInterrupt)
+                {
+                    z80InterruptPending = false;
+                }
+                z80Observer?.Invoke(new Z80InstructionTrace(Bus.CurrentMasterCycle, z80Pc, z80Opcode, stepped, Z80.PC, Z80.A, Z80.B, Z80.C, Z80.D, Z80.E, Z80.H, Z80.L, Z80.IX, Z80.IY, Z80.BusRequested, Z80.ResetAsserted));
+                if (stepped <= 0)
+                {
+                    z80MasterCycleCursor = sliceEndMasterCycle;
+                    break;
+                }
+
+                z80MasterCycleCursor += stepped * GenesisScheduler.Z80Divider;
             }
         }
 
@@ -429,6 +424,7 @@ public sealed class MegaDrive
             Ym2612.CaptureState(),
             Scheduler.CaptureState(),
             _pendingM68kInterruptLevels,
+            _z80MasterCycleCursor,
             _psgFilter,
             _audioBassFilterLeft,
             _audioBassFilterRight,
@@ -450,6 +446,7 @@ public sealed class MegaDrive
         Bus.CurrentMasterCycle = Scheduler.MasterCycles;
         Bus.AnchorSvpTiming(Scheduler.MasterCycles);
         _pendingM68kInterruptLevels = state.PendingM68kInterruptLevels;
+        _z80MasterCycleCursor = Math.Max(state.Z80MasterCycleCursor, Scheduler.MasterCycles);
         _psgFilter = state.PsgFilter;
         _audioBassFilterLeft = state.AudioBassFilterLeft;
         _audioBassFilterRight = state.AudioBassFilterRight;
@@ -484,6 +481,7 @@ public sealed class MegaDrive
         Ym2612.Ym2612State Ym2612,
         GenesisScheduler.SchedulerState Scheduler,
         byte PendingM68kInterruptLevels,
+        long Z80MasterCycleCursor,
         double PsgFilter,
         double AudioBassFilterLeft,
         double AudioBassFilterRight,
