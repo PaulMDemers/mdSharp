@@ -17,6 +17,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added desktop Preferences for save RAM and save-state storage folders.
 - Added desktop display Preferences for aspect mode, integer scaling, and smoothing.
 - Added CLI compatibility matrix export to JSON and Markdown, with public redaction mode.
+- Added desktop portable storage detection and release package manifests/content verification.
 
 ## 0.1.0 - 2026-05-17
 

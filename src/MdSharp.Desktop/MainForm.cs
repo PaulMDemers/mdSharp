@@ -1273,10 +1273,7 @@ internal sealed class MainForm : Form
     {
         return !string.IsNullOrWhiteSpace(_settings.StateDirectory)
             ? Path.GetFullPath(_settings.StateDirectory)
-            : Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "mdSharp",
-                "states");
+            : DesktopPaths.StateDirectory;
     }
 
     private string? CurrentFileDialogDirectory()

@@ -144,7 +144,7 @@ Other shortcuts:
 - `F11`: fullscreen
 - `Esc`: exit fullscreen
 
-The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. The File menu includes Preferences for display aspect/scaling, default ROM folder, save RAM folder, save-state folder, audio mute, and instruction-budget defaults. Save RAM and quick states default to `%APPDATA%\mdSharp\` folders unless custom folders are configured.
+The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. If `mdsharp-portable.json` or a `portable\` folder exists next to the executable, settings, save RAM, and quick states are stored under `portable\` instead. The File menu includes Preferences for display aspect/scaling, default ROM folder, save RAM folder, save-state folder, audio mute, and instruction-budget defaults.
 
 ## Command-Line Examples
 

@@ -38,10 +38,7 @@ internal sealed class DesktopSettings
     public InputSettings Input { get; set; } = InputSettings.Default();
     public List<InputProfileSettings> InputProfiles { get; set; } = [];
 
-    public static string SettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "mdSharp",
-        "desktop-settings.json");
+    public static string SettingsPath => DesktopPaths.SettingsPath;
 
     public static DesktopSettings Load()
     {

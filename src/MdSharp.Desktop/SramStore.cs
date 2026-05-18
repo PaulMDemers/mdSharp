@@ -10,10 +10,7 @@ internal static class SramStore
     {
         string saves = !string.IsNullOrWhiteSpace(saveDirectory)
             ? Path.GetFullPath(saveDirectory)
-            : Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "mdSharp",
-                "saves");
+            : DesktopPaths.SaveRamDirectory;
         string identity = string.IsNullOrWhiteSpace(cartridge.Header.ProductCode)
             ? Path.GetFileNameWithoutExtension(romPath)
             : cartridge.Header.ProductCode.Trim();

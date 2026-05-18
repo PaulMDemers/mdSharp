@@ -6,7 +6,7 @@ Release packages are created with:
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version <version>
 ```
 
-The script performs a clean Release build, stamps assemblies with the requested version, runs tests by default, publishes the desktop frontend, copies release documentation into each package folder, and writes zip files under `artifacts/packages/`.
+The script performs a clean Release build, stamps assemblies with the requested version, runs tests by default, publishes the desktop frontend, copies release documentation into each package folder, writes a package `manifest.json`, verifies package contents, and writes zip files under `artifacts/packages/`.
 
 ## Outputs
 
@@ -28,7 +28,10 @@ powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.1.
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.1.0 -SkipTests
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.1.0 -SkipSelfContained
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.1.0 -Runtime win-arm64
+powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.1.0 -Portable
 ```
+
+`-Portable` adds `mdsharp-portable.json` and a `portable/` storage root to each package. When present next to `MdSharp.Desktop.exe`, the desktop app stores settings, save RAM, and quick states under `portable/` instead of `%APPDATA%\mdSharp\`, unless the user configures explicit save folders in Preferences.
 
 ## Package Contents
 
@@ -38,6 +41,9 @@ Packages include:
 - `README.md`
 - `LICENSE`
 - `NOTICE.txt`
+- `manifest.json`
+
+The manifest records package name, version, build date, commit, runtime mode, portable mode, and SHA-256 hashes for package files.
 
 Packages must not include:
 

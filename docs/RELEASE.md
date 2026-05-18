@@ -103,7 +103,7 @@ Use the release packaging script for normal release candidates:
 powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version <version>
 ```
 
-The script writes framework-dependent and self-contained Windows packages under `artifacts\packages\`. See [PACKAGING.md](PACKAGING.md) for options and package contents.
+The script writes framework-dependent and self-contained Windows packages under `artifacts\packages\`, verifies package contents, and writes package manifests. See [PACKAGING.md](PACKAGING.md) for options, portable packages, and package contents.
 
 Manual framework-dependent publish:
 
