@@ -26,7 +26,7 @@ The frame scheduler now runs fixed active-display and HBlank CPU phases per scan
 - Expand unusual input hardware beyond J-Cart, Sega Team Player, EA 4-Way Play, and approximate light-gun support.
 - Improve unsupported-hardware diagnostics.
 - Build a curated public regression set using redistributable test ROMs and local-only movie metadata when possible.
-- Add automated release packaging.
+- Continue improving automated release packaging and release-gate coverage.
 
 ## Known Gaps
 
@@ -38,10 +38,11 @@ The frame scheduler now runs fixed active-display and HBlank CPU phases per scan
 
 ## Release Goals
 
-Before a public tagged release:
+Before each public tagged release:
 
-- Choose a license.
-- Remove local ROMs, reference audio, and generated output from the repository.
-- Verify README and docs against a clean clone.
+- Keep the MIT license, README, docs, and changelog current.
+- Run the repository hygiene check so local ROMs, reference audio, generated output, saves, and package artifacts remain untracked.
+- Run the release gate and review generated compatibility, visual, audio, movie, and performance reports.
+- Verify README and docs against a clean clone when release packaging changes.
 - Publish a Windows desktop build.
-- Include a known-issues section with compatibility expectations.
+- Include current compatibility expectations and known issues in release notes.

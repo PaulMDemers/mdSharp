@@ -20,6 +20,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added desktop portable storage detection and release package manifests/content verification.
 - Hid desktop developer-only frame safety budget controls behind a persisted View menu toggle.
 - Added a desktop `Help -> Diagnostics...` dialog with copyable app, package, storage, input, display, and cartridge details.
+- Added a repository hygiene checker to the release gate to catch tracked ROMs, generated output, package artifacts, saves, and local reference audio.
 
 ## 0.1.0 - 2026-05-17
 

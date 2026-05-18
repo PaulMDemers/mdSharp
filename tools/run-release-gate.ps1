@@ -46,6 +46,10 @@ Push-Location $root
 try {
     New-Item -ItemType Directory -Force -Path $OutputFolder | Out-Null
 
+    Invoke-Step "Repository hygiene" {
+        & (Join-Path $PSScriptRoot "check-repo-hygiene.ps1")
+    }
+
     Invoke-Step "Build" {
         dotnet build .\mdSharp.sln -c Release --no-restore -v minimal
     }

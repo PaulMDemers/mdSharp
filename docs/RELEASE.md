@@ -14,6 +14,7 @@ Run this checklist before publishing the repository or cutting a binary release.
 ## Build
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File tools\check-repo-hygiene.ps1
 dotnet clean mdSharp.sln -c Release
 dotnet build mdSharp.sln -c Release
 dotnet test mdSharp.sln -c Release --no-build
@@ -29,6 +30,7 @@ powershell -ExecutionPolicy Bypass -File tools\run-release-gate.ps1
 
 The gate runs:
 
+- repository hygiene checks for ignored ROMs, generated output, package artifacts, runtime saves, and local reference audio
 - Release build
 - core test harness
 - Virtua Racing SVP layout gate with `--fail-on-mismatch`
