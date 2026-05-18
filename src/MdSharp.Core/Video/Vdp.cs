@@ -362,10 +362,22 @@ public sealed class Vdp
     {
         _address = request.DestinationAddress;
         _code = request.Code;
+        WriteDataPort(value);
         AddDmaEvent(request, TraceEnabled ? $"fill value=${value:X4}" : "fill");
+        byte fill = (byte)value;
         for (int i = 0; i < request.LengthWords; i++)
         {
-            WriteDmaWord(value);
+            WriteDmaFillByte(fill);
+        }
+    }
+
+    private void WriteDmaFillByte(byte value)
+    {
+        if ((_code & 0x0F) == 0x01)
+        {
+            _vram[_address & 0xFFFF] = value;
+            _vramGeneration++;
+            IncrementAddress();
         }
     }
 

@@ -9,6 +9,8 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Kept the Z80 audio execution cursor continuous across frame boundaries and bounded to the current master-cycle slice, removing small PCM gaps in the Sonic 1 Sega voice.
 - Extended save states to preserve the Z80 audio timing cursor.
 - Re-ran the post-Z80 timing audio, visual, compatibility, and near-blank guardrails and recorded the current local snapshot.
+- Corrected VDP DMA fill to perform the trigger data-port word write followed by byte fills using the VDP auto-increment.
+- Classified the current no-input blank follow-up set further: `Zany Golf` reaches visible output with repeated Start, while `Ex-Mutants`, `Pac-Man 2`, `Shadow of the Beast`, and `Tyrants` remain focused suspects.
 
 ## 0.2.0 - 2026-05-18
 

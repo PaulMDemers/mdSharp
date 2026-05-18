@@ -531,13 +531,17 @@ void VdpDmaFillAndCopyModes()
 
     AssertEqual((byte)0xCA, machine.Vdp.Vram[0]);
     AssertEqual((byte)0xFE, machine.Vdp.Vram[1]);
-    AssertEqual((byte)0xCA, machine.Vdp.Vram[2]);
-    AssertEqual((byte)0xFE, machine.Vdp.Vram[3]);
-    AssertEqual((byte)0xCA, machine.Vdp.Vram[4]);
-    AssertEqual((byte)0xFE, machine.Vdp.Vram[5]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[2]);
+    AssertEqual((byte)0x00, machine.Vdp.Vram[3]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[4]);
+    AssertEqual((byte)0x00, machine.Vdp.Vram[5]);
+    AssertEqual((byte)0xFE, machine.Vdp.Vram[6]);
     AssertEqual(2, machine.Vdp.DmaEvents.Count);
     AssertEqual("fill-armed", machine.Vdp.DmaEvents[0].Operation);
     AssertEqual(6, machine.Vdp.DmaCycleDebt);
+
+    WriteVramWordAt(machine.Vdp, 0x0000, 0xCAFE);
+    WriteVramWordAt(machine.Vdp, 0x0002, 0xCAFE);
 
     ConfigureDma(machine.Vdp, lengthWords: 2, sourceAddress: 0, mode: 3);
     machine.Bus.WriteWord(0x00C0_0004, 0x4020); // VRAM DMA copy to $0020.
