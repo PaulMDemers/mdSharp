@@ -70,6 +70,16 @@ powershell -ExecutionPolicy Bypass -File tools\classify-near-blank.ps1 -Compatib
 
 The follow-up report classifies each near-blank candidate as visible, still blank, missing, or errored and links the later screenshots.
 
+## Post-Menu Workflow
+
+Use a manifest-driven post-menu pass when the broad boot dashboard is clean enough that title-screen samples are no longer the highest-value signal:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --post-menu-compat docs\post-menu-compat.sample.json roms render-output\post-menu 300000
+```
+
+This runs selected ROMs with built-in input scripts, captures later screenshots, and writes `post-menu-compatibility.csv`, `post-menu-compatibility.md`, and `index.html`. Prefer this for lightweight menu/gameplay probes. Use `.mdmovie` recordings when a scene needs precise human input.
+
 ## Publishing A Matrix
 
 After a sweep, export the CSV to a stable JSON artifact and a docs-ready Markdown table:

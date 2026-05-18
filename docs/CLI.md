@@ -71,6 +71,23 @@ Common options:
 
 Compatibility rows include cartridge diagnostics in the detail field when a ROM declares save hardware, expects bank switching, has suspicious header ranges, or needs known unsupported hardware.
 
+## Post-Menu Compatibility
+
+Use `--post-menu-compat` to run a manifest of scripted, later-frame compatibility probes after title/menu input:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --post-menu-compat docs\post-menu-compat.sample.json roms render-output\post-menu 300000
+```
+
+Outputs:
+
+- `post-menu-compatibility.csv`
+- `post-menu-compatibility.md`
+- `index.html`
+- screenshots under `screenshots/`
+
+The manifest can select ROMs by filename substrings, choose a built-in script such as `none`, `start`, `repeat-start`, `sonic1-start`, `sonic3-start`, `streets`, or `virtua-racing-drive`, and set a target frame for each case.
+
 ## Cartridge Info
 
 ```powershell

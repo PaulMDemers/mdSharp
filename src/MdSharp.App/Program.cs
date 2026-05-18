@@ -42,6 +42,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --loadstate <rom-file> <state.mdss> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --regress <rom-folder> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --compat <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>]");
+    Console.WriteLine("  mdsharp --post-menu-compat <manifest.json> <rom-folder> <output-folder> [instructions-per-frame]");
     Console.WriteLine("  mdsharp --perf-suite <rom-folder> <output-folder> [frames] [instructions-per-frame] [--frame-profile] [--filter <text>]");
     Console.WriteLine("  mdsharp --m68k-alloc-profile <rom-file> [frames] [instructions-per-frame] [top]");
     Console.WriteLine("  mdsharp --visual-checkpoints <rom-folder> <output-folder> [instructions-per-frame] [--update-baseline]");
@@ -294,6 +295,19 @@ if (args[0].Equals("--compat", StringComparison.OrdinalIgnoreCase))
     bool resume = args.Any(arg => arg.Equals("--resume", StringComparison.OrdinalIgnoreCase));
     string? filter = GetOptionValue(args, "--filter");
     RunCompatibilityDashboard(args[1], args[2], frames, instructionsPerFrame, screenshots, resume, filter);
+    return;
+}
+
+if (args[0].Equals("--post-menu-compat", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --post-menu-compat <manifest.json> <rom-folder> <output-folder> [instructions-per-frame]");
+        Environment.Exit(1);
+    }
+
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    RunPostMenuCompatibility(args[1], args[2], args[3], instructionsPerFrame);
     return;
 }
 
@@ -2151,6 +2165,218 @@ CompatibilityResult RunCompatibilityCase(string romPath, string romRoot, string 
         hash,
         bmpPath,
         detail);
+}
+
+void RunPostMenuCompatibility(string manifestPath, string romFolder, string outputFolder, int instructionsPerFrame)
+{
+    string fullManifestPath = Path.GetFullPath(manifestPath);
+    string fullRomFolder = Path.GetFullPath(romFolder);
+    string fullOutputFolder = Path.GetFullPath(outputFolder);
+    string screenshotFolder = Path.Combine(fullOutputFolder, "screenshots");
+    Directory.CreateDirectory(fullOutputFolder);
+    Directory.CreateDirectory(screenshotFolder);
+
+    PostMenuCompatibilityManifest manifest = JsonSerializer.Deserialize<PostMenuCompatibilityManifest>(
+            File.ReadAllText(fullManifestPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+        ?? new PostMenuCompatibilityManifest();
+
+    string[] roms = EnumerateRomFiles(fullRomFolder);
+    List<PostMenuCompatibilityResult> results = [];
+    string csvPath = Path.Combine(fullOutputFolder, "post-menu-compatibility.csv");
+    using StreamWriter writer = new(csvPath, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("id,name,rom,status,script,player2Script,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,cramNonzero,sprites,audioPeak,sha256,bmp,detail");
+
+    Console.WriteLine($"Post-menu compatibility run: {manifest.Cases.Count:N0} case(s), {instructionsPerFrame:N0} instructions/frame");
+    foreach (PostMenuCompatibilityCase testCase in manifest.Cases)
+    {
+        string? rom = ResolvePostMenuRom(testCase.RomMatches(), roms);
+        PostMenuCompatibilityResult result = rom is null
+            ? PostMenuCompatibilityResult.Missing(testCase)
+            : RunPostMenuCompatibilityCase(testCase, rom, fullRomFolder, screenshotFolder, instructionsPerFrame);
+        results.Add(result);
+        writer.WriteLine(result.ToCsv());
+        Console.WriteLine($"{result.Status,-12} {result.Id} {result.Name} frames={result.Frames:N0} pixels={result.NonBackgroundPixels:N0} maxPixels={result.MaxNonBackgroundPixels:N0} hash={ShortHash(result.Sha256)}");
+    }
+
+    writer.Dispose();
+    string markdownPath = Path.Combine(fullOutputFolder, "post-menu-compatibility.md");
+    string htmlPath = Path.Combine(fullOutputFolder, "index.html");
+    WritePostMenuCompatibilityMarkdown(markdownPath, fullManifestPath, results, instructionsPerFrame);
+    WritePostMenuCompatibilityHtml(htmlPath, results, instructionsPerFrame);
+    Console.WriteLine($"Wrote post-menu compatibility report to {markdownPath}");
+    Console.WriteLine($"Wrote post-menu compatibility dashboard to {htmlPath}");
+}
+
+PostMenuCompatibilityResult RunPostMenuCompatibilityCase(PostMenuCompatibilityCase testCase, string romPath, string romRoot, string screenshotFolder, int instructionsPerFrame)
+{
+    string status = "ok";
+    string detail = string.Empty;
+    MegaDrive? machine = null;
+    int completedFrames = 0;
+    long audioPeak = 0;
+    int maxNonBackground = 0;
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+    try
+    {
+        CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+        detail = FormatCartridgeDetail(cartridge.Diagnostics, FilenameCartridgeWarnings(romPath));
+        if (cartridge.Diagnostics.HasUnsupportedHardware)
+        {
+            status = "unsupported";
+        }
+        else
+        {
+            Func<int, ControllerInput> input = ResolveControllerInputScript(testCase.ScriptOrDefault());
+            Func<int, GenesisButton>? player2Input = string.IsNullOrWhiteSpace(testCase.Player2Script)
+                ? null
+                : ResolveInputScript(testCase.Player2Script!);
+            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine.Reset();
+            for (; completedFrames < Math.Max(1, testCase.Frames); completedFrames++)
+            {
+                ControllerInput pressed = input(completedFrames);
+                machine.Bus.Controller1.Pressed = pressed.Player1;
+                machine.Bus.Controller2.Pressed = player2Input?.Invoke(completedFrames) ?? pressed.Player2;
+                machine.RunFrameCycles(instructionsPerFrame);
+                audioPeak = Math.Max(audioPeak, PeakAbs(machine.RenderFrameStereoAudioSamples()));
+                int frameNumber = completedFrames + 1;
+                if (frameNumber % 60 == 0 || frameNumber == testCase.Frames)
+                {
+                    byte[] sample = machine.Vdp.RenderFrameRgb();
+                    maxNonBackground = Math.Max(maxNonBackground, CountNonBackgroundPixels(machine.Vdp, sample));
+                }
+            }
+        }
+    }
+    catch (M68kException ex)
+    {
+        status = "m68k";
+        detail = AppendDetail(detail, ex.Message);
+    }
+    catch (Exception ex)
+    {
+        status = "error";
+        detail = AppendDetail(detail, ex.Message);
+    }
+
+    stopwatch.Stop();
+    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    string hash = Convert.ToHexString(SHA256.HashData(rgb));
+    int nonBackground = machine is null ? 0 : CountNonBackgroundPixels(machine.Vdp, rgb);
+    maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+    if (status == "ok" && nonBackground <= Math.Max(64, testCase.MinimumPixels))
+    {
+        status = "blank";
+        detail = AppendDetail(detail, "Final checkpoint frame is near blank.");
+    }
+
+    int cramNonzero = machine is null ? 0 : CountNonzeroCram(machine.Vdp);
+    int sprites = machine?.Vdp.GetDiagnostics().LikelySpriteCount ?? 0;
+    string mode = machine?.Vdp.LastRenderMode ?? string.Empty;
+    uint pc = machine?.MainCpu.PC ?? 0;
+    string exceptions = machine is null ? string.Empty : FormatExceptions(machine.MainCpu);
+    string bmpPath = Path.Combine(screenshotFolder, $"{SanitizeFileName(testCase.IdOrName())}.bmp");
+    WriteBmp(bmpPath, Vdp.ScreenWidth, Vdp.ScreenHeight, rgb);
+    double fps = completedFrames <= 0 || stopwatch.Elapsed.TotalSeconds <= 0.0
+        ? 0.0
+        : completedFrames / stopwatch.Elapsed.TotalSeconds;
+
+    return new PostMenuCompatibilityResult(
+        testCase.IdOrName(),
+        testCase.NameOrId(),
+        Path.GetRelativePath(romRoot, romPath),
+        status,
+        testCase.ScriptOrDefault(),
+        testCase.Player2Script ?? string.Empty,
+        completedFrames,
+        stopwatch.ElapsedMilliseconds,
+        fps,
+        pc,
+        exceptions,
+        mode,
+        nonBackground,
+        maxNonBackground,
+        cramNonzero,
+        sprites,
+        audioPeak,
+        hash,
+        bmpPath,
+        detail);
+}
+
+string? ResolvePostMenuRom(string[] matches, string[] roms)
+{
+    foreach (string match in matches)
+    {
+        string? rom = roms.FirstOrDefault(path => string.Equals(Path.GetFileNameWithoutExtension(path), match, StringComparison.OrdinalIgnoreCase));
+        if (rom is not null)
+        {
+            return rom;
+        }
+    }
+
+    foreach (string match in matches)
+    {
+        string? rom = roms.FirstOrDefault(path => Path.GetFileNameWithoutExtension(path).Contains(match, StringComparison.OrdinalIgnoreCase));
+        if (rom is not null)
+        {
+            return rom;
+        }
+    }
+
+    return null;
+}
+
+void WritePostMenuCompatibilityMarkdown(string path, string manifestPath, IReadOnlyList<PostMenuCompatibilityResult> results, int instructionsPerFrame)
+{
+    int ok = results.Count(result => result.Status == "ok");
+    int blank = results.Count(result => result.Status == "blank");
+    int failed = results.Count(result => result.Status is not "ok" and not "blank");
+    StringBuilder builder = new();
+    builder.AppendLine("# mdSharp Post-Menu Compatibility");
+    builder.AppendLine();
+    builder.AppendLine($"Manifest: `{manifestPath}`");
+    builder.AppendLine();
+    builder.AppendLine($"- Cases: {results.Count:N0}");
+    builder.AppendLine($"- OK: {ok:N0}");
+    builder.AppendLine($"- Near blank: {blank:N0}");
+    builder.AppendLine($"- Failed/missing/unsupported: {failed:N0}");
+    builder.AppendLine($"- Instructions per frame: {instructionsPerFrame:N0}");
+    builder.AppendLine();
+    builder.AppendLine("| ID | Name | ROM | Status | Script | Frames | PC | Pixels | Max pixels | Sprites | Audio | Hash | Screenshot | Detail |");
+    builder.AppendLine("| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | --- | --- | --- |");
+    foreach (PostMenuCompatibilityResult result in results)
+    {
+        string bmp = string.IsNullOrWhiteSpace(result.BmpPath) ? string.Empty : Path.GetRelativePath(Path.GetDirectoryName(path)!, result.BmpPath).Replace('\\', '/');
+        string image = string.IsNullOrWhiteSpace(bmp) ? string.Empty : $"[bmp]({EscapeMarkdown(bmp)})";
+        builder.AppendLine($"| `{EscapeMarkdown(result.Id)}` | {EscapeMarkdown(result.Name)} | {EscapeMarkdown(result.RelativeRom)} | `{EscapeMarkdown(result.Status)}` | `{EscapeMarkdown(result.Script)}` | {result.Frames:N0} | `${result.Pc:X8}` | {result.NonBackgroundPixels:N0} | {result.MaxNonBackgroundPixels:N0} | {result.Sprites:N0} | {result.AudioPeak:N0} | `{ShortHash(result.Sha256)}` | {image} | {EscapeMarkdown(result.Detail)} |");
+    }
+
+    File.WriteAllText(path, builder.ToString(), Encoding.UTF8);
+}
+
+void WritePostMenuCompatibilityHtml(string path, IReadOnlyList<PostMenuCompatibilityResult> results, int instructionsPerFrame)
+{
+    int ok = results.Count(result => result.Status == "ok");
+    int failed = results.Count - ok;
+    StringBuilder html = new();
+    html.AppendLine("<!doctype html><html><head><meta charset=\"utf-8\"><title>mdSharp post-menu compatibility</title>");
+    html.AppendLine("<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f6f7f9;color:#15171a}table{border-collapse:collapse;width:100%;background:white}th,td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;text-align:left}th{position:sticky;top:0;background:#20242b;color:white}.ok{color:#127a34;font-weight:600}.bad{color:#b42318;font-weight:600}.blank{color:#9a6700;font-weight:600}img{image-rendering:pixelated;width:160px}</style></head><body>");
+    html.AppendLine($"<h1>mdSharp post-menu compatibility</h1><p>{results.Count:N0} cases, {ok:N0} ok, {failed:N0} flagged, {instructionsPerFrame:N0} instructions/frame.</p>");
+    html.AppendLine("<table><thead><tr><th>ID</th><th>Name</th><th>ROM</th><th>Status</th><th>Script</th><th>Frames</th><th>FPS</th><th>PC</th><th>Mode</th><th>Pixels</th><th>Max Pixels</th><th>Sprites</th><th>Audio</th><th>Hash</th><th>Screenshot</th><th>Detail</th></tr></thead><tbody>");
+    foreach (PostMenuCompatibilityResult result in results)
+    {
+        string css = result.Status == "ok" ? "ok" : result.Status == "blank" ? "blank" : "bad";
+        string screenshot = string.IsNullOrWhiteSpace(result.BmpPath)
+            ? string.Empty
+            : $"<a href=\"{EscapeHtml(Path.GetRelativePath(Path.GetDirectoryName(path)!, result.BmpPath).Replace('\\', '/'))}\"><img src=\"{EscapeHtml(Path.GetRelativePath(Path.GetDirectoryName(path)!, result.BmpPath).Replace('\\', '/'))}\"></a>";
+        html.AppendLine($"<tr><td>{EscapeHtml(result.Id)}</td><td>{EscapeHtml(result.Name)}</td><td>{EscapeHtml(result.RelativeRom)}</td><td class=\"{css}\">{EscapeHtml(result.Status)}</td><td>{EscapeHtml(result.Script)}</td><td>{result.Frames:N0}</td><td>{result.Fps:0.0}</td><td>${result.Pc:X8}</td><td>{EscapeHtml(result.RenderMode)}</td><td>{result.NonBackgroundPixels:N0}</td><td>{result.MaxNonBackgroundPixels:N0}</td><td>{result.Sprites:N0}</td><td>{result.AudioPeak:N0}</td><td><code>{EscapeHtml(ShortHash(result.Sha256))}</code></td><td>{screenshot}</td><td>{EscapeHtml(result.Detail)}</td></tr>");
+    }
+
+    html.AppendLine("</tbody></table></body></html>");
+    File.WriteAllText(path, html.ToString(), Encoding.UTF8);
 }
 
 void RunPerfSuite(string romFolder, string outputFolder, int frames, int instructionsPerFrame, bool frameProfile, string? filter = null)
@@ -9337,6 +9563,126 @@ file sealed record CompatibilityResult(
     public string ToCsv()
     {
         return $"\"{Escape(RelativeRom)}\",{Status},{Frames},{ElapsedMs},{Fps:0.###},${Pc:X8},\"{Escape(Exceptions)}\",{RenderMode},{NonBackgroundPixels},{MaxNonBackgroundPixels},{CramNonzero},{Sprites},{AudioPeak},{Sha256},\"{Escape(BmpPath)}\",\"{Escape(Detail)}\"";
+    }
+
+    private static string Escape(string value)
+    {
+        return value.Replace("\"", "\"\"", StringComparison.Ordinal);
+    }
+}
+
+file sealed class PostMenuCompatibilityManifest
+{
+    public List<PostMenuCompatibilityCase> Cases { get; set; } = [];
+}
+
+file sealed class PostMenuCompatibilityCase
+{
+    public string? Id { get; set; }
+    public string? Name { get; set; }
+    public string[]? Rom { get; set; }
+    public string[]? RomNameContains { get; set; }
+    public string? Script { get; set; }
+    public string? Player2Script { get; set; }
+    public int Frames { get; set; } = 1_800;
+    public int MinimumPixels { get; set; } = 64;
+
+    public string IdOrName()
+    {
+        if (!string.IsNullOrWhiteSpace(Id))
+        {
+            return Id!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Name))
+        {
+            return Name!;
+        }
+
+        return "post-menu-case";
+    }
+
+    public string NameOrId()
+    {
+        if (!string.IsNullOrWhiteSpace(Name))
+        {
+            return Name!;
+        }
+
+        return IdOrName();
+    }
+
+    public string ScriptOrDefault()
+    {
+        return string.IsNullOrWhiteSpace(Script) ? "none" : Script!;
+    }
+
+    public string[] RomMatches()
+    {
+        if (Rom is { Length: > 0 })
+        {
+            return Rom;
+        }
+
+        if (RomNameContains is { Length: > 0 })
+        {
+            return RomNameContains;
+        }
+
+        return [];
+    }
+}
+
+file sealed record PostMenuCompatibilityResult(
+    string Id,
+    string Name,
+    string RelativeRom,
+    string Status,
+    string Script,
+    string Player2Script,
+    int Frames,
+    long ElapsedMs,
+    double Fps,
+    uint Pc,
+    string Exceptions,
+    string RenderMode,
+    int NonBackgroundPixels,
+    int MaxNonBackgroundPixels,
+    int CramNonzero,
+    int Sprites,
+    long AudioPeak,
+    string Sha256,
+    string BmpPath,
+    string Detail)
+{
+    public static PostMenuCompatibilityResult Missing(PostMenuCompatibilityCase testCase)
+    {
+        return new PostMenuCompatibilityResult(
+            testCase.IdOrName(),
+            testCase.NameOrId(),
+            string.Empty,
+            "missing",
+            testCase.ScriptOrDefault(),
+            testCase.Player2Script ?? string.Empty,
+            testCase.Frames,
+            0,
+            0,
+            0,
+            string.Empty,
+            string.Empty,
+            0,
+            0,
+            0,
+            0,
+            0,
+            string.Empty,
+            string.Empty,
+            "ROM not found");
+    }
+
+    public string ToCsv()
+    {
+        return $"\"{Escape(Id)}\",\"{Escape(Name)}\",\"{Escape(RelativeRom)}\",{Status},\"{Escape(Script)}\",\"{Escape(Player2Script)}\",{Frames},{ElapsedMs},{Fps:0.###},${Pc:X8},\"{Escape(Exceptions)}\",{RenderMode},{NonBackgroundPixels},{MaxNonBackgroundPixels},{CramNonzero},{Sprites},{AudioPeak},{Sha256},\"{Escape(BmpPath)}\",\"{Escape(Detail)}\"";
     }
 
     private static string Escape(string value)

@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "id": "sonic1-green-hill",
+      "name": "Sonic 1 Green Hill after title start",
+      "rom": [ "sonic the hedgehog (usa)", "sonic the hedgehog" ],
+      "script": "sonic1-start",
+      "frames": 2400
+    },
+    {
+      "id": "sonic2-split-idle",
+      "name": "Sonic 2 split-view idle demo",
+      "rom": [ "sonic the hedgehog 2 (usa) (rev-b)", "sonic the hedgehog 2" ],
+      "script": "none",
+      "frames": 3800
+    },
+    {
+      "id": "sonic3-special-preview",
+      "name": "Sonic 3 post-start special-stage preview",
+      "rom": [ "sonic the hedgehog 3 (usa)", "sonic the hedgehog 3" ],
+      "script": "sonic3-start",
+      "frames": 3600
+    },
+    {
+      "id": "streets-hud",
+      "name": "Streets of Rage HUD gameplay",
+      "rom": [ "streets of rage (usa) (rev-a)", "streets of rage" ],
+      "script": "streets",
+      "frames": 2700
+    },
+    {
+      "id": "bloodlines-cutscene",
+      "name": "Castlevania Bloodlines cutscene color check",
+      "rom": [ "castlevania - bloodlines" ],
+      "script": "none",
+      "frames": 2400
+    },
+    {
+      "id": "aladdin-gameplay",
+      "name": "Aladdin early gameplay after menu",
+      "rom": [ "disney's aladdin", "aladdin" ],
+      "script": "repeat-start",
+      "frames": 1800
+    },
+    {
+      "id": "toy-story-bedroom",
+      "name": "Toy Story bedroom sprite/DMA scene",
+      "rom": [ "disney's toy story", "toy story" ],
+      "script": "repeat-start",
+      "frames": 3600
+    },
+    {
+      "id": "zero-wing-idle-gameplay",
+      "name": "Zero Wing idle gameplay sprites",
+      "rom": [ "zero wing" ],
+      "script": "none",
+      "frames": 7200
+    },
+    {
+      "id": "virtua-racing-gameplay",
+      "name": "Virtua Racing SVP gameplay",
+      "rom": [ "virtua racing" ],
+      "script": "virtua-racing-drive",
+      "player2Script": "none",
+      "frames": 4800
+    },
+    {
+      "id": "zany-golf-instructions",
+      "name": "Zany Golf input-gated instructions",
+      "rom": [ "zany golf" ],
+      "script": "repeat-start",
+      "frames": 15000
+    },
+    {
+      "id": "pacman2-title",
+      "name": "Pac-Man 2 post-VBlank wait title",
+      "rom": [ "pac-man 2 - the new adventures", "pac-man 2" ],
+      "script": "none",
+      "frames": 1200
+    },
+    {
+      "id": "shadow-beast-splash",
+      "name": "Shadow of the Beast Psygnosis splash",
+      "rom": [ "shadow of the beast (usa)", "shadow of the beast" ],
+      "script": "none",
+      "frames": 5000
+    },
+    {
+      "id": "tyrants-intro",
+      "name": "Tyrants intro art",
+      "rom": [ "tyrants - fight through time", "tyrants" ],
+      "script": "none",
+      "frames": 1500
+    },
+    {
+      "id": "ex-mutants-intro",
+      "name": "Ex-Mutants intro/title",
+      "rom": [ "ex-mutants" ],
+      "script": "none",
+      "frames": 1500
+    }
+  ]
+}

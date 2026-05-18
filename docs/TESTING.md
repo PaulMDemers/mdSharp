@@ -73,6 +73,22 @@ This rerenders only successful rows whose final sampled frame had at most 64 non
 
 Rows that become visible at a later frame are usually slow boots or transition timing. Rows that remain blank after all follow-up frames are stronger compatibility suspects.
 
+## Post-Menu Compatibility
+
+Boot sweeps prove that games start; post-menu compatibility checks prove that selected games keep working after title screens, menus, or long idle intros.
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --post-menu-compat docs\post-menu-compat.sample.json roms render-output\post-menu 300000
+```
+
+Review:
+
+- `post-menu-compatibility.md`
+- `index.html`
+- screenshots under `screenshots/`
+
+Add new cases to the manifest when a game needs scripted Start presses, a later idle/demo frame, or a known regression scene but does not need a full recorded input movie.
+
 ## Input Movie Regression
 
 Input movies are the preferred way to capture a human-observed issue.
