@@ -6,6 +6,8 @@ using MdSharp.Core.State;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
 
 namespace MdSharp.Desktop;
 
@@ -181,6 +183,7 @@ internal sealed class MainForm : Form
 
         ToolStripMenuItem help = new("&Help");
         help.DropDownItems.Add("&Controls", null, (_, _) => ShowControls());
+        help.DropDownItems.Add("&Diagnostics...", null, (_, _) => ShowDiagnostics());
         help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add($"&About {AppInfo.Name}", null, (_, _) => ShowAbout());
 
@@ -791,6 +794,171 @@ internal sealed class MainForm : Form
     {
         using AboutForm dialog = new(Icon);
         dialog.ShowDialog(this);
+    }
+
+    private void ShowDiagnostics()
+    {
+        using DiagnosticsForm dialog = new(BuildDiagnosticsText(), Icon);
+        dialog.ShowDialog(this);
+    }
+
+    private string BuildDiagnosticsText()
+    {
+        StringBuilder builder = new();
+        AppendLine(builder, "Generated", DateTimeOffset.Now.ToString("u"));
+        AppendLine(builder, "Application", AppInfo.Name);
+        AppendLine(builder, "Version", AppInfo.DisplayVersion);
+        AppendLine(builder, "Executable", Application.ExecutablePath);
+        AppendLine(builder, "Base directory", AppContext.BaseDirectory);
+        builder.AppendLine();
+
+        AppendLine(builder, "Portable mode", DesktopPaths.IsPortable ? "yes" : "no");
+        AppendLine(builder, "Storage root", DesktopPaths.RootDirectory);
+        AppendLine(builder, "Settings path", DesktopSettings.SettingsPath);
+        AppendLine(builder, "Default save RAM folder", _settings.SaveRamDirectory ?? DesktopPaths.SaveRamDirectory);
+        AppendLine(builder, "Default save-state folder", _settings.StateDirectory ?? DesktopPaths.StateDirectory);
+        AppendLine(builder, "Default ROM folder", _settings.DefaultRomDirectory ?? "(not set)");
+        builder.AppendLine();
+
+        AppendPackageDiagnostics(builder);
+        AppendDisplayDiagnostics(builder);
+        AppendInputDiagnostics(builder);
+        AppendRomDiagnostics(builder);
+
+        return builder.ToString();
+    }
+
+    private void AppendPackageDiagnostics(StringBuilder builder)
+    {
+        string manifestPath = Path.Combine(AppContext.BaseDirectory, "manifest.json");
+        AppendLine(builder, "Package manifest", File.Exists(manifestPath) ? manifestPath : "(not found)");
+        if (!File.Exists(manifestPath))
+        {
+            builder.AppendLine();
+            return;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            JsonElement root = document.RootElement;
+            AppendLine(builder, "Package name", JsonString(root, "name"));
+            AppendLine(builder, "Package version", JsonString(root, "version"));
+            AppendLine(builder, "Build version", JsonString(root, "buildVersion"));
+            AppendLine(builder, "Package commit", JsonString(root, "commit"));
+            AppendLine(builder, "Build date UTC", JsonString(root, "buildDateUtc"));
+            AppendLine(builder, "Runtime mode", JsonString(root, "runtimeMode"));
+            AppendLine(builder, "Runtime", JsonString(root, "runtime"));
+            AppendLine(builder, "Package portable", JsonBool(root, "portable"));
+            AppendLine(builder, "Packaged files", JsonArrayCount(root, "files"));
+        }
+        catch (Exception ex)
+        {
+            AppendLine(builder, "Package manifest error", ex.Message);
+        }
+
+        builder.AppendLine();
+    }
+
+    private void AppendDisplayDiagnostics(StringBuilder builder)
+    {
+        AppendLine(builder, "Display aspect", _settings.VideoAspectMode.ToString());
+        AppendLine(builder, "Integer scale", _settings.VideoIntegerScale ? "yes" : "no");
+        AppendLine(builder, "Smooth scaling", _settings.VideoSmoothing ? "yes" : "no");
+        AppendLine(builder, "Fullscreen", _fullscreen ? "yes" : "no");
+        AppendLine(builder, "Muted", _muted ? "yes" : "no");
+        AppendLine(builder, "Developer options", _settings.ShowDeveloperOptions ? "shown" : "hidden");
+        if (_settings.ShowDeveloperOptions)
+        {
+            AppendLine(builder, "Frame safety budget", _instructionsPerFrame.ToString("N0"));
+        }
+
+        builder.AppendLine();
+    }
+
+    private void AppendInputDiagnostics(StringBuilder builder)
+    {
+        _settings.Input.EnsureDefaults();
+        AppendLine(builder, "Port 1 device", _settings.Input.Port1Device.ToString());
+        AppendLine(builder, "Port 2 device", _settings.Input.Port2Device.ToString());
+        for (int i = 0; i < InputSettings.ControllerCount; i++)
+        {
+            ControllerInputSettings controller = _settings.Input.Controller(i);
+            AppendLine(builder, $"Player {i + 1}", $"keyboard={(controller.KeyboardEnabled ? "on" : "off")}, sixButton={(controller.SixButtonEnabled ? "on" : "off")}, gamepad={(controller.GamepadIndex < 0 ? "disabled" : controller.GamepadIndex + 1)}");
+        }
+
+        builder.AppendLine();
+    }
+
+    private void AppendRomDiagnostics(StringBuilder builder)
+    {
+        if (_cartridge is null || _romPath is null)
+        {
+            AppendLine(builder, "ROM", "(none loaded)");
+            return;
+        }
+
+        CartridgeDiagnostics diagnostics = _cartridge.Diagnostics;
+        AppendLine(builder, "ROM path", _romPath);
+        AppendLine(builder, "ROM hash", InputMovie.ComputeRomSha256(_cartridge));
+        AppendLine(builder, "Save RAM path", SramStore.GetSavePath(_romPath, _cartridge, _settings.SaveRamDirectory));
+        AppendLine(builder, $"Quick state slot {_settings.CurrentStateSlot}", QuickStatePath(_settings.CurrentStateSlot));
+        AppendLine(builder, "Domestic name", Empty(_cartridge.Header.DomesticName));
+        AppendLine(builder, "Overseas name", Empty(_cartridge.Header.OverseasName));
+        AppendLine(builder, "Product code", Empty(_cartridge.Header.ProductCode));
+        AppendLine(builder, "Region", Empty(_cartridge.Header.Region));
+        AppendLine(builder, "ROM size", $"{diagnostics.RomSize:N0} bytes");
+        AppendLine(builder, "Save hardware", diagnostics.SaveHardware);
+        AppendLine(builder, "Save range", FormatRange(diagnostics.SaveRamStart, diagnostics.SaveRamEnd, diagnostics.SaveRamLanes));
+        AppendLine(builder, "EEPROM size", diagnostics.EepromSize?.ToString("N0") ?? "none");
+        AppendLine(builder, "Bank switching", diagnostics.UsesBankSwitchRegisters ? "yes" : "no");
+        AppendLine(builder, "J-Cart", diagnostics.HasJCart ? "yes" : "no");
+        AppendLine(builder, "SVP", diagnostics.HasSvp ? "yes" : "no");
+        AppendLine(builder, "Unsupported hardware", diagnostics.UnsupportedHardware.Length == 0 ? "none" : string.Join(", ", diagnostics.UnsupportedHardware));
+        AppendLine(builder, "Warnings", diagnostics.Warnings.Length == 0 ? "none" : string.Join("; ", diagnostics.Warnings));
+        AppendLine(builder, "Frame", _machine?.Frames.ToString("N0") ?? "unknown");
+        AppendLine(builder, "PC", _machine is null ? "unknown" : $"${_machine.MainCpu.PC:X8}");
+        AppendLine(builder, "Render mode", _machine?.Vdp.LastRenderMode ?? "unknown");
+    }
+
+    private static void AppendLine(StringBuilder builder, string name, string value)
+    {
+        builder.Append(name);
+        builder.Append(": ");
+        builder.AppendLine(value);
+    }
+
+    private static string JsonString(JsonElement root, string property)
+    {
+        return root.TryGetProperty(property, out JsonElement value) && value.ValueKind != JsonValueKind.Null
+            ? value.ToString()
+            : "(not set)";
+    }
+
+    private static string JsonBool(JsonElement root, string property)
+    {
+        return root.TryGetProperty(property, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? (value.GetBoolean() ? "yes" : "no")
+            : "(not set)";
+    }
+
+    private static string JsonArrayCount(JsonElement root, string property)
+    {
+        return root.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.Array
+            ? value.GetArrayLength().ToString("N0")
+            : "(not set)";
+    }
+
+    private static string FormatRange(uint? start, uint? end, string lanes)
+    {
+        return start.HasValue && end.HasValue
+            ? $"${start.Value:X6}-${end.Value:X6} ({lanes})"
+            : "none";
+    }
+
+    private static string Empty(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "(empty)" : value.Trim();
     }
 
     private void ShowInputConfig()

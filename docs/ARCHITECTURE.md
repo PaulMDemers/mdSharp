@@ -66,6 +66,10 @@ A typical frontend integration flow is:
 6. Render video and audio samples.
 7. Persist SRAM or save state when needed.
 
+## Desktop Frontend
+
+`MdSharp.Desktop` owns WinForms menus, file dialogs, preferences, input mapping, audio playback, and package-aware storage paths. The desktop diagnostics dialog is intentionally frontend-level: it gathers app/package metadata, portable-mode paths, input/display settings, and current cartridge details without adding UI concepts to `MdSharp.Core`.
+
 ## Design Principles
 
 - Keep the core deterministic. Given the same ROM, save data, settings, and input movie, the same frame should produce the same video, audio, and machine state.

@@ -19,6 +19,7 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added CLI compatibility matrix export to JSON and Markdown, with public redaction mode.
 - Added desktop portable storage detection and release package manifests/content verification.
 - Hid desktop developer-only frame safety budget controls behind a persisted View menu toggle.
+- Added a desktop `Help -> Diagnostics...` dialog with copyable app, package, storage, input, display, and cartridge details.
 
 ## 0.1.0 - 2026-05-17
 

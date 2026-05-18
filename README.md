@@ -144,7 +144,7 @@ Other shortcuts:
 - `F11`: fullscreen
 - `Esc`: exit fullscreen
 
-The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. If `mdsharp-portable.json` or a `portable\` folder exists next to the executable, settings, save RAM, and quick states are stored under `portable\` instead. The File menu includes Preferences for display aspect/scaling, default ROM folder, save RAM folder, save-state folder, and audio mute. `View -> Developer Options` reveals diagnostic frame safety budget controls used during emulator development.
+The desktop app stores settings under `%APPDATA%\mdSharp\desktop-settings.json`. If `mdsharp-portable.json` or a `portable\` folder exists next to the executable, settings, save RAM, and quick states are stored under `portable\` instead. The File menu includes Preferences for display aspect/scaling, default ROM folder, save RAM folder, save-state folder, and audio mute. `Help -> Diagnostics...` opens a copyable support summary with app/package details, storage paths, input/display settings, and current cartridge metadata. `View -> Developer Options` reveals diagnostic frame safety budget controls used during emulator development.
 
 ## Command-Line Examples
 
