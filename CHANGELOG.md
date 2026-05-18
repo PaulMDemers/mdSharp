@@ -4,7 +4,8 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 
 ## Unreleased
 
-- No unreleased changes yet.
+- Started the `0.3.0` development cycle.
+- Retuned the default PSG mix level against the local Sonic/Streets MAME audio guardrail suite.
 
 ## 0.2.0 - 2026-05-18
 

@@ -10,10 +10,10 @@ The frame scheduler now runs fixed active-display and HBlank CPU phases per scan
 
 ## Short-Term Priorities
 
-- Continue compatibility sweeps against broad ROM folders.
-- Turn user-visible bugs into input movies or visual checkpoints.
 - Improve YM2612 envelope/output accuracy.
 - Add more audio references, especially Streets of Rage.
+- Continue compatibility sweeps against broad ROM folders.
+- Turn user-visible bugs into input movies or visual checkpoints.
 - Expand cartridge hardware coverage.
 - Harden Z80 and 68000 edge cases with more tests.
 - Profile and optimize hot paths in Release builds.

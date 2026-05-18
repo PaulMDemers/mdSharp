@@ -203,6 +203,7 @@ Recent audio work improved:
 - Sonic title MAME balance by lowering default YM channel 2 and YM channel 6/DAC mix contribution, which keeps the low `G#2`/`D#2` support from overpowering the `D5`/`D6` lead
 - Sonic title MAME comparison stability by forcing the title windows near 8.00s and letting the comparer fine-align locally; the current MAME suite refines Sonic title to about reference 7.93s / emulator 7.89s and raises the title correlation to roughly 0.895
 - Sonic Sega voice smoothness by lowering the YM DAC low-pass default to 6 kHz and disabling the DAC high-pass stage by default; this removes the small DC-recovery tremor while keeping the setting overrideable with `MDSHARP_YM_DAC_LOW_PASS_HZ` and `MDSHARP_YM_DAC_HIGH_PASS_HZ`
+- 0.3.0 guardrail pass lowered the default PSG mix from 1.05 to 0.90 after the local Sonic/Streets MAME reference suite improved average correlation, RMS delta, and band-error score while keeping the case ratings stable
 
 Current known rough spots:
 

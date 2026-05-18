@@ -5,7 +5,7 @@ public static class AudioConstants
     public const int DefaultSampleRate = 44_100;
     public const int StereoChannels = 2;
     public static readonly double YmMixLevel = ReadTuning("MDSHARP_YM_MIX_LEVEL", 0.85);
-    public static readonly double PsgMixLevel = ReadTuning("MDSHARP_PSG_MIX_LEVEL", 1.05);
+    public static readonly double PsgMixLevel = ReadTuning("MDSHARP_PSG_MIX_LEVEL", 0.90);
     private static readonly double[] YmChannelMixLevels = BuildChannelMixLevels("MDSHARP_YM_CH", [1.0, 0.65, 1.0, 1.0, 1.0, 0.70]);
     private static readonly double[] PsgChannelMixLevels = BuildChannelMixLevels("MDSHARP_PSG_CH", [1.0, 0.70, 1.0, 1.0]);
     public static readonly double MasterMixLevel = ReadTuning("MDSHARP_MASTER_MIX_LEVEL", 1.45);
