@@ -3061,7 +3061,7 @@ public sealed class ThirtyTwoXDevice
                 break;
             }
 
-            int paletteIndex = source[sourceIndex];
+            int paletteIndex = source[sourceIndex] & 0x3F;
             ushort color = ReadBigEndianWord(_palette, paletteIndex * 2);
             if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
             {

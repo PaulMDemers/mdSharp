@@ -43,6 +43,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
+    Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
     Console.WriteLine("  mdsharp --32x-node-dump <rom-file> [frames] [instructions-per-frame] [address] [count] [linear|next|prev]");
     Console.WriteLine("  mdsharp --32x-cache-inspect <rom-file> [frames] [instructions-per-frame] [address]");
@@ -319,6 +320,20 @@ if (args[0].Equals("--32x-cache-inspect", StringComparison.OrdinalIgnoreCase))
     int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
     uint address = args.Length > 4 ? ParseNumber(args[4]) : 0;
     InspectThirtyTwoXCache(args[1], frames, instructionsPerFrame, address);
+    return;
+}
+
+if (args[0].Equals("--32x-fb-summary", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
+        return;
+    }
+
+    int frames = args.Length > 2 && int.TryParse(args[2], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
+    SummarizeThirtyTwoXFrameBuffers(args[1], frames, instructionsPerFrame);
     return;
 }
 
@@ -3526,6 +3541,148 @@ void InspectThirtyTwoXCache(string romPath, int frames, int instructionsPerFrame
     Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
     Console.WriteLine(device.FormatSh2CacheLineDebug(address, cpuIndex: 0));
     Console.WriteLine(device.FormatSh2CacheLineDebug(address, cpuIndex: 1));
+}
+
+void SummarizeThirtyTwoXFrameBuffers(string romPath, int frames, int instructionsPerFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    ushort mode = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset);
+    ushort fbctl = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+    Console.WriteLine($"32X framebuffer summary: {Path.GetFileName(romPath)} frame={frames}");
+    Console.WriteLine($"mode={mode & 0x03} rawMode=${mode:X4} fbctl=${fbctl:X4} display={device.DisplayFrameBufferIndex} draw={device.DrawFrameBufferIndex} compositeMode={device.LastCompositeMode} fallback={device.LastCompositeUsedFallback} pixels={device.LastCompositeWrittenPixels}");
+    int paletteNonzero = 0;
+    Console.Write("palette nonzero:");
+    for (int i = 0; i < ThirtyTwoXHardwareProfile.PaletteEntries; i++)
+    {
+        ushort color = device.ReadPaletteWord((ushort)(i * 2));
+        if (color == 0)
+        {
+            continue;
+        }
+
+        paletteNonzero++;
+        if (paletteNonzero <= 24)
+        {
+            Console.Write($" ${i:X2}:${color:X4}");
+        }
+    }
+
+    Console.WriteLine($" count={paletteNonzero}");
+    SummarizeFrameBuffer("display", device.DisplayFrameBuffer, device);
+    SummarizeFrameBuffer("draw", device.DrawFrameBuffer, device);
+
+    static void SummarizeFrameBuffer(string label, ReadOnlySpan<byte> buffer, ThirtyTwoXDevice device)
+    {
+        int nonzero = 0;
+        int first = -1;
+        int last = -1;
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            if (buffer[i] == 0)
+            {
+                continue;
+            }
+
+            nonzero++;
+            first = first < 0 ? i : first;
+            last = i;
+        }
+
+        Console.WriteLine($"[{label}] nonzero={nonzero} first=${Math.Max(first, 0):X5} last=${Math.Max(last, 0):X5}");
+        int[] histogram = new int[256];
+        for (int i = 0x200; i < buffer.Length; i++)
+        {
+            histogram[buffer[i]]++;
+        }
+
+        Console.Write($"[{label}] top indices:");
+        for (int rank = 0; rank < 8; rank++)
+        {
+            int bestIndex = 0;
+            int bestCount = -1;
+            for (int i = 1; i < histogram.Length; i++)
+            {
+                if (histogram[i] > bestCount)
+                {
+                    bestCount = histogram[i];
+                    bestIndex = i;
+                }
+            }
+
+            if (bestCount <= 0)
+            {
+                break;
+            }
+
+            ushort color = device.ReadPaletteWord((ushort)(bestIndex * 2));
+            Console.Write($" ${bestIndex:X2}:{bestCount}/${color:X4}");
+            histogram[bestIndex] = -1;
+        }
+
+        Console.WriteLine();
+        for (int bucket = 0; bucket < buffer.Length; bucket += 0x2000)
+        {
+            int bucketNonzero = 0;
+            int end = Math.Min(buffer.Length, bucket + 0x2000);
+            for (int i = bucket; i < end; i++)
+            {
+                if (buffer[i] != 0)
+                {
+                    bucketNonzero++;
+                }
+            }
+
+            if (bucketNonzero > 0)
+            {
+                Console.WriteLine($"[{label}] bucket ${bucket:X5}-${end - 1:X5} nonzero={bucketNonzero}");
+            }
+        }
+
+        for (int y = 0; y < Vdp.ScreenHeight; y += 32)
+        {
+            int lineWordOffset = y * 2;
+            int lineAddress = ReadBigEndianWordSpan(buffer, lineWordOffset) * 2;
+            int colored = 0;
+            int firstPixel = -1;
+            int lastPixel = -1;
+            if ((uint)lineAddress < (uint)buffer.Length)
+            {
+                for (int x = 0; x < ThirtyTwoXHardwareProfile.NominalWidth; x++)
+                {
+                    int sourceIndex = lineAddress + x;
+                    if ((uint)sourceIndex >= (uint)buffer.Length)
+                    {
+                        break;
+                    }
+
+                    byte paletteIndex = (byte)(buffer[sourceIndex] & 0x3F);
+                    ushort color = device.ReadPaletteWord((ushort)(paletteIndex * 2));
+                    if (paletteIndex != 0 && color != 0)
+                    {
+                        colored++;
+                        firstPixel = firstPixel < 0 ? x : firstPixel;
+                        lastPixel = x;
+                    }
+                }
+            }
+
+            Console.WriteLine($"[{label}] y={y,3} line=${lineAddress:X5} colored={colored,3} firstX={firstPixel,4} lastX={lastPixel,4}");
+        }
+    }
 }
 
 void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame, int line, int maxSpans)
