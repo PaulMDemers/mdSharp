@@ -389,6 +389,12 @@ public sealed class MegaDrive
             return false;
         }
 
+        if (opcode == 0x4E4F)
+        {
+            Bus.ThirtyTwoX.RunSh2Cycles(256);
+            return true;
+        }
+
         if (opcode != 0x4E40 ||
             (MainCpu.D[0] & 0xFF) < 0x81)
         {

@@ -13,6 +13,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private const int M68kMasterDivider = 7;
     private const uint ThirtyTwoXVectorRomBytes = 0x100;
     private const uint ThirtyTwoXVectorRomHelperStart = 0xC0;
+    private const uint ThirtyTwoXTrap15ReturnHelper = ThirtyTwoXVectorRomHelperStart + 0x3C;
     private const uint ThirtyTwoXVectorJumpTableStart = 0x88_0200;
     private const uint ThirtyTwoXVectorJumpTableStride = 6;
     private const int ThirtyTwoXCommunicationReadSyncCycles = 32;
@@ -1123,6 +1124,18 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return true;
         }
 
+        if (address == ThirtyTwoXTrap15ReturnHelper)
+        {
+            value = 0x4E;
+            return true;
+        }
+
+        if (address == ThirtyTwoXTrap15ReturnHelper + 1)
+        {
+            value = 0x73;
+            return true;
+        }
+
         if (address >= ThirtyTwoXVectorRomHelperStart)
         {
             value = ThirtyTwoXVectorRomHelpers[(int)(address - ThirtyTwoXVectorRomHelperStart)];
@@ -1131,7 +1144,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         uint vector = address >> 2;
         uint byteOffset = address & 0x03;
-        uint target = ThirtyTwoXVectorJumpTableStart + (vector * ThirtyTwoXVectorJumpTableStride);
+        uint target = vector == 47
+            ? ThirtyTwoXTrap15ReturnHelper
+            : ThirtyTwoXVectorJumpTableStart + (vector * ThirtyTwoXVectorJumpTableStride);
         value = byteOffset switch
         {
             0 => (byte)(target >> 24),
