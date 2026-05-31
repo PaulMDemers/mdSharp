@@ -3582,10 +3582,11 @@ void SummarizeThirtyTwoXFrameBuffers(string romPath, int frames, int instruction
     }
 
     Console.WriteLine($" count={paletteNonzero}");
-    SummarizeFrameBuffer("display", device.DisplayFrameBuffer, device);
-    SummarizeFrameBuffer("draw", device.DrawFrameBuffer, device);
+    int bitmapMode = mode & 0x03;
+    SummarizeFrameBuffer("display", device.DisplayFrameBuffer, device, bitmapMode);
+    SummarizeFrameBuffer("draw", device.DrawFrameBuffer, device, bitmapMode);
 
-    static void SummarizeFrameBuffer(string label, ReadOnlySpan<byte> buffer, ThirtyTwoXDevice device)
+    static void SummarizeFrameBuffer(string label, ReadOnlySpan<byte> buffer, ThirtyTwoXDevice device, int bitmapMode)
     {
         int nonzero = 0;
         int first = -1;
@@ -3661,21 +3662,65 @@ void SummarizeThirtyTwoXFrameBuffers(string romPath, int frames, int instruction
             int lastPixel = -1;
             if ((uint)lineAddress < (uint)buffer.Length)
             {
-                for (int x = 0; x < ThirtyTwoXHardwareProfile.NominalWidth; x++)
+                if (bitmapMode == 2)
                 {
-                    int sourceIndex = lineAddress + x;
-                    if ((uint)sourceIndex >= (uint)buffer.Length)
+                    for (int x = 0; x < ThirtyTwoXHardwareProfile.NominalWidth; x++)
                     {
-                        break;
-                    }
+                        int sourceIndex = lineAddress + (x * 2);
+                        if (sourceIndex + 1 >= buffer.Length)
+                        {
+                            break;
+                        }
 
-                    byte paletteIndex = (byte)(buffer[sourceIndex] & 0x3F);
-                    ushort color = device.ReadPaletteWord((ushort)(paletteIndex * 2));
-                    if (paletteIndex != 0 && color != 0)
+                        ushort color = ReadBigEndianWordSpan(buffer, sourceIndex);
+                        if (color != 0)
+                        {
+                            colored++;
+                            firstPixel = firstPixel < 0 ? x : firstPixel;
+                            lastPixel = x;
+                        }
+                    }
+                }
+                else if (bitmapMode == 3)
+                {
+                    int x = 0;
+                    int sourceIndex = lineAddress;
+                    while (x < ThirtyTwoXHardwareProfile.NominalWidth && sourceIndex + 1 < buffer.Length)
                     {
-                        colored++;
-                        firstPixel = firstPixel < 0 ? x : firstPixel;
-                        lastPixel = x;
+                        ushort span = ReadBigEndianWordSpan(buffer, sourceIndex);
+                        sourceIndex += 2;
+                        int runLength = (span >> 8) + 1;
+                        int paletteIndex = span & 0xFF;
+                        ushort color = device.ReadPaletteWord((ushort)(paletteIndex * 2));
+                        int end = Math.Min(ThirtyTwoXHardwareProfile.NominalWidth, x + runLength);
+                        if (paletteIndex != 0 && color != 0)
+                        {
+                            colored += end - x;
+                            firstPixel = firstPixel < 0 ? x : firstPixel;
+                            lastPixel = end - 1;
+                        }
+
+                        x = end;
+                    }
+                }
+                else
+                {
+                    for (int x = 0; x < ThirtyTwoXHardwareProfile.NominalWidth; x++)
+                    {
+                        int sourceIndex = lineAddress + x;
+                        if ((uint)sourceIndex >= (uint)buffer.Length)
+                        {
+                            break;
+                        }
+
+                        byte paletteIndex = (byte)(buffer[sourceIndex] & 0x3F);
+                        ushort color = device.ReadPaletteWord((ushort)(paletteIndex * 2));
+                        if (paletteIndex != 0 && color != 0)
+                        {
+                            colored++;
+                            firstPixel = firstPixel < 0 ? x : firstPixel;
+                            lastPixel = x;
+                        }
                     }
                 }
             }
