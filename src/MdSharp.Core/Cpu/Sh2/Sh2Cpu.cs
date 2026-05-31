@@ -2080,28 +2080,53 @@ public sealed class Sh2Cpu
         PC += 2;
         LastOpcode = opcode;
         LastOpcodePc = pc;
-        uint beforeSr = SR;
-        uint beforeR0 = R[0];
-        uint beforeR1 = R[1];
-        uint beforeR2 = R[2];
-        uint beforeR3 = R[3];
-        uint beforeR4 = R[4];
-        uint beforeR5 = R[5];
-        uint beforeR6 = R[6];
-        uint beforeR7 = R[7];
-        uint beforeR8 = R[8];
-        uint beforeR9 = R[9];
-        uint beforeR10 = R[10];
-        uint beforeR11 = R[11];
-        uint beforeR12 = R[12];
-        uint beforeR13 = R[13];
-        uint beforeR14 = R[14];
-        uint beforeR15 = R[15];
-        uint beforePr = PR;
-        uint beforeGbr = GBR;
-        uint beforeVbr = VBR;
+        Action<Sh2InstructionTrace>? observer = InstructionObserver;
+        uint beforeSr = 0;
+        uint beforeR0 = 0;
+        uint beforeR1 = 0;
+        uint beforeR2 = 0;
+        uint beforeR3 = 0;
+        uint beforeR4 = 0;
+        uint beforeR5 = 0;
+        uint beforeR6 = 0;
+        uint beforeR7 = 0;
+        uint beforeR8 = 0;
+        uint beforeR9 = 0;
+        uint beforeR10 = 0;
+        uint beforeR11 = 0;
+        uint beforeR12 = 0;
+        uint beforeR13 = 0;
+        uint beforeR14 = 0;
+        uint beforeR15 = 0;
+        uint beforePr = 0;
+        uint beforeGbr = 0;
+        uint beforeVbr = 0;
+        long beforeCycles = 0;
+        if (observer is not null)
+        {
+            beforeSr = SR;
+            beforeR0 = R[0];
+            beforeR1 = R[1];
+            beforeR2 = R[2];
+            beforeR3 = R[3];
+            beforeR4 = R[4];
+            beforeR5 = R[5];
+            beforeR6 = R[6];
+            beforeR7 = R[7];
+            beforeR8 = R[8];
+            beforeR9 = R[9];
+            beforeR10 = R[10];
+            beforeR11 = R[11];
+            beforeR12 = R[12];
+            beforeR13 = R[13];
+            beforeR14 = R[14];
+            beforeR15 = R[15];
+            beforePr = PR;
+            beforeGbr = GBR;
+            beforeVbr = VBR;
+            beforeCycles = Cycles;
+        }
 
-        long beforeCycles = Cycles;
         _delaySlotWaitCycles = 0;
         int cycles = Execute(opcode, pc);
         cycles += _delaySlotWaitCycles;
@@ -2111,55 +2136,59 @@ public sealed class Sh2Cpu
         }
 
         Cycles += cycles;
-        InstructionObserver?.Invoke(new Sh2InstructionTrace(
-            _name,
-            pc,
-            opcode,
-            PC,
-            beforeSr,
-            beforeR0,
-            beforeR1,
-            beforeR2,
-            beforeR3,
-            beforeR4,
-            beforeR5,
-            beforeR6,
-            beforeR7,
-            beforeR8,
-            beforeR9,
-            beforeR10,
-            beforeR11,
-            beforeR12,
-            beforeR13,
-            beforeR14,
-            beforeR15,
-            SR,
-            R[0],
-            R[1],
-            R[2],
-            R[3],
-            R[4],
-            R[5],
-            R[6],
-            R[7],
-            R[8],
-            R[9],
-            R[10],
-            R[11],
-            R[12],
-            R[13],
-            R[14],
-            R[15],
-            beforePr,
-            beforeGbr,
-            beforeVbr,
-            PR,
-            GBR,
-            VBR,
-            beforeCycles,
-            Cycles,
-            cycles,
-            DelaySlot: false));
+        if (observer is not null)
+        {
+            observer(new Sh2InstructionTrace(
+                _name,
+                pc,
+                opcode,
+                PC,
+                beforeSr,
+                beforeR0,
+                beforeR1,
+                beforeR2,
+                beforeR3,
+                beforeR4,
+                beforeR5,
+                beforeR6,
+                beforeR7,
+                beforeR8,
+                beforeR9,
+                beforeR10,
+                beforeR11,
+                beforeR12,
+                beforeR13,
+                beforeR14,
+                beforeR15,
+                SR,
+                R[0],
+                R[1],
+                R[2],
+                R[3],
+                R[4],
+                R[5],
+                R[6],
+                R[7],
+                R[8],
+                R[9],
+                R[10],
+                R[11],
+                R[12],
+                R[13],
+                R[14],
+                R[15],
+                beforePr,
+                beforeGbr,
+                beforeVbr,
+                PR,
+                GBR,
+                VBR,
+                beforeCycles,
+                Cycles,
+                cycles,
+                DelaySlot: false));
+        }
+
         return cycles;
     }
 
@@ -3264,28 +3293,54 @@ public sealed class Sh2Cpu
         ushort delayOpcode = _bus.ReadWord(delaySlotPc);
         PC += 2;
         _delaySlotPcRelativeBase = target + 2;
-        uint beforeSr = SR;
-        uint beforeR0 = R[0];
-        uint beforeR1 = R[1];
-        uint beforeR2 = R[2];
-        uint beforeR3 = R[3];
-        uint beforeR4 = R[4];
-        uint beforeR5 = R[5];
-        uint beforeR6 = R[6];
-        uint beforeR7 = R[7];
-        uint beforeR8 = R[8];
-        uint beforeR9 = R[9];
-        uint beforeR10 = R[10];
-        uint beforeR11 = R[11];
-        uint beforeR12 = R[12];
-        uint beforeR13 = R[13];
-        uint beforeR14 = R[14];
-        uint beforeR15 = R[15];
-        uint beforePr = PR;
-        uint beforeGbr = GBR;
-        uint beforeVbr = VBR;
+        Action<Sh2InstructionTrace>? observer = InstructionObserver;
+        uint beforeSr = 0;
+        uint beforeR0 = 0;
+        uint beforeR1 = 0;
+        uint beforeR2 = 0;
+        uint beforeR3 = 0;
+        uint beforeR4 = 0;
+        uint beforeR5 = 0;
+        uint beforeR6 = 0;
+        uint beforeR7 = 0;
+        uint beforeR8 = 0;
+        uint beforeR9 = 0;
+        uint beforeR10 = 0;
+        uint beforeR11 = 0;
+        uint beforeR12 = 0;
+        uint beforeR13 = 0;
+        uint beforeR14 = 0;
+        uint beforeR15 = 0;
+        uint beforePr = 0;
+        uint beforeGbr = 0;
+        uint beforeVbr = 0;
+        long beforeCycles = 0;
+        if (observer is not null)
+        {
+            beforeSr = SR;
+            beforeR0 = R[0];
+            beforeR1 = R[1];
+            beforeR2 = R[2];
+            beforeR3 = R[3];
+            beforeR4 = R[4];
+            beforeR5 = R[5];
+            beforeR6 = R[6];
+            beforeR7 = R[7];
+            beforeR8 = R[8];
+            beforeR9 = R[9];
+            beforeR10 = R[10];
+            beforeR11 = R[11];
+            beforeR12 = R[12];
+            beforeR13 = R[13];
+            beforeR14 = R[14];
+            beforeR15 = R[15];
+            beforePr = PR;
+            beforeGbr = GBR;
+            beforeVbr = VBR;
+            beforeCycles = Cycles;
+        }
+
         DelaySlotActive = true;
-        long beforeCycles = Cycles;
         int delayCycles = 0;
         try
         {
@@ -3303,55 +3358,59 @@ public sealed class Sh2Cpu
             _delaySlotPcRelativeBase = null;
         }
 
-        InstructionObserver?.Invoke(new Sh2InstructionTrace(
-            _name,
-            delaySlotPc,
-            delayOpcode,
-            PC,
-            beforeSr,
-            beforeR0,
-            beforeR1,
-            beforeR2,
-            beforeR3,
-            beforeR4,
-            beforeR5,
-            beforeR6,
-            beforeR7,
-            beforeR8,
-            beforeR9,
-            beforeR10,
-            beforeR11,
-            beforeR12,
-            beforeR13,
-            beforeR14,
-            beforeR15,
-            SR,
-            R[0],
-            R[1],
-            R[2],
-            R[3],
-            R[4],
-            R[5],
-            R[6],
-            R[7],
-            R[8],
-            R[9],
-            R[10],
-            R[11],
-            R[12],
-            R[13],
-            R[14],
-            R[15],
-            beforePr,
-            beforeGbr,
-            beforeVbr,
-            PR,
-            GBR,
-            VBR,
-            beforeCycles,
-            beforeCycles + delayCycles,
-            delayCycles,
-            DelaySlot: true));
+        if (observer is not null)
+        {
+            observer(new Sh2InstructionTrace(
+                _name,
+                delaySlotPc,
+                delayOpcode,
+                PC,
+                beforeSr,
+                beforeR0,
+                beforeR1,
+                beforeR2,
+                beforeR3,
+                beforeR4,
+                beforeR5,
+                beforeR6,
+                beforeR7,
+                beforeR8,
+                beforeR9,
+                beforeR10,
+                beforeR11,
+                beforeR12,
+                beforeR13,
+                beforeR14,
+                beforeR15,
+                SR,
+                R[0],
+                R[1],
+                R[2],
+                R[3],
+                R[4],
+                R[5],
+                R[6],
+                R[7],
+                R[8],
+                R[9],
+                R[10],
+                R[11],
+                R[12],
+                R[13],
+                R[14],
+                R[15],
+                beforePr,
+                beforeGbr,
+                beforeVbr,
+                PR,
+                GBR,
+                VBR,
+                beforeCycles,
+                beforeCycles + delayCycles,
+                delayCycles,
+                DelaySlot: true));
+        }
+
         PC = target;
     }
 

@@ -5,6 +5,9 @@ namespace MdSharp.Core.ThirtyTwoX;
 
 public sealed class ThirtyTwoXDevice
 {
+    private static readonly bool EnableSh2ListFastPaths =
+        Environment.GetEnvironmentVariable("MDSHARP_ENABLE_SH2_LIST_FASTPATHS") == "1";
+
     private const int SystemRegisterBytes = 0x100;
     private const int VdpRegisterBytes = 0x100;
     private const int Sh2PeripheralRegisterBytes = 0x100;
@@ -626,40 +629,56 @@ public sealed class ThirtyTwoXDevice
     {
         Sh2Cpu cpu = cpuIndex == 0 ? MasterSh2 : SlaveSh2;
         int fastCycles;
-        bool enableListFastPaths = Environment.GetEnvironmentVariable("MDSHARP_ENABLE_SH2_LIST_FASTPATHS") == "1";
-        int fillLoopBudget = Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations);
-        if (cpu.TryFastForwardMovWStoreAddDtBfLoop(
-                fillLoopBudget,
-                _sh2FrameBufferWordWriters[cpuIndex],
-                Sh2FrameBufferWordFillLoopCycles,
-                out fastCycles))
+        ushort nextOpcode = 0;
+        bool canProbeFastPath = !cpu.Halted &&
+            !cpu.HasAcceptablePendingInterrupt &&
+            !cpu.DelaySlotActive &&
+            cpu.InstructionObserver is null &&
+            TryPeekSh2Word(cpu.PC, cpuIndex, out nextOpcode);
+
+        if (canProbeFastPath)
         {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
+            if ((nextOpcode & 0xF00F) == 0x2001)
+            {
+                int fillLoopBudget = Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations);
+                if (cpu.TryFastForwardMovWStoreAddDtBfLoop(
+                        fillLoopBudget,
+                        _sh2FrameBufferWordWriters[cpuIndex],
+                        Sh2FrameBufferWordFillLoopCycles,
+                        out fastCycles))
+                {
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+            }
+
+            if ((nextOpcode & 0xF00F) == 0x2002)
+            {
+                int longStoreBudget = Math.Min(cycleBudget, Sh2LongStoreFillLoopCycles * Sh2LongStoreFillLoopMaxBurstIterations);
+                if (cpu.TryFastForwardMovLStoreAddDtBfLoop(
+                        longStoreBudget,
+                        _sh2LongWriters[cpuIndex],
+                        Sh2LongStoreFillLoopCycles,
+                        out fastCycles))
+                {
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+            }
+
+            if ((nextOpcode & 0xF00F) == 0x6005 &&
+                cpu.TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
         }
 
-        int longStoreBudget = Math.Min(cycleBudget, Sh2LongStoreFillLoopCycles * Sh2LongStoreFillLoopMaxBurstIterations);
-        if (cpu.TryFastForwardMovLStoreAddDtBfLoop(
-                longStoreBudget,
-                _sh2LongWriters[cpuIndex],
-                Sh2LongStoreFillLoopCycles,
-                out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
-
-        if (cpu.TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(
-                cycleBudget,
-                _sh2WordReaders[cpuIndex],
-                _sh2WordWriters[cpuIndex],
-                out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
-
-        if (enableListFastPaths &&
+        if (EnableSh2ListFastPaths &&
             cpu.TryFastForwardSdramLinkedListInsertRoutine(
                 cycleBudget,
                 _sh2LongReaders[cpuIndex],
@@ -671,7 +690,7 @@ public sealed class ThirtyTwoXDevice
             return fastCycles;
         }
 
-        if (enableListFastPaths &&
+        if (EnableSh2ListFastPaths &&
             cpu.TryFastForwardRunlengthSdkRechainRoutine(
                 cycleBudget,
                 _sh2LongReaders[cpuIndex],
@@ -683,58 +702,71 @@ public sealed class ThirtyTwoXDevice
             return fastCycles;
         }
 
-        if (cpu.TryFastForwardDtBfLoop(cycleBudget, out fastCycles))
+        if (canProbeFastPath)
         {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xF0FF) == 0x4010 &&
+                cpu.TryFastForwardDtBfLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardNopDtBfDelayLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode == 0x0009 || (nextOpcode & 0xF0FF) == 0x4010) &&
+                cpu.TryFastForwardNopDtBfDelayLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardTstBfPollLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xFF00) == 0x8400 &&
+                cpu.TryFastForwardTstBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardGbrCmpEqBfPollLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xFC00) == 0xC400 &&
+                cpu.TryFastForwardGbrCmpEqBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardMovLiteralTstBfPollLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xF000) == 0xD000)
+            {
+                if (cpu.TryFastForwardMovLiteralTstBfPollLoop(cycleBudget, out fastCycles))
+                {
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
 
-        if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+                if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
+                {
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+            }
 
-        if (cpu.TryFastForwardWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xF00F) == 0x6001 &&
+                cpu.TryFastForwardWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardTstBfsDelayAddLoop(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
-        }
+            if ((nextOpcode & 0xF00F) == 0x2008 &&
+                cpu.TryFastForwardTstBfsDelayAddLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
 
-        if (cpu.TryFastForwardTwoStageWordZeroPollRing(cycleBudget, out fastCycles))
-        {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
-            return fastCycles;
+            if ((nextOpcode & 0xFF00) == 0x8900 &&
+                cpu.TryFastForwardTwoStageWordZeroPollRing(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
         }
 
         long before = cpu.Cycles;
