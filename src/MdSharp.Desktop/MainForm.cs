@@ -42,6 +42,7 @@ internal sealed class MainForm : Form
     private ToolStripMenuItem _budget200Menu = null!;
     private ToolStripMenuItem _budget300Menu = null!;
     private ToolStripMenuItem _budget500Menu = null!;
+    private ToolStripMenuItem _enable32XMenu = null!;
     private MegaDrive? _machine;
     private CartridgeImage? _cartridge;
     private WaveOutAudio? _audio;
@@ -173,9 +174,11 @@ internal sealed class MainForm : Form
         _budget200Menu = new ToolStripMenuItem("Frame safety budget: &200k", null, (_, _) => SetInstructionBudget(200_000));
         _budget300Menu = new ToolStripMenuItem("Frame safety budget: &300k", null, (_, _) => SetInstructionBudget(300_000));
         _budget500Menu = new ToolStripMenuItem("Frame safety budget: &500k", null, (_, _) => SetInstructionBudget(500_000));
+        _enable32XMenu = new ToolStripMenuItem("Enable experimental &32X ROMs", null, (_, _) => Toggle32XLoading());
         emulation.DropDownItems.Add(_budget200Menu);
         emulation.DropDownItems.Add(_budget300Menu);
         emulation.DropDownItems.Add(_budget500Menu);
+        emulation.DropDownItems.Add(_enable32XMenu);
 
         ToolStripMenuItem view = new("&View");
         _developerOptionsMenu = new ToolStripMenuItem("&Developer Options", null, (_, _) => ToggleDeveloperOptions());
@@ -201,8 +204,8 @@ internal sealed class MainForm : Form
     {
         using OpenFileDialog dialog = new()
         {
-            Filter = "Genesis ROMs|*.bin;*.md;*.gen;*.smd;*.rom|All files|*.*",
-            Title = "Open Genesis/Mega Drive ROM",
+            Filter = BuildRomFileFilter(),
+            Title = _settings.Enable32X ? "Open Genesis/Mega Drive/32X ROM" : "Open Genesis/Mega Drive ROM",
         };
         ApplyRomInitialDirectory(dialog);
 
@@ -210,6 +213,13 @@ internal sealed class MainForm : Form
         {
             LoadRom(dialog.FileName);
         }
+    }
+
+    private string BuildRomFileFilter()
+    {
+        return _settings.Enable32X
+            ? "Genesis/32X ROMs|*.bin;*.md;*.gen;*.smd;*.rom;*.32x|Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|32X ROMs|*.32x;*.bin;*.md|All files|*.*"
+            : "Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|All files|*.*";
     }
 
     private void LoadRom(string path)
@@ -265,6 +275,7 @@ internal sealed class MainForm : Form
         _settings.VideoIntegerScale = dialog.VideoIntegerScale;
         _settings.VideoSmoothing = dialog.VideoSmoothing;
         _settings.Muted = dialog.Muted;
+        _settings.Enable32X = dialog.Enable32X;
         _settings.NormalizeSession();
 
         _instructionsPerFrame = _settings.InstructionBudget;
@@ -283,6 +294,14 @@ internal sealed class MainForm : Form
         _settings.Save();
         UpdateMenus();
         SetStatus("Preferences saved.");
+    }
+
+    private void Toggle32XLoading()
+    {
+        _settings.Enable32X = !_settings.Enable32X;
+        _settings.Save();
+        UpdateMenus();
+        SetStatus(_settings.Enable32X ? "Experimental 32X ROM loading enabled." : "Experimental 32X ROM loading disabled.");
     }
 
     private void ToggleDeveloperOptions()
@@ -316,7 +335,7 @@ internal sealed class MainForm : Form
                 PollControllerInput();
                 _recordingMovie?.AddFrame((int)_machine.Frames, _machine.Bus.Controller1.Pressed, _machine.Bus.Controller2.Pressed);
                 _machine.RunFrame(_instructionsPerFrame);
-                _machine.Vdp.RenderFrameBgrInto(_videoFrameBuffer);
+                _machine.RenderFrameBgrInto(_videoFrameBuffer);
                 _video.SetFrame(_videoFrameBuffer);
                 QueueAudio();
                 if (_playbackMovie is not null && ++_playbackFrame >= _playbackMovie.FrameCount)
@@ -662,7 +681,7 @@ internal sealed class MainForm : Form
         }
 
         SaveStateSerializer.Load(_machine, path);
-        _machine.Vdp.RenderFrameBgrInto(_videoFrameBuffer);
+        _machine.RenderFrameBgrInto(_videoFrameBuffer);
         _video.SetFrame(_videoFrameBuffer);
         ResetTiming();
         SetStatus($"Loaded slot {_settings.CurrentStateSlot} from {Path.GetFileName(path)}.");
@@ -686,7 +705,7 @@ internal sealed class MainForm : Form
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             SaveStateSerializer.Load(_machine, dialog.FileName);
-            _machine.Vdp.RenderFrameBgrInto(_videoFrameBuffer);
+            _machine.RenderFrameBgrInto(_videoFrameBuffer);
             _video.SetFrame(_videoFrameBuffer);
             ResetTiming();
             SetStatus($"Loaded state from {Path.GetFileName(dialog.FileName)}.");
@@ -740,9 +759,10 @@ internal sealed class MainForm : Form
         _audio = null;
 
         CartridgeImage cartridge = CartridgeImage.FromFile(path);
-        if (cartridge.Diagnostics.HasUnsupportedHardware)
+        if (HasBlockedUnsupportedHardware(cartridge))
         {
-            throw new NotSupportedException($"Unsupported cartridge hardware: {string.Join(", ", cartridge.Diagnostics.UnsupportedHardware)}");
+            string unsupported = string.Join(", ", BlockedUnsupportedHardware(cartridge));
+            throw new NotSupportedException($"Unsupported cartridge hardware: {unsupported}");
         }
 
         if (movie is not null)
@@ -754,7 +774,7 @@ internal sealed class MainForm : Form
             SramStore.Load(path, cartridge, _settings.SaveRamDirectory);
         }
 
-        MegaDrive machine = new(cartridge);
+        MegaDrive machine = new(cartridge, thirtyTwoXM68kBios: TryLoadThirtyTwoXM68kBios());
         machine.Reset();
         _cartridge = cartridge;
         _machine = machine;
@@ -762,6 +782,46 @@ internal sealed class MainForm : Form
         ApplyControllerSettings();
         ResetTiming();
         TryStartAudio();
+    }
+
+    private static ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
+    {
+        string[] candidates =
+        [
+            Environment.GetEnvironmentVariable("MDSHARP_32X_M68K_BIOS") ?? string.Empty,
+            Path.Combine(AppContext.BaseDirectory, "32X_G_BIOS.BIN"),
+            Path.Combine(AppContext.BaseDirectory, "32X_M68K_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_G_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_M68K_BIOS.BIN"),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+            {
+                return File.ReadAllBytes(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private bool HasBlockedUnsupportedHardware(CartridgeImage cartridge)
+    {
+        return BlockedUnsupportedHardware(cartridge).Any();
+    }
+
+    private IEnumerable<string> BlockedUnsupportedHardware(CartridgeImage cartridge)
+    {
+        foreach (string hardware in cartridge.Diagnostics.UnsupportedHardware)
+        {
+            if (_settings.Enable32X && cartridge.Diagnostics.Requires32X && hardware.Contains("32X", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            yield return hardware;
+        }
     }
 
     private void ResetTiming()
@@ -871,6 +931,7 @@ internal sealed class MainForm : Form
         if (_settings.ShowDeveloperOptions)
         {
             AppendLine(builder, "Frame safety budget", _instructionsPerFrame.ToString("N0"));
+            AppendLine(builder, "Experimental 32X ROM loading", _settings.Enable32X ? "enabled" : "disabled");
         }
 
         builder.AppendLine();
@@ -914,6 +975,7 @@ internal sealed class MainForm : Form
         AppendLine(builder, "Bank switching", diagnostics.UsesBankSwitchRegisters ? "yes" : "no");
         AppendLine(builder, "J-Cart", diagnostics.HasJCart ? "yes" : "no");
         AppendLine(builder, "SVP", diagnostics.HasSvp ? "yes" : "no");
+        AppendLine(builder, "32X", diagnostics.Requires32X ? "required" : "no");
         AppendLine(builder, "Unsupported hardware", diagnostics.UnsupportedHardware.Length == 0 ? "none" : string.Join(", ", diagnostics.UnsupportedHardware));
         AppendLine(builder, "Warnings", diagnostics.Warnings.Length == 0 ? "none" : string.Join("; ", diagnostics.Warnings));
         AppendLine(builder, "Frame", _machine?.Frames.ToString("N0") ?? "unknown");
@@ -1257,6 +1319,8 @@ internal sealed class MainForm : Form
         _budget200Menu.Visible = _settings.ShowDeveloperOptions;
         _budget300Menu.Visible = _settings.ShowDeveloperOptions;
         _budget500Menu.Visible = _settings.ShowDeveloperOptions;
+        _enable32XMenu.Visible = _settings.ShowDeveloperOptions;
+        _enable32XMenu.Checked = _settings.Enable32X;
         _budget200Menu.Checked = _instructionsPerFrame == 200_000;
         _budget300Menu.Checked = _instructionsPerFrame == 300_000;
         _budget500Menu.Checked = _instructionsPerFrame == 500_000;

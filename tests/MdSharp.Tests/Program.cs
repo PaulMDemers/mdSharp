@@ -2,15 +2,48 @@ using MdSharp.Core;
 using MdSharp.Core.Audio;
 using MdSharp.Core.Bus;
 using MdSharp.Core.Cartridge;
+using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Cpu.Z80;
 using MdSharp.Core.Input;
 using MdSharp.Core.State;
+using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
+using System.Runtime.CompilerServices;
 
 int failures = 0;
 
 Run("cartridge header parsing", CartridgeHeaderParsing);
 Run("cartridge diagnostics", CartridgeDiagnosticsReport);
+Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
+Run("32X device shell", ThirtyTwoXDeviceShell);
+Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
+Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticCode);
+Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
+Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
+Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
+Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
+Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
+Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
+Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
+Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
+Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 linked-list insert fast-forward matches interpreter", ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter);
+Run("32X SH-2 DMA transfer size bits", ThirtyTwoXSh2DmaTransferSizeBits);
+Run("32X SH-2 arithmetic flags", ThirtyTwoXSh2ArithmeticFlags);
+Run("32X user header loads initial program", ThirtyTwoXUserHeaderLoadsInitialProgram);
+Run("32X adapter control and communication ports", ThirtyTwoXAdapterControlAndCommunicationPorts);
+Run("32X communication byte read/write edge", ThirtyTwoXCommunicationByteReadWriteEdge);
+Run("32X 68000 system handshakes sync SH-2", ThirtyTwoXM68kSystemHandshakesSyncSh2);
+Run("32X SH-2 watchdog keyed writes", ThirtyTwoXSh2WatchdogKeyedWrites);
+Run("32X SH-2 watchdog interval interrupt", ThirtyTwoXSh2WatchdogIntervalInterrupt);
+Run("32X SH-2 division unit", ThirtyTwoXSh2DivisionUnit);
+Run("32X PWM interrupts advance with executed SH-2 cycles", ThirtyTwoXPwmInterruptsAdvanceWithExecutedSh2Cycles);
+Run("32X 68000 bus shell", ThirtyTwoXM68kBusShell);
+Run("32X 68000 vector ROM mapping", ThirtyTwoXM68kVectorRomMapping);
+Run("32X 68000 VBlank remains level 6", ThirtyTwoXM68kVBlankRemainsLevel6);
+Run("32X SH-2 boot ROM ready marker", ThirtyTwoXSh2BootRomReadyMarker);
 Run("68k reset and simple instructions", CpuResetAndSimpleInstructions);
 Run("68k Codemasters DNLD reset vectors", CodemastersDnldResetVectors);
 Run("VDP register and VRAM writes", VdpRegisterAndVramWrites);
@@ -30,6 +63,7 @@ Run("68000 peripheral accesses add wait cycles", M68kPeripheralAccessesAddWaitCy
 Run("controller TH multiplexing", ControllerMultiplexing);
 Run("six-button controller handshake", SixButtonControllerHandshake);
 Run("controller data and control ports", ControllerDataAndControlPorts);
+Run("controller input pins do not drive TH", ControllerInputPinsDoNotDriveTh);
 Run("Sega Team Player adapter protocol", SegaTeamPlayerAdapterProtocol);
 Run("EA 4-Way Play adapter protocol", Ea4WayPlayAdapterProtocol);
 Run("light gun adapter button protocol", LightGunAdapterButtonProtocol);
@@ -110,6 +144,7 @@ Run("synthetic Genesis startup ROM", SyntheticGenesisStartupRom);
 Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
+Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
 Run("68000 multiply instructions", MultiplyInstructions);
 Run("68000 EOR and CMPM instructions", EorAndCmpmInstructions);
@@ -129,6 +164,8 @@ Run("68000 RESET is privileged and resumes", ResetInstructionIsPrivilegedAndResu
 Run("68000 MOVE.W postincrement to VDP absolute long", MovePostincrementToVdpAbsoluteLong);
 Run("68000 DBRA displacement word origin", DbraUsesDisplacementWordOrigin);
 Run("68000 BRA.W displacement word origin", BraWordUsesDisplacementWordOrigin);
+Run("68000 program counter uses 24-bit address bus", ProgramCounterUses24BitAddressBus);
+Run("68000 PC-relative EA uses extension word origin", PcRelativeEffectiveAddressUsesExtensionWordOrigin);
 Run("68000 immediate RMW absolute long evaluates EA once", ImmediateRmwAbsoluteLongEvaluatesEaOnce);
 Run("68000 ASR sign extends byte and word register operands", AsrSignExtendsRegisterOperands);
 Run("68000 register shift count zero is no-op", RegisterShiftCountZeroIsNoOp);
@@ -239,6 +276,7 @@ void CartridgeDiagnosticsReport()
     byte[] x32Rom = CreateRom();
     WriteAscii(x32Rom, 0x100, "SEGA 32X");
     CartridgeDiagnostics x32 = CartridgeImage.FromBytes(x32Rom).Diagnostics;
+    AssertTrue(x32.Requires32X, "32X diagnostic should expose a first-class 32X requirement flag");
     AssertTrue(x32.UnsupportedHardware.Any(item => item.Contains("32X", StringComparison.Ordinal)), "32X diagnostic should name unsupported 32X hardware");
 
     byte[] jCartRom = CreateRom();
@@ -256,6 +294,2873 @@ void CartridgeDiagnosticsReport()
     WriteAscii(t2ArcadeRom, 0x150, "T2 THE ARCADE GAME");
     CartridgeDiagnostics t2Arcade = CartridgeImage.FromBytes(t2ArcadeRom).Diagnostics;
     AssertTrue(t2Arcade.Warnings.Any(item => item.Contains("Light gun", StringComparison.Ordinal)), "T2 arcade should be flagged as a light gun game");
+}
+
+void ThirtyTwoXHardwareProfileReport()
+{
+    AssertEqual(2, ThirtyTwoXHardwareProfile.Sh2CpuCount);
+    AssertEqual(256 * 1024, ThirtyTwoXHardwareProfile.SdramBytes);
+    AssertEqual(128 * 1024, ThirtyTwoXHardwareProfile.FrameBufferBytes);
+    AssertEqual(0xA1_5100u, ThirtyTwoXHardwareProfile.M68kSystemRegisterStart);
+    AssertEqual(0xA1_5130u, ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.PwmControlOffset));
+    AssertEqual(0xA1_5180u, ThirtyTwoXHardwareProfile.M68kVdpRegisterStart);
+    AssertEqual(0x2000_4030u, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.PwmControlOffset));
+    AssertEqual(0x0000_0000u, ThirtyTwoXHardwareProfile.Sh2CartridgeLowCachedStart);
+    AssertEqual(0x0200_0000u, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart);
+    AssertEqual(0x2200_0000u, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    AssertTrue(ThirtyTwoXHardwareProfile.RequiredSubsystems.Length >= 6, "32X plan should name the major subsystems");
+}
+
+void ThirtyTwoXDeviceShell()
+{
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+    static void LatchThirtyTwoXVdp(ThirtyTwoXDevice target)
+    {
+        target.SetHBlank(true);
+        target.SetHBlank(false);
+    }
+
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
+        return (byte)method.Invoke(target, [address, 0])!;
+    }
+
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value, int cpuIndex = 0)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+        method.Invoke(target, [address, value, cpuIndex]);
+    }
+
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    AssertTrue(device.Sh2HeldInReset, "32X shell should hold SH-2s until adapter control releases them");
+    AssertEqual((ushort)0x8000, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
+    device.WriteVdpRegisterWord(0x0072, 0xFFFF);
+    AssertEqual((ushort)0x0000, device.ReadVdpRegisterWord(0x0072));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x72));
+    device.WriteFrameBufferByte(0, 0x5A);
+    device.WriteFrameBufferByte(0, 0x00);
+    AssertEqual((byte)0x00, device.ReadFrameBufferByte(0));
+    device.WriteFrameBufferByte(0, 0x5A);
+    device.WriteOverwriteImageByte(0, 0x00);
+    AssertEqual((byte)0x5A, device.ReadFrameBufferByte(0));
+    ThirtyTwoXDevice ntscFormatDevice = new();
+    ntscFormatDevice.Reset();
+    ntscFormatDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    AssertEqual((ushort)0x8001, ntscFormatDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
+    ThirtyTwoXDevice palDevice = new(pal: true);
+    palDevice.Reset();
+    AssertEqual((ushort)0x0000, palDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
+    palDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x8001);
+    AssertEqual((ushort)0x0001, palDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
+    ThirtyTwoXDevice statusDevice = new();
+    statusDevice.Reset();
+    AssertEqual((ushort)0x2000, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    statusDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    AssertEqual((ushort)0x0002, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    statusDevice.SetHBlank(true);
+    AssertEqual((ushort)0x4000, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    statusDevice.SetHBlank(false);
+    statusDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0002);
+    AssertEqual((ushort)0x2002, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    statusDevice.StepScanline(224, pal: false);
+    AssertEqual((ushort)0xA000, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    ThirtyTwoXDevice interruptClearDevice = new();
+    interruptClearDevice.Reset();
+    interruptClearDevice.RestoreState(interruptClearDevice.CaptureState() with
+    {
+        MasterVerticalInterruptPending = true,
+        SlaveVerticalInterruptPending = true,
+        MasterHorizontalInterruptPending = true,
+        SlaveHorizontalInterruptPending = true,
+        MasterPwmInterruptPending = true,
+        SlavePwmInterruptPending = true,
+    });
+    WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.VInterruptClearOffset), 0, cpuIndex: 0);
+    WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.HInterruptClearOffset), 0, cpuIndex: 0);
+    WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.PwmInterruptClearOffset), 0, cpuIndex: 0);
+    ThirtyTwoXDevice.ThirtyTwoXState clearedState = interruptClearDevice.CaptureState();
+    AssertTrue(!clearedState.MasterVerticalInterruptPending, "master V interrupt clear should clear master latch");
+    AssertTrue(!clearedState.SlaveVerticalInterruptPending, "V interrupt clear should clear both SH-2 latches");
+    AssertTrue(!clearedState.MasterHorizontalInterruptPending, "master H interrupt clear should clear master latch");
+    AssertTrue(!clearedState.SlaveHorizontalInterruptPending, "H interrupt clear should clear both SH-2 latches");
+    AssertTrue(!clearedState.MasterPwmInterruptPending, "master PWM interrupt clear should clear master latch");
+    AssertTrue(!clearedState.SlavePwmInterruptPending, "PWM interrupt clear should clear both SH-2 latches");
+    ThirtyTwoXDevice commandClearDevice = new();
+    commandClearDevice.Reset();
+    commandClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset, 0x0003);
+    WriteSh2WordForTest(commandClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommandInterruptClearOffset), 0, cpuIndex: 0);
+    ThirtyTwoXDevice.ThirtyTwoXState commandClearState = commandClearDevice.CaptureState();
+    AssertTrue(!commandClearState.MasterCommandInterruptPending, "master CMD interrupt clear should clear master latch");
+    AssertTrue(!commandClearState.SlaveCommandInterruptPending, "CMD interrupt clear should clear both SH-2 latches");
+    AssertEqual((ushort)0x0000, commandClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    AssertEqual(0, device.RunSh2(4));
+
+    byte[] cycleRom = new byte[0x20];
+    WriteWord(cycleRom, 0x00, 0x0009); // NOP, 1 cycle.
+    WriteWord(cycleRom, 0x02, 0x000B); // RTS, 2 cycles with delay slot.
+    WriteWord(cycleRom, 0x04, 0x0009); // delay slot NOP.
+    ThirtyTwoXDevice cycleDevice = new(cycleRom);
+    cycleDevice.Reset();
+    cycleDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    cycleDevice.RestoreState(cycleDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    int cycleSteps = cycleDevice.RunSh2Cycles(1);
+    AssertEqual(2, cycleSteps);
+    AssertEqual(13L, cycleDevice.MasterSh2.Cycles);
+    AssertEqual(13L, cycleDevice.SlaveSh2.Cycles);
+    cycleSteps = cycleDevice.RunSh2Cycles(2);
+    AssertEqual(2, cycleSteps);
+    AssertEqual(39L, cycleDevice.MasterSh2.Cycles);
+    AssertEqual(39L, cycleDevice.SlaveSh2.Cycles);
+
+    AssertEqual((byte)'M', device.ReadSuper32XIdByte(0xA1_30EC));
+    AssertEqual((byte)'A', device.ReadSuper32XIdByte(0xA1_30ED));
+    AssertEqual((byte)'R', device.ReadSuper32XIdByte(0xA1_30EE));
+    AssertEqual((byte)'S', device.ReadSuper32XIdByte(0xA1_30EF));
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x1ABC);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0123);
+    ThirtyTwoXDevice.PwmSnapshot pwm = device.CapturePwm();
+    AssertEqual(2, pwm.Left.Length);
+    AssertEqual((ushort)0x0ABC, pwm.Left[0]);
+    AssertEqual((ushort)0x0123, pwm.Left[1]);
+
+    ThirtyTwoXDevice stereoPwmDevice = new();
+    stereoPwmDevice.Reset();
+    stereoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0800);
+    stereoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0009);
+    stereoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0700);
+    stereoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmRightPulseWidthOffset, 0x0100);
+    stereoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset, 0x0600);
+    short[] pwmSamples = new short[8 * 2];
+    stereoPwmDevice.RenderPwmStereoSamplesInto(pwmSamples, 8);
+    AssertTrue(pwmSamples.Any(sample => sample != 0), "32X PWM writes should render audible samples");
+    AssertTrue(pwmSamples[14] > pwmSamples[15], "separate left/right PWM queues should preserve stereo balance");
+    ThirtyTwoXDevice routedPwmDevice = new();
+    routedPwmDevice.Reset();
+    routedPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0800);
+    routedPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0006);
+    routedPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0700);
+    routedPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmRightPulseWidthOffset, 0x0100);
+    short[] routedPwmSamples = new short[8 * 2];
+    routedPwmDevice.RenderPwmStereoSamplesInto(routedPwmSamples, 8);
+    AssertTrue(routedPwmSamples[15] > routedPwmSamples[14], "PWM routing should allow left/right channels to be swapped");
+    ThirtyTwoXDevice fifoPwmDevice = new();
+    fifoPwmDevice.Reset();
+    fifoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0100);
+    AssertTrue((fifoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset) & 0x4000) == 0, "non-empty PWM FIFO should clear the empty bit");
+    fifoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0200);
+    fifoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0300);
+    AssertTrue((fifoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset) & 0x8000) != 0, "third PWM queued sample should set the full bit");
+    fifoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0400);
+    AssertEqual(3, fifoPwmDevice.CapturePwm().Left.Length);
+    AssertEqual((ushort)0x0100, (ushort)(fifoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset) & 0x0FFF));
+
+    ThirtyTwoXDevice monoPwmDevice = new();
+    monoPwmDevice.Reset();
+    monoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0800);
+    monoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset, 0x0555);
+    AssertTrue((monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset) & 0x4000) == 0, "mono PWM writes should feed the left hardware FIFO");
+    AssertTrue((monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmRightPulseWidthOffset) & 0x4000) == 0, "mono PWM writes should feed the right hardware FIFO");
+    AssertTrue((monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset) & 0x4000) == 0, "mono PWM status should derive non-empty state from stereo hardware FIFOs");
+    monoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset, 0x0444);
+    monoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset, 0x0333);
+    AssertTrue((monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset) & 0x8000) != 0, "mono PWM status should report full when either stereo hardware FIFO is full");
+    monoPwmDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset, 0x0222);
+    AssertEqual(3, monoPwmDevice.CapturePwm().Mono.Length);
+    AssertEqual((ushort)0x0333, (ushort)(monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset) & 0x0FFF));
+
+    AssertEqual((ushort)0x4000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0007);
+    AssertEqual((ushort)0x0004, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset));
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x1357);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x2468);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0xAAAA);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0xBBBB);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0xCCCC);
+    AssertEqual((ushort)0x8000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset));
+    AssertEqual((ushort)0x1357, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x2468, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0xAAAA, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0xBBBB, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x4000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    ThirtyTwoXDevice dreqSnoopDevice = new();
+    dreqSnoopDevice.Reset();
+    dreqSnoopDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset, 0x0000);
+    dreqSnoopDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset + 2), 0x0200);
+    dreqSnoopDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0004);
+    dreqSnoopDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0001);
+    AssertTrue(!dreqSnoopDevice.SnoopM68kVdpDmaWord(0x0000_0202, 0x9999), "DREQ snoop should wait for the programmed DMA source");
+    AssertTrue(dreqSnoopDevice.SnoopM68kVdpDmaWord(0x0000_0200, 0x1111), "DREQ snoop should accept the programmed DMA source");
+    AssertTrue(dreqSnoopDevice.SnoopM68kVdpDmaWord(0x0000_0202, 0x2222), "DREQ snoop should advance the programmed source");
+    AssertTrue(dreqSnoopDevice.SnoopM68kVdpDmaWord(0x0000_0204, 0x3333), "DREQ snoop should keep accepting sequential DMA words");
+    AssertTrue(dreqSnoopDevice.SnoopM68kVdpDmaWord(0x0000_0206, 0x4444), "DREQ snoop should accept the final programmed word");
+    AssertEqual((ushort)0x8000, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset));
+    AssertEqual((ushort)0x1111, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x2222, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x3333, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x4444, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x4000, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    byte[] dreqWordReadRom = new byte[0x40];
+    WriteWord(dreqWordReadRom, 0x00, 0xD003); // MOV.L @(literal,PC),R0
+    WriteWord(dreqWordReadRom, 0x02, 0x6101); // MOV.W @R0,R1
+    WriteWord(dreqWordReadRom, 0x04, 0x6201); // MOV.W @R0,R2
+    WriteWord(dreqWordReadRom, 0x06, 0x001B); // SLEEP
+    WriteLong(dreqWordReadRom, 0x10, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    ThirtyTwoXDevice dreqWordReadDevice = new(dreqWordReadRom);
+    dreqWordReadDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    dreqWordReadDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0002);
+    dreqWordReadDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x1357);
+    dreqWordReadDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x2468);
+    dreqWordReadDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    dreqWordReadDevice.MasterSh2.Run(8);
+    AssertEqual(0x1357u, dreqWordReadDevice.MasterSh2.R[1]);
+    AssertEqual(0x2468u, dreqWordReadDevice.MasterSh2.R[2]);
+    AssertEqual((ushort)0x4004, dreqWordReadDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    byte[] dreqWordWriteRom = new byte[0x40];
+    WriteWord(dreqWordWriteRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(dreqWordWriteRom, 0x02, 0xD105); // MOV.L @(literal,PC),R1
+    WriteWord(dreqWordWriteRom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(dreqWordWriteRom, 0x06, 0x001B); // SLEEP
+    WriteLong(dreqWordWriteRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    WriteLong(dreqWordWriteRom, 0x18, 0x0000_55AA);
+    ThirtyTwoXDevice dreqWordWriteDevice = new(dreqWordWriteRom);
+    dreqWordWriteDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    dreqWordWriteDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0001);
+    dreqWordWriteDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    dreqWordWriteDevice.MasterSh2.Run(8);
+    AssertEqual(1, dreqWordWriteDevice.DreqFifoWriteCount);
+    AssertEqual((ushort)0x55AA, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x4004, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    byte[] lowCartridgeAliasRom = new byte[0x80];
+    WriteWord(lowCartridgeAliasRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(lowCartridgeAliasRom, 0x02, 0x6101); // MOV.W @R0,R1
+    WriteWord(lowCartridgeAliasRom, 0x04, 0x001B); // SLEEP
+    WriteWord(lowCartridgeAliasRom, 0x20, 0x5AA5);
+    WriteLong(lowCartridgeAliasRom, 0x14, 0x0000_0020);
+    ThirtyTwoXDevice lowCartridgeAliasDevice = new(lowCartridgeAliasRom);
+    lowCartridgeAliasDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    lowCartridgeAliasDevice.MasterSh2.Run(8);
+    AssertEqual(0x5AA5u, lowCartridgeAliasDevice.MasterSh2.R[1]);
+
+    byte[] lowCartridgeCacheHitRom = new byte[0x80];
+    WriteWord(lowCartridgeCacheHitRom, 0x00, 0xD006); // MOV.L @(literal,PC),R0
+    WriteWord(lowCartridgeCacheHitRom, 0x02, 0x6101); // MOV.W @R0,R1, fills line
+    WriteWord(lowCartridgeCacheHitRom, 0x04, 0xD106); // MOV.L @(literal,PC),R1
+    WriteWord(lowCartridgeCacheHitRom, 0x06, 0x2011); // MOV.W R1,@R0, updates cached line
+    WriteWord(lowCartridgeCacheHitRom, 0x08, 0x6201); // MOV.W @R0,R2
+    WriteWord(lowCartridgeCacheHitRom, 0x0A, 0x001B); // SLEEP
+    WriteWord(lowCartridgeCacheHitRom, 0x30, 0x1111);
+    WriteLong(lowCartridgeCacheHitRom, 0x1C, 0x0000_0030);
+    WriteLong(lowCartridgeCacheHitRom, 0x20, 0x0000_255A);
+    ThirtyTwoXDevice lowCartridgeCacheHitDevice = new(lowCartridgeCacheHitRom);
+    lowCartridgeCacheHitDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    WriteSh2ByteForTest(lowCartridgeCacheHitDevice, 0xFFFF_FE92, 0x01);
+    lowCartridgeCacheHitDevice.MasterSh2.Run(12);
+    AssertEqual(0x255Au, lowCartridgeCacheHitDevice.MasterSh2.R[2]);
+
+    byte[] lowCartridgeCacheWriteAllocateRom = new byte[0x80];
+    WriteWord(lowCartridgeCacheWriteAllocateRom, 0x00, 0xD005); // MOV.L @(literal,PC),R0
+    WriteWord(lowCartridgeCacheWriteAllocateRom, 0x02, 0xD106); // MOV.L @(literal,PC),R1
+    WriteWord(lowCartridgeCacheWriteAllocateRom, 0x04, 0x2011); // MOV.W R1,@R0, misses without allocating a line
+    WriteWord(lowCartridgeCacheWriteAllocateRom, 0x06, 0x6201); // MOV.W @R0,R2
+    WriteWord(lowCartridgeCacheWriteAllocateRom, 0x08, 0x001B); // SLEEP
+    WriteLong(lowCartridgeCacheWriteAllocateRom, 0x18, 0x0000_0040);
+    WriteLong(lowCartridgeCacheWriteAllocateRom, 0x1C, 0x0000_A55A);
+    ThirtyTwoXDevice lowCartridgeCacheWriteAllocateDevice = new(lowCartridgeCacheWriteAllocateRom);
+    lowCartridgeCacheWriteAllocateDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    WriteSh2ByteForTest(lowCartridgeCacheWriteAllocateDevice, 0xFFFF_FE92, 0x01);
+    lowCartridgeCacheWriteAllocateDevice.MasterSh2.Run(12);
+    AssertEqual(0x0000_0000u, lowCartridgeCacheWriteAllocateDevice.MasterSh2.R[2]);
+
+    byte[] dreqDmaRom = new byte[0x100];
+    int dreqPc = 0;
+    int dreqLiteral = 0x40;
+    void EmitMovLongLiteral(int register, uint value)
+    {
+        WriteLong(dreqDmaRom, dreqLiteral, value);
+        int baseAddress = (dreqPc + 4) & ~3;
+        int displacement = (dreqLiteral - baseAddress) / 4;
+        WriteWord(dreqDmaRom, dreqPc, (ushort)(0xD000 | (register << 8) | displacement));
+        dreqPc += 2;
+        dreqLiteral += 4;
+    }
+
+    void EmitStoreR1AtR0()
+    {
+        WriteWord(dreqDmaRom, dreqPc, 0x2012); // MOV.L R1,@R0
+        dreqPc += 2;
+    }
+
+    EmitMovLongLiteral(0, 0xFFFF_FF80); // SH-2 DMA source register 0
+    EmitMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF84); // SH-2 DMA destination register 0
+    EmitMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF88); // SH-2 DMA transfer count register 0
+    EmitMovLongLiteral(1, 4);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF8C); // SH-2 DMA channel control register 0
+    EmitMovLongLiteral(1, 0x0000_0001);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FFB0); // SH-2 DMA operation register
+    EmitMovLongLiteral(1, 0x0000_0001);
+    EmitStoreR1AtR0();
+    WriteWord(dreqDmaRom, dreqPc, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice dreqDmaDevice = new(dreqDmaRom);
+    dreqDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    dreqDmaDevice.MasterSh2.Run(64);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0004);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x1020);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x3040);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x5060);
+    dreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x7080);
+    AssertEqual((byte)0x10, dreqDmaDevice.Sdram[0x100]);
+    AssertEqual((byte)0x20, dreqDmaDevice.Sdram[0x101]);
+    AssertEqual((byte)0x70, dreqDmaDevice.Sdram[0x106]);
+    AssertEqual((byte)0x80, dreqDmaDevice.Sdram[0x107]);
+    AssertEqual((ushort)0x4000, dreqDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    ThirtyTwoXDevice gatedDreqDmaDevice = new(dreqDmaRom);
+    gatedDreqDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    gatedDreqDmaDevice.MasterSh2.Run(64);
+    WriteSh2ByteForTest(gatedDreqDmaDevice, 0xFFFF_FE71, 0x01); // RXI request source, not DREQ.
+    gatedDreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    gatedDreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0002);
+    gatedDreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0xAAAA);
+    gatedDreqDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0xBBBB);
+    AssertEqual(2, gatedDreqDmaDevice.DreqFifoCount);
+    AssertEqual((byte)0x00, gatedDreqDmaDevice.Sdram[0x100]);
+    WriteSh2ByteForTest(gatedDreqDmaDevice, 0xFFFF_FE71, 0x00); // DREQ request source.
+    AssertEqual(0, gatedDreqDmaDevice.DreqFifoCount);
+    AssertEqual((byte)0xAA, gatedDreqDmaDevice.Sdram[0x100]);
+    AssertEqual((byte)0xBB, gatedDreqDmaDevice.Sdram[0x102]);
+
+    ThirtyTwoXDevice dreqSnoopDmaDevice = new(dreqDmaRom);
+    dreqSnoopDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    dreqSnoopDmaDevice.MasterSh2.Run(64);
+    dreqSnoopDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset, 0x0000);
+    dreqSnoopDmaDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset + 2), 0x0200);
+    dreqSnoopDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0004);
+    dreqSnoopDmaDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0001);
+    dreqSnoopDmaDevice.SnoopM68kVdpDmaWord(0x0000_0200, 0x1234);
+    dreqSnoopDmaDevice.SnoopM68kVdpDmaWord(0x0000_0202, 0x5678);
+    dreqSnoopDmaDevice.SnoopM68kVdpDmaWord(0x0000_0204, 0x9ABC);
+    dreqSnoopDmaDevice.SnoopM68kVdpDmaWord(0x0000_0206, 0xDEF0);
+    AssertEqual((byte)0x12, dreqSnoopDmaDevice.Sdram[0x100]);
+    AssertEqual((byte)0x34, dreqSnoopDmaDevice.Sdram[0x101]);
+    AssertEqual((byte)0xDE, dreqSnoopDmaDevice.Sdram[0x106]);
+    AssertEqual((byte)0xF0, dreqSnoopDmaDevice.Sdram[0x107]);
+    AssertEqual((ushort)0x4000, dreqSnoopDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+
+    ThirtyTwoXDevice dreqBackpressureDevice = new();
+    dreqBackpressureDevice.Reset();
+    dreqBackpressureDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset, 0x0000);
+    dreqBackpressureDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset + 2), 0x0300);
+    dreqBackpressureDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0008);
+    dreqBackpressureDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0001);
+    dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0300, 0x1001);
+    dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0302, 0x1002);
+    dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0304, 0x1003);
+    dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0306, 0x1004);
+    AssertEqual(4, dreqBackpressureDevice.DreqFifoCount);
+    WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF80, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF84, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x180);
+    WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF88, 5);
+    WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF8C, 0x0000_0001);
+    WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FFB0, 0x0000_0001);
+    AssertTrue(dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0308, 0x1005), "DREQ backpressure should drain a full FIFO before accepting the next VDP DMA word");
+    AssertEqual(0, dreqBackpressureDevice.DreqFifoCount);
+    AssertEqual((byte)0x10, dreqBackpressureDevice.Sdram[0x180]);
+    AssertEqual((byte)0x01, dreqBackpressureDevice.Sdram[0x181]);
+    AssertEqual((byte)0x10, dreqBackpressureDevice.Sdram[0x188]);
+    AssertEqual((byte)0x05, dreqBackpressureDevice.Sdram[0x189]);
+
+    byte[] memoryDmaRom = new byte[0x100];
+    WriteWord(memoryDmaRom, 0x80, 0xABCD);
+    WriteWord(memoryDmaRom, 0x82, 0x1234);
+    int memoryDmaPc = 0;
+    int memoryDmaLiteral = 0x40;
+    void EmitMemoryDmaMovLongLiteral(int register, uint value)
+    {
+        WriteLong(memoryDmaRom, memoryDmaLiteral, value);
+        int baseAddress = (memoryDmaPc + 4) & ~3;
+        int displacement = (memoryDmaLiteral - baseAddress) / 4;
+        WriteWord(memoryDmaRom, memoryDmaPc, (ushort)(0xD000 | (register << 8) | displacement));
+        memoryDmaPc += 2;
+        memoryDmaLiteral += 4;
+    }
+
+    void EmitMemoryDmaStoreR1AtR0()
+    {
+        WriteWord(memoryDmaRom, memoryDmaPc, 0x2012); // MOV.L R1,@R0
+        memoryDmaPc += 2;
+    }
+
+    EmitMemoryDmaMovLongLiteral(0, 0xFFFF_FF80);
+    EmitMemoryDmaMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    EmitMemoryDmaStoreR1AtR0();
+    EmitMemoryDmaMovLongLiteral(0, 0xFFFF_FF84);
+    EmitMemoryDmaMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2FrameBufferCachedStart + 0x200);
+    EmitMemoryDmaStoreR1AtR0();
+    EmitMemoryDmaMovLongLiteral(0, 0xFFFF_FF88);
+    EmitMemoryDmaMovLongLiteral(1, 2);
+    EmitMemoryDmaStoreR1AtR0();
+    EmitMemoryDmaMovLongLiteral(0, 0xFFFF_FF8C);
+    EmitMemoryDmaMovLongLiteral(1, 0x0000_56E1);
+    EmitMemoryDmaStoreR1AtR0();
+    EmitMemoryDmaMovLongLiteral(0, 0xFFFF_FFB0);
+    EmitMemoryDmaMovLongLiteral(1, 1);
+    EmitMemoryDmaStoreR1AtR0();
+    WriteWord(memoryDmaRom, memoryDmaPc, 0x001B);
+
+    ThirtyTwoXDevice memoryDmaDevice = new(memoryDmaRom);
+    memoryDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    memoryDmaDevice.MasterSh2.Run(64);
+    AssertEqual((byte)0xAB, memoryDmaDevice.DrawFrameBuffer[0x200]);
+    AssertEqual((byte)0xCD, memoryDmaDevice.DrawFrameBuffer[0x201]);
+    AssertEqual((byte)0x12, memoryDmaDevice.DrawFrameBuffer[0x202]);
+    AssertEqual((byte)0x34, memoryDmaDevice.DrawFrameBuffer[0x203]);
+
+    byte[] systemRegisterDmaRom = new byte[0x100];
+    WriteWord(systemRegisterDmaRom, 0x80, 0x0004);
+    int systemRegisterDmaPc = 0;
+    int systemRegisterDmaLiteral = 0x40;
+    void EmitSystemRegisterDmaMovLongLiteral(int register, uint value)
+    {
+        WriteLong(systemRegisterDmaRom, systemRegisterDmaLiteral, value);
+        int baseAddress = (systemRegisterDmaPc + 4) & ~3;
+        int displacement = (systemRegisterDmaLiteral - baseAddress) / 4;
+        WriteWord(systemRegisterDmaRom, systemRegisterDmaPc, (ushort)(0xD000 | (register << 8) | displacement));
+        systemRegisterDmaPc += 2;
+        systemRegisterDmaLiteral += 4;
+    }
+
+    void EmitSystemRegisterDmaStoreR1AtR0()
+    {
+        WriteWord(systemRegisterDmaRom, systemRegisterDmaPc, 0x2012); // MOV.L R1,@R0
+        systemRegisterDmaPc += 2;
+    }
+
+    EmitSystemRegisterDmaMovLongLiteral(0, 0xFFFF_FF80);
+    EmitSystemRegisterDmaMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    EmitSystemRegisterDmaStoreR1AtR0();
+    EmitSystemRegisterDmaMovLongLiteral(0, 0xFFFF_FF84);
+    EmitSystemRegisterDmaMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    EmitSystemRegisterDmaStoreR1AtR0();
+    EmitSystemRegisterDmaMovLongLiteral(0, 0xFFFF_FF88);
+    EmitSystemRegisterDmaMovLongLiteral(1, 1);
+    EmitSystemRegisterDmaStoreR1AtR0();
+    EmitSystemRegisterDmaMovLongLiteral(0, 0xFFFF_FF8C);
+    EmitSystemRegisterDmaMovLongLiteral(1, 0x0000_56E1);
+    EmitSystemRegisterDmaStoreR1AtR0();
+    EmitSystemRegisterDmaMovLongLiteral(0, 0xFFFF_FFB0);
+    EmitSystemRegisterDmaMovLongLiteral(1, 1);
+    EmitSystemRegisterDmaStoreR1AtR0();
+    WriteWord(systemRegisterDmaRom, systemRegisterDmaPc, 0x001B);
+
+    ThirtyTwoXDevice systemRegisterDmaDevice = new(systemRegisterDmaRom);
+    systemRegisterDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    systemRegisterDmaDevice.MasterSh2.Run(64);
+    AssertEqual((ushort)0x0004, (ushort)(systemRegisterDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset) & 0x3FFF));
+    AssertTrue(systemRegisterDmaDevice.MasterSh2.Halted, "SH-2 DMA into 32X system registers should not recursively re-enter DMA");
+
+    byte[] timerRom = new byte[0x100];
+    WriteWord(timerRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(timerRom, 0x02, 0x6101); // MOV.W @R0,R1
+    WriteWord(timerRom, 0x04, 0x0009); // NOP
+    WriteWord(timerRom, 0x06, 0x0009); // NOP
+    WriteWord(timerRom, 0x08, 0x0009); // NOP
+    WriteWord(timerRom, 0x0A, 0x0009); // NOP
+    WriteWord(timerRom, 0x0C, 0x0009); // NOP
+    WriteWord(timerRom, 0x0E, 0x0009); // NOP
+    WriteWord(timerRom, 0x10, 0x6201); // MOV.W @R0,R2
+    WriteWord(timerRom, 0x12, 0x001B); // SLEEP
+    WriteLong(timerRom, 0x14, 0xFFFF_FE12);
+    ThirtyTwoXDevice timerDevice = new(timerRom);
+    timerDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    timerDevice.MasterSh2.Run(12);
+    AssertTrue(timerDevice.MasterSh2.R[2] != timerDevice.MasterSh2.R[1], "SH-2 free-running timer should advance while code executes");
+
+    byte[] timerStatusRom = new byte[0x80];
+    WriteWord(timerStatusRom, 0x00, 0xD007); // MOV.L @(literal,PC),R0
+    WriteWord(timerStatusRom, 0x02, 0x6100); // MOV.B @R0,R1
+    WriteWord(timerStatusRom, 0x04, 0x7001); // ADD #1,R0
+    WriteWord(timerStatusRom, 0x06, 0x6200); // MOV.B @R0,R2
+    WriteWord(timerStatusRom, 0x08, 0x7001); // ADD #1,R0
+    WriteWord(timerStatusRom, 0x0A, 0x6300); // MOV.B @R0,R3
+    WriteWord(timerStatusRom, 0x0C, 0x7001); // ADD #1,R0
+    WriteWord(timerStatusRom, 0x0E, 0x6400); // MOV.B @R0,R4
+    WriteWord(timerStatusRom, 0x10, 0x001B); // SLEEP
+    WriteLong(timerStatusRom, 0x20, 0xFFFF_FE10);
+    ThirtyTwoXDevice timerStatusDevice = new(timerStatusRom);
+    timerStatusDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    timerStatusDevice.MasterSh2.Run(16);
+    AssertEqual(1u, timerStatusDevice.MasterSh2.R[1]);
+    AssertEqual(0u, timerStatusDevice.MasterSh2.R[2]);
+    AssertEqual(0u, timerStatusDevice.MasterSh2.R[3]);
+
+    device.WritePaletteWord(0, 0x7FFF);
+    AssertEqual((ushort)0x7FFF, device.ReadPaletteWord(0));
+
+    ThirtyTwoXDevice fillDevice = new();
+    fillDevice.Reset();
+    fillDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset, 0x0002);
+    fillDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillStartAddressOffset, 0x20FE);
+    fillDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillDataOffset, 0x1234);
+    AssertEqual((byte)0x12, fillDevice.DrawFrameBuffer[0x41FC]);
+    AssertEqual((byte)0x34, fillDevice.DrawFrameBuffer[0x41FD]);
+    AssertEqual((byte)0x12, fillDevice.DrawFrameBuffer[0x41FE]);
+    AssertEqual((byte)0x34, fillDevice.DrawFrameBuffer[0x41FF]);
+    AssertEqual((byte)0x12, fillDevice.DrawFrameBuffer[0x4000]);
+    AssertEqual((byte)0x34, fillDevice.DrawFrameBuffer[0x4001]);
+    AssertEqual((ushort)0x2000, fillDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillStartAddressOffset));
+    AssertEqual(6, fillDevice.FrameBufferByteWriteCount);
+
+    ThirtyTwoXDevice byteFillDevice = new();
+    byteFillDevice.Reset();
+    byteFillDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset, 0x0000);
+    byteFillDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillStartAddressOffset, 0x0010);
+    byteFillDevice.WriteVdpRegisterByte((ushort)(ThirtyTwoXHardwareProfile.AutoFillDataOffset + 0), 0x56);
+    AssertEqual(0, byteFillDevice.FrameBufferByteWriteCount);
+    byteFillDevice.WriteVdpRegisterByte((ushort)(ThirtyTwoXHardwareProfile.AutoFillDataOffset + 1), 0x78);
+    AssertEqual((byte)0x56, byteFillDevice.DrawFrameBuffer[0x20]);
+    AssertEqual((byte)0x78, byteFillDevice.DrawFrameBuffer[0x21]);
+    AssertEqual(2, byteFillDevice.FrameBufferByteWriteCount);
+
+    byte[] bankedRom = new byte[0x400000];
+    bankedRom[0x000010] = 0x11;
+    bankedRom[0x100010] = 0x22;
+    ThirtyTwoXDevice bankedCacheDevice = new(bankedRom);
+    bankedCacheDevice.Reset();
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(bankedCacheDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart + 0x10));
+    bankedCacheDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.BankSetOffset, 0x0001);
+    AssertEqual((byte)0x22, ReadSh2ByteForTest(bankedCacheDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart + 0x10));
+    AssertEqual((byte)0x22, ReadSh2ByteForTest(bankedCacheDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeBankedStart + 0x10));
+    bankedCacheDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.BankSetOffset, 0x0000);
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(bankedCacheDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeBankedStart + 0x10));
+
+    ThirtyTwoXDevice overwriteDevice = new();
+    overwriteDevice.Reset();
+    overwriteDevice.WriteFrameBufferWord(0, 0x1234);
+    overwriteDevice.WriteFrameBufferByte(0, 0x00);
+    AssertEqual((byte)0x00, overwriteDevice.DrawFrameBuffer[0]);
+    overwriteDevice.WriteFrameBufferByte(0, 0x12);
+    overwriteDevice.WriteOverwriteImageWord(0, 0x00AB);
+    AssertEqual((byte)0x12, overwriteDevice.DrawFrameBuffer[0]);
+    AssertEqual((byte)0xAB, overwriteDevice.DrawFrameBuffer[1]);
+    overwriteDevice.WriteOverwriteImageByte(1, 0x00);
+    AssertEqual((byte)0xAB, overwriteDevice.DrawFrameBuffer[1]);
+
+    ThirtyTwoXDevice frameBufferMirrorDevice = new();
+    frameBufferMirrorDevice.Reset();
+    WriteSh2ByteForTest(frameBufferMirrorDevice, 0x0500_0040, 0x66);
+    AssertEqual((byte)0x66, frameBufferMirrorDevice.DrawFrameBuffer[0x40]);
+    WriteSh2ByteForTest(frameBufferMirrorDevice, 0x0500_0040, 0x00);
+    AssertEqual((byte)0x00, frameBufferMirrorDevice.DrawFrameBuffer[0x40]);
+    WriteSh2ByteForTest(frameBufferMirrorDevice, 0x2502_0041, 0x77);
+    AssertEqual((byte)0x77, frameBufferMirrorDevice.DrawFrameBuffer[0x41]);
+    WriteSh2ByteForTest(frameBufferMirrorDevice, 0x2502_0041, 0x00);
+    AssertEqual((byte)0x77, frameBufferMirrorDevice.DrawFrameBuffer[0x41]);
+
+    ThirtyTwoXDevice runLengthDevice = new();
+    runLengthDevice.Reset();
+    runLengthDevice.WriteFrameBufferWord(0, 0x0100);
+    runLengthDevice.WriteFrameBufferWord(0x200, 0x0304);
+    runLengthDevice.WritePaletteWord(8, 0x03E0);
+    runLengthDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0003);
+    LatchThirtyTwoXVdp(runLengthDevice);
+    runLengthDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] runLengthFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    runLengthDevice.CompositeFrameRgbInto(runLengthFramebuffer);
+    AssertEqual((byte)0, runLengthFramebuffer[0]);
+    AssertEqual((byte)255, runLengthFramebuffer[1]);
+    AssertEqual((byte)0, runLengthFramebuffer[2]);
+    AssertEqual((byte)0, runLengthFramebuffer[9]);
+    AssertEqual((byte)255, runLengthFramebuffer[10]);
+    AssertEqual((byte)0, runLengthFramebuffer[11]);
+
+    ThirtyTwoXDevice runLengthTerminatorDevice = new();
+    runLengthTerminatorDevice.Reset();
+    runLengthTerminatorDevice.WriteFrameBufferWord(0, 0x0100);
+    runLengthTerminatorDevice.WriteFrameBufferWord(0x200, 0x0001);
+    runLengthTerminatorDevice.WriteFrameBufferWord(0x202, 0x0000);
+    runLengthTerminatorDevice.WriteFrameBufferWord(0x204, 0xFF02);
+    runLengthTerminatorDevice.WritePaletteWord(2, 0x001F);
+    runLengthTerminatorDevice.WritePaletteWord(4, 0x03E0);
+    runLengthTerminatorDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0003);
+    LatchThirtyTwoXVdp(runLengthTerminatorDevice);
+    runLengthTerminatorDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] runLengthTerminatorFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    runLengthTerminatorDevice.CompositeFrameRgbInto(runLengthTerminatorFramebuffer);
+    AssertEqual((byte)255, runLengthTerminatorFramebuffer[0]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[1]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[2]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[3]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[4]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[5]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[6]);
+    AssertEqual((byte)255, runLengthTerminatorFramebuffer[7]);
+    AssertEqual((byte)0, runLengthTerminatorFramebuffer[8]);
+
+    AssertEqual(1, device.DrawFrameBufferIndex);
+    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    device.StepScanline(224, pal: false);
+    AssertEqual(0, device.DrawFrameBufferIndex);
+    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, device.DrawFrameBuffer.Length);
+    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, device.DisplayFrameBuffer.Length);
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8083);
+    AssertTrue(device.AdapterEnabled, "ADEN should enable 32X adapter state");
+    AssertTrue(device.Sh2ResetEnabled, "REN should arm SH-2 reset control");
+    AssertTrue(device.Sh2ResetReleased, "RES should release SH-2 reset");
+    AssertTrue(device.VdpAccessGrantedToSh2, "FM should grant 32X VDP access to SH-2");
+    AssertTrue(!device.Sh2HeldInReset, "adapter control should release SH-2 execution");
+
+    ThirtyTwoXDevice compositeDevice = new();
+    compositeDevice.Reset();
+    compositeDevice.WriteFrameBufferWord(0, 0x0100);
+    compositeDevice.WriteFrameBufferByte(0x200, 2);
+    compositeDevice.WritePaletteWord(4, 0x001F);
+    compositeDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(compositeDevice);
+    compositeDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] framebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    compositeDevice.CompositeFrameRgbInto(framebuffer);
+    AssertEqual((byte)255, framebuffer[0]);
+    AssertEqual((byte)0, framebuffer[1]);
+    AssertEqual((byte)0, framebuffer[2]);
+    AssertTrue(compositeDevice.LastCompositeUsedFallback, "compositor should report diagnostic draw-buffer fallback");
+
+    ThirtyTwoXDevice lineTableDevice = new();
+    lineTableDevice.Reset();
+    lineTableDevice.WriteFrameBufferWord(0, 0x0100);
+    lineTableDevice.WriteFrameBufferWord(2, 0x0200);
+    lineTableDevice.WriteFrameBufferByte(0x200, 1);
+    lineTableDevice.WriteFrameBufferByte(0x400, 2);
+    lineTableDevice.WritePaletteWord(2, 0x001F);
+    lineTableDevice.WritePaletteWord(4, 0x03E0);
+    lineTableDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(lineTableDevice);
+    lineTableDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] lineTableFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    lineTableDevice.CompositeFrameRgbInto(lineTableFramebuffer);
+    AssertEqual((byte)255, lineTableFramebuffer[0]);
+    AssertEqual((byte)0, lineTableFramebuffer[1]);
+    AssertEqual((byte)0, lineTableFramebuffer[2]);
+    int secondLineOffset = MdSharp.Core.Video.Vdp.ScreenWidth * 3;
+    AssertEqual((byte)0, lineTableFramebuffer[secondLineOffset]);
+    AssertEqual((byte)255, lineTableFramebuffer[secondLineOffset + 1]);
+    AssertEqual((byte)0, lineTableFramebuffer[secondLineOffset + 2]);
+
+    ThirtyTwoXDevice directColorLineTableDevice = new();
+    directColorLineTableDevice.Reset();
+    directColorLineTableDevice.WriteFrameBufferWord(0, 0x0100);
+    directColorLineTableDevice.WriteFrameBufferWord(0x200, 0x001F);
+    directColorLineTableDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0002);
+    LatchThirtyTwoXVdp(directColorLineTableDevice);
+    directColorLineTableDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] directColorLineTableFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    directColorLineTableDevice.CompositeFrameRgbInto(directColorLineTableFramebuffer);
+    AssertEqual((byte)255, directColorLineTableFramebuffer[0]);
+    AssertEqual((byte)0, directColorLineTableFramebuffer[1]);
+    AssertEqual((byte)0, directColorLineTableFramebuffer[2]);
+
+    ThirtyTwoXDevice shiftedDevice = new();
+    shiftedDevice.Reset();
+    shiftedDevice.WriteFrameBufferWord(0, 0x0100);
+    shiftedDevice.WriteFrameBufferByte(0x200, 1);
+    shiftedDevice.WriteFrameBufferByte(0x201, 2);
+    shiftedDevice.WritePaletteWord(2, 0x001F);
+    shiftedDevice.WritePaletteWord(4, 0x03E0);
+    shiftedDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    shiftedDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.ScreenShiftControlOffset, 0x0001);
+    LatchThirtyTwoXVdp(shiftedDevice);
+    shiftedDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] shiftedFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    shiftedDevice.CompositeFrameRgbInto(shiftedFramebuffer);
+    AssertEqual((byte)0, shiftedFramebuffer[0]);
+    AssertEqual((byte)255, shiftedFramebuffer[1]);
+    AssertEqual((byte)0, shiftedFramebuffer[2]);
+
+    ThirtyTwoXDevice priorityDevice = new();
+    priorityDevice.Reset();
+    priorityDevice.WriteFrameBufferWord(0, 0x0100);
+    priorityDevice.WriteFrameBufferByte(0x200, 1);
+    priorityDevice.WritePaletteWord(2, 0x001F);
+    priorityDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(priorityDevice);
+    priorityDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] priorityFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    priorityFramebuffer[0] = 9;
+    priorityFramebuffer[1] = 8;
+    priorityFramebuffer[2] = 7;
+    bool[] mdOpaque = new bool[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight];
+    mdOpaque[0] = true;
+    priorityDevice.CompositeFrameRgbInto(priorityFramebuffer, mdOpaque);
+    AssertEqual((byte)9, priorityFramebuffer[0]);
+    AssertEqual((byte)8, priorityFramebuffer[1]);
+    AssertEqual((byte)7, priorityFramebuffer[2]);
+
+    priorityDevice.WritePaletteWord(2, 0x801F);
+    priorityDevice.CompositeFrameRgbInto(priorityFramebuffer, mdOpaque);
+    AssertEqual((byte)255, priorityFramebuffer[0]);
+    AssertEqual((byte)0, priorityFramebuffer[1]);
+    AssertEqual((byte)0, priorityFramebuffer[2]);
+
+    priorityDevice.WritePaletteWord(2, 0x001F);
+    priorityDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0081);
+    LatchThirtyTwoXVdp(priorityDevice);
+    priorityFramebuffer[0] = 9;
+    priorityFramebuffer[1] = 8;
+    priorityFramebuffer[2] = 7;
+    priorityDevice.CompositeFrameRgbInto(priorityFramebuffer, mdOpaque);
+    AssertEqual((byte)255, priorityFramebuffer[0]);
+    AssertEqual((byte)0, priorityFramebuffer[1]);
+    AssertEqual((byte)0, priorityFramebuffer[2]);
+
+    priorityDevice.WritePaletteWord(2, 0x801F);
+    priorityFramebuffer[0] = 9;
+    priorityFramebuffer[1] = 8;
+    priorityFramebuffer[2] = 7;
+    priorityDevice.CompositeFrameRgbInto(priorityFramebuffer, mdOpaque);
+    AssertEqual((byte)9, priorityFramebuffer[0]);
+    AssertEqual((byte)8, priorityFramebuffer[1]);
+    AssertEqual((byte)7, priorityFramebuffer[2]);
+
+    ThirtyTwoXDevice swapDevice = new();
+    swapDevice.Reset();
+    swapDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(swapDevice);
+    swapDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    AssertEqual(1, swapDevice.DrawFrameBufferIndex);
+    AssertTrue(swapDevice.FrameBufferSwapPending, "display-time frame buffer writes should wait for VBlank");
+    AssertTrue((swapDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should report active-display frame-buffer engagement");
+    swapDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    AssertEqual(0, swapDevice.DrawFrameBufferIndex);
+    AssertTrue(!swapDevice.FrameBufferSwapPending, "VBlank should complete the pending 32X frame buffer swap");
+    ushort frameBufferStatus = swapDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+    AssertTrue((frameBufferStatus & 0x8000) != 0, "32X VBlank status should be visible in frame buffer control reads");
+
+    ThirtyTwoXDevice readDevice = new();
+    readDevice.Reset();
+    readDevice.WriteFrameBufferWord(0, 0x1357);
+    readDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(readDevice);
+    readDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    readDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    AssertEqual((ushort)0x0000, readDevice.ReadFrameBufferWord(0));
+    readDevice.WriteFrameBufferWord(0, 0x2468);
+    AssertEqual((ushort)0x2468, readDevice.ReadFrameBufferWord(0));
+    AssertTrue((frameBufferStatus & 0x0002) == 0, "FEN should clear when frame-buffer access is approved after the swap");
+
+    ThirtyTwoXDevice accessDevice = new();
+    accessDevice.Reset();
+    accessDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    AssertTrue((accessDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should be visible while the 32X framebuffer is engaged during active display");
+
+    ThirtyTwoXDevice latchDevice = new();
+    latchDevice.Reset();
+    latchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    latchDevice.SetHBlank(true);
+    latchDevice.SetHBlank(false);
+    latchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    AssertEqual(0, latchDevice.DisplayFrameBufferIndex);
+    AssertEqual(1, latchDevice.RequestedDisplayFrameBufferIndex);
+    AssertTrue(latchDevice.FrameBufferSwapPending, "active display mode should defer frame-buffer selection until VBlank");
+    AssertTrue((latchDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0001) != 0, "FS readback should preserve the requested frame buffer while the active display buffer is still pending");
+    AssertTrue((latchDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should remain set during active display after a deferred frame-buffer selection");
+    latchDevice.WriteFrameBufferWord(0, 0x55AA);
+    AssertEqual((ushort)0xFFFF, latchDevice.ReadFrameBufferWord(0));
+    latchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0000);
+    latchDevice.SetHBlank(true);
+    latchDevice.SetHBlank(false);
+    AssertEqual(1, latchDevice.DisplayFrameBufferIndex);
+    AssertTrue(!latchDevice.FrameBufferSwapPending, "latched blank mode should allow a pending frame-buffer selection to complete");
+    latchDevice.WriteFrameBufferWord(0, 0x55AA);
+    AssertEqual((ushort)0x55AA, latchDevice.DrawFrameBuffer[0] << 8 | latchDevice.DrawFrameBuffer[1]);
+
+    ThirtyTwoXDevice hInterruptDevice = new();
+    hInterruptDevice.Reset();
+    hInterruptDevice.RestoreState(hInterruptDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0004,
+        SlaveInterruptMask = 0x0004,
+        HorizontalInterruptPeriod = 1,
+    });
+    hInterruptDevice.SetHBlank(true);
+    AssertEqual(0, hInterruptDevice.MasterSh2.PendingInterruptLevel);
+    hInterruptDevice.SetHBlank(false);
+    hInterruptDevice.SetHBlank(true);
+    AssertEqual(10, hInterruptDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(69, hInterruptDevice.MasterSh2.PendingInterruptVectorNumber);
+
+    ThirtyTwoXDevice vblankHInterruptDevice = new();
+    vblankHInterruptDevice.Reset();
+    vblankHInterruptDevice.RestoreState(vblankHInterruptDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        VBlank = true,
+        MasterInterruptMask = 0x0004,
+        HorizontalInterruptPeriod = 0,
+    });
+    vblankHInterruptDevice.SetHBlank(true);
+    AssertEqual(0, vblankHInterruptDevice.MasterSh2.PendingInterruptLevel);
+    vblankHInterruptDevice.RestoreState(vblankHInterruptDevice.CaptureState() with
+    {
+        MasterInterruptMask = 0x0024,
+    });
+    vblankHInterruptDevice.SetHBlank(false);
+    vblankHInterruptDevice.SetHBlank(true);
+    AssertEqual(10, vblankHInterruptDevice.MasterSh2.PendingInterruptLevel);
+
+    byte[] acceptedInterruptRom = new byte[0x300];
+    WriteWord(acceptedInterruptRom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(acceptedInterruptRom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(acceptedInterruptRom, 0x04, 0xAFFE); // BRA *
+    WriteWord(acceptedInterruptRom, 0x06, 0x0009); // NOP
+    WriteWord(acceptedInterruptRom, 0x80, 0xE156); // MOV #$56,R1
+    WriteWord(acceptedInterruptRom, 0x82, 0x001B); // SLEEP
+    WriteWord(acceptedInterruptRom, 0x90, 0xE257); // MOV #$57,R2
+    WriteWord(acceptedInterruptRom, 0x92, 0x001B); // SLEEP
+    WriteLong(acceptedInterruptRom, 0x40 + (69 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    WriteLong(acceptedInterruptRom, 0x40 + (70 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x90);
+
+    ThirtyTwoXDevice acceptedHInterruptDevice = new(acceptedInterruptRom);
+    acceptedHInterruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    acceptedHInterruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    acceptedHInterruptDevice.MasterSh2.Run(3);
+    acceptedHInterruptDevice.RestoreState(acceptedHInterruptDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0004,
+        HorizontalInterruptPeriod = 0,
+    });
+    acceptedHInterruptDevice.SetHBlank(true);
+    acceptedHInterruptDevice.RunSh2Cycles(40);
+    AssertEqual(0x0000_0056u, acceptedHInterruptDevice.MasterSh2.R[1]);
+    AssertTrue(acceptedHInterruptDevice.CaptureState().MasterHorizontalInterruptPending, "accepted 32X H interrupt should remain latched until the clear register is written");
+
+    ThirtyTwoXDevice acceptedVInterruptDevice = new(acceptedInterruptRom);
+    acceptedVInterruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    acceptedVInterruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    acceptedVInterruptDevice.MasterSh2.Run(3);
+    acceptedVInterruptDevice.RestoreState(acceptedVInterruptDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0008,
+    });
+    acceptedVInterruptDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    acceptedVInterruptDevice.RunSh2Cycles(40);
+    AssertEqual(0x0000_0057u, acceptedVInterruptDevice.MasterSh2.R[2]);
+    AssertTrue(acceptedVInterruptDevice.CaptureState().MasterVerticalInterruptPending, "accepted 32X V interrupt should remain latched until the clear register is written");
+
+    byte[] acceptedPwmInterruptRom = new byte[0x300];
+    WriteWord(acceptedPwmInterruptRom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(acceptedPwmInterruptRom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(acceptedPwmInterruptRom, 0x04, 0xAFFE); // BRA *
+    WriteWord(acceptedPwmInterruptRom, 0x06, 0x0009); // NOP
+    WriteWord(acceptedPwmInterruptRom, 0x80, 0xE158); // MOV #$58,R1
+    WriteWord(acceptedPwmInterruptRom, 0x82, 0x001B); // SLEEP
+    WriteLong(acceptedPwmInterruptRom, 0x40 + (67 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    ThirtyTwoXDevice acceptedPwmInterruptDevice = new(acceptedPwmInterruptRom);
+    acceptedPwmInterruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    acceptedPwmInterruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    acceptedPwmInterruptDevice.MasterSh2.Run(3);
+    acceptedPwmInterruptDevice.RestoreState(acceptedPwmInterruptDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0001,
+    });
+    acceptedPwmInterruptDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0105);
+    acceptedPwmInterruptDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0004);
+    acceptedPwmInterruptDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0200);
+    acceptedPwmInterruptDevice.RunSh2Cycles(40);
+    AssertEqual(0x0000_0058u, acceptedPwmInterruptDevice.MasterSh2.R[1]);
+}
+
+void ThirtyTwoXSh2FrtInputCaptureSignal()
+{
+    byte[] rom = new byte[0x300];
+    WriteWord(rom, 0x00, 0xD005); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xE17F); // MOV #$7F,R1
+    WriteWord(rom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(rom, 0x06, 0x001B); // SLEEP
+    WriteLong(rom, 0x18, 0x2100_0000); // Slave SH-2 input capture signal.
+
+    WriteWord(rom, 0x80, 0xD105); // MOV.L @(literal,PC),R1
+    WriteWord(rom, 0x82, 0xE080); // MOV #$80,R0
+    WriteWord(rom, 0x84, 0x2100); // MOV.B R0,@R1
+    WriteWord(rom, 0x86, 0xE002); // MOV #2,R0
+    WriteWord(rom, 0x88, 0x400E); // LDC R0,SR
+    WriteWord(rom, 0x8A, 0xAFFE); // BRA *
+    WriteWord(rom, 0x8C, 0x0009); // NOP
+    WriteLong(rom, 0x98, 0xFFFF_FE10); // FRT TIER.
+
+    WriteLong(rom, 0x100, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x180);
+    WriteWord(rom, 0x180, 0xE255); // MOV #$55,R2
+    WriteWord(rom, 0x182, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice disabledDevice = new(rom);
+    disabledDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    disabledDevice.MasterSh2.Run(4);
+    AssertEqual(0, disabledDevice.SlaveSh2.PendingInterruptLevel);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.MasterSh2.Reset(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.SlaveSh2.Reset(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    device.SlaveSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.SlaveSh2.Run(8);
+    AssertEqual(0x0000_0002u, device.SlaveSh2.SR & 0xFFu);
+
+    device.MasterSh2.Run(4);
+    AssertEqual(15, device.SlaveSh2.PendingInterruptLevel);
+    AssertEqual(64, device.SlaveSh2.PendingInterruptVectorNumber);
+    device.SlaveSh2.Run(4);
+    AssertEqual(0x0000_0055u, device.SlaveSh2.R[2]);
+    AssertTrue(device.SlaveSh2.Halted, "input capture should vector through FRT vector 64 when ICIE is enabled");
+}
+
+void ThirtyTwoXSh2CoreExecutesSyntheticCode()
+{
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
+        return (byte)method.Invoke(target, [address, 0])!;
+    }
+
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static uint ReadSh2LongForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Long helper was not found");
+        return (uint)method.Invoke(target, [address, 0])!;
+    }
+
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xE15A); // MOV #$5A,R1
+    WriteWord(rom, 0x04, 0x1010); // MOV.L R1,@(0,R0)
+    WriteWord(rom, 0x06, 0x5200); // MOV.L @(0,R0),R2
+    WriteWord(rom, 0x08, 0x001B); // SLEEP
+    WriteLong(rom, 0x14, ThirtyTwoXHardwareProfile.Sh2SdramStart);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    int executed = device.MasterSh2.Run(16);
+
+    AssertEqual(5, executed);
+    AssertTrue(device.MasterSh2.Halted, "SH-2 synthetic program should halt on SLEEP");
+    AssertEqual(0x0000_005Au, device.MasterSh2.R[2]);
+    AssertEqual((byte)0x5A, device.Sdram[3]);
+
+    byte[] cacheDataRom = new byte[0x100];
+    WriteWord(cacheDataRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(cacheDataRom, 0x02, 0xE134); // MOV #$34,R1
+    WriteWord(cacheDataRom, 0x04, 0x1010); // MOV.L R1,@(0,R0)
+    WriteWord(cacheDataRom, 0x06, 0x5200); // MOV.L @(0,R0),R2
+    WriteWord(cacheDataRom, 0x08, 0x001B); // SLEEP
+    WriteLong(cacheDataRom, 0x14, 0xC000_0000);
+    ThirtyTwoXDevice cacheDataDevice = new(cacheDataRom);
+    cacheDataDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    cacheDataDevice.MasterSh2.Run(16);
+    AssertEqual(0x0000_0034u, cacheDataDevice.MasterSh2.R[2]);
+    AssertEqual((byte)0x00, cacheDataDevice.Sdram[3]);
+    ThirtyTwoXDevice.ThirtyTwoXState cacheDataState = cacheDataDevice.CaptureState();
+    cacheDataDevice.Reset();
+    cacheDataDevice.RestoreState(cacheDataState);
+    cacheDataDevice.MasterSh2.Reset(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 6);
+    cacheDataDevice.MasterSh2.R[0] = 0xC000_0000;
+    cacheDataDevice.MasterSh2.Run(4);
+    AssertEqual(0x0000_0034u, cacheDataDevice.MasterSh2.R[2]);
+    WriteSh2ByteForTest(cacheDataDevice, 0xDFFF_FFFF, 0x7B);
+    AssertEqual((byte)0x7B, ReadSh2ByteForTest(cacheDataDevice, 0xC000_0FFF));
+
+    byte[] cacheControlRom = new byte[0x100];
+    cacheControlRom[0x20] = 0x42;
+    ThirtyTwoXDevice cacheControlDevice = new(cacheControlRom);
+    uint cachedRomByte = ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x20;
+    WriteSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92, 0x01);
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    WriteSh2ByteForTest(cacheControlDevice, cachedRomByte, 0x99);
+    AssertEqual((byte)0x99, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    WriteSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92, 0x19);
+    AssertEqual((byte)0x09, ReadSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92));
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    WriteSh2ByteForTest(cacheControlDevice, 0xC000_0020, 0x66);
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    WriteSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92, 0x05);
+    WriteSh2ByteForTest(cacheControlDevice, cachedRomByte, 0x77);
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    ThirtyTwoXDevice.ThirtyTwoXState cacheControlState = cacheControlDevice.CaptureState();
+    cacheControlDevice.Reset();
+    cacheControlDevice.RestoreState(cacheControlState);
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+    WriteSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92, 0x19);
+    AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+
+    ThirtyTwoXDevice cacheAddressArrayDevice = new(cacheControlRom);
+    WriteSh2ByteForTest(cacheAddressArrayDevice, 0xFFFF_FE92, 0xC1); // Select way 3 and enable cache.
+    WriteSh2LongForTest(cacheAddressArrayDevice, 0x6000_0004, 0x048C_00C0); // Address bit 2 marks valid; LRU is written from bits 11:6.
+    AssertEqual(0x048C_0032u, ReadSh2LongForTest(cacheAddressArrayDevice, 0x6000_0000));
+    WriteSh2LongForTest(cacheAddressArrayDevice, 0x6000_0000, 0x0000_0000); // Address bit 2 clear invalidates the selected entry.
+    AssertEqual(0x0000_0000u, ReadSh2LongForTest(cacheAddressArrayDevice, 0x6000_0000) & 0x0008_0002u);
+
+    byte[] twoWayCacheRom = new byte[0x80];
+    twoWayCacheRom[0x00] = 0x12;
+    twoWayCacheRom[0x01] = 0x34;
+    ThirtyTwoXDevice twoWayCacheDevice = new(twoWayCacheRom);
+    WriteSh2ByteForTest(twoWayCacheDevice, 0xFFFF_FE92, 0x09);
+    WriteSh2ByteForTest(twoWayCacheDevice, 0xC000_0000, 0xAA);
+    WriteSh2ByteForTest(twoWayCacheDevice, 0xC000_0400, 0xBB);
+    AssertEqual((byte)0x12, ReadSh2ByteForTest(twoWayCacheDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart));
+    AssertEqual((byte)0xAA, ReadSh2ByteForTest(twoWayCacheDevice, 0xC000_0000));
+    AssertEqual((byte)0xBB, ReadSh2ByteForTest(twoWayCacheDevice, 0xC000_0400));
+
+    byte[] taggedLongRom = new byte[0x80];
+    taggedLongRom[0x20] = 0x11;
+    taggedLongRom[0x21] = 0x22;
+    taggedLongRom[0x22] = 0x33;
+    taggedLongRom[0x23] = 0x44;
+    WriteWord(taggedLongRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(taggedLongRom, 0x02, 0x5102); // MOV.L @(8,R0),R1
+    WriteWord(taggedLongRom, 0x04, 0x001B); // SLEEP
+    WriteLong(taggedLongRom, 0x14, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x19);
+    ThirtyTwoXDevice taggedLongDevice = new(taggedLongRom);
+    WriteSh2ByteForTest(taggedLongDevice, 0xFFFF_FE92, 0x01);
+    taggedLongDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    taggedLongDevice.MasterSh2.Run(8);
+    AssertEqual(0x1122_3344u, taggedLongDevice.MasterSh2.R[1]);
+
+    byte[] internalRegisterRom = new byte[0x100];
+    WriteWord(internalRegisterRom, 0x00, 0xD003); // MOV.L @(literal,PC),R0
+    WriteWord(internalRegisterRom, 0x02, 0x6201); // MOV.W @R0,R2
+    WriteWord(internalRegisterRom, 0x04, 0x001B); // SLEEP
+    WriteLong(internalRegisterRom, 0x10, 0xFFFF_FF40);
+    ThirtyTwoXDevice internalRegisterDevice = new(internalRegisterRom);
+    internalRegisterDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    internalRegisterDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_0000u, internalRegisterDevice.MasterSh2.R[2]);
+
+    ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
+    device.MasterSh2.Reset();
+    device.RestoreState(state);
+    AssertEqual(0x0000_005Au, device.MasterSh2.R[2]);
+    AssertEqual((byte)0x5A, device.Sdram[3]);
+
+    byte[] branchRom = new byte[0x100];
+    WriteWord(branchRom, 0x00, 0xE001); // MOV #1,R0
+    WriteWord(branchRom, 0x02, 0xE105); // MOV #5,R1
+    WriteWord(branchRom, 0x04, 0x3010); // CMP/EQ R1,R0
+    WriteWord(branchRom, 0x06, 0x8F01); // BF/S to $0C
+    WriteWord(branchRom, 0x08, 0xE2FF); // MOV #-1,R2 in delay slot
+    WriteWord(branchRom, 0x0A, 0xE222); // skipped
+    WriteWord(branchRom, 0x0C, 0xE333); // MOV #$33,R3
+    WriteWord(branchRom, 0x0E, 0x001B); // SLEEP
+    ThirtyTwoXDevice branchDevice = new(branchRom);
+    branchDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    branchDevice.MasterSh2.Run(16);
+    AssertEqual(0xFFFF_FFFFu, branchDevice.MasterSh2.R[2]);
+    AssertEqual(0x0000_0033u, branchDevice.MasterSh2.R[3]);
+    AssertTrue(branchDevice.MasterSh2.Halted, "SH-2 branch test should halt");
+
+    byte[] notRom = new byte[0x20];
+    WriteWord(notRom, 0x00, 0xE1F0); // MOV #-$10,R1
+    WriteWord(notRom, 0x02, 0x6217); // NOT R1,R2
+    WriteWord(notRom, 0x04, 0x611B); // NEG R1,R1
+    WriteWord(notRom, 0x06, 0x001B); // SLEEP
+    ThirtyTwoXDevice notDevice = new(notRom);
+    notDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    notDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_000Fu, notDevice.MasterSh2.R[2]);
+    AssertEqual(0x0000_0010u, notDevice.MasterSh2.R[1]);
+
+    byte[] shiftAndTasRom = new byte[0x100];
+    WriteWord(shiftAndTasRom, 0x00, 0xE5FC); // MOV #-4,R5
+    WriteWord(shiftAndTasRom, 0x02, 0xE2FF); // MOV #-1,R2
+    WriteWord(shiftAndTasRom, 0x04, 0x452C); // SHAD R2,R5
+    WriteWord(shiftAndTasRom, 0x06, 0xE301); // MOV #1,R3
+    WriteWord(shiftAndTasRom, 0x08, 0xE404); // MOV #4,R4
+    WriteWord(shiftAndTasRom, 0x0A, 0x434D); // SHLD R4,R3
+    WriteWord(shiftAndTasRom, 0x0C, 0xE4FF); // MOV #-1,R4
+    WriteWord(shiftAndTasRom, 0x0E, 0x434D); // SHLD R4,R3
+    WriteWord(shiftAndTasRom, 0x10, 0xD103); // MOV.L @(literal,PC),R1
+    WriteWord(shiftAndTasRom, 0x12, 0x411B); // TAS.B @R1
+    WriteWord(shiftAndTasRom, 0x14, 0x001B); // SLEEP
+    WriteLong(shiftAndTasRom, 0x20, ThirtyTwoXHardwareProfile.Sh2SdramStart);
+    ThirtyTwoXDevice shiftAndTasDevice = new(shiftAndTasRom);
+    shiftAndTasDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    shiftAndTasDevice.MasterSh2.Run(16);
+    AssertEqual(0xFFFF_FFFEu, shiftAndTasDevice.MasterSh2.R[5]);
+    AssertEqual(0x0000_0008u, shiftAndTasDevice.MasterSh2.R[3]);
+    AssertTrue((shiftAndTasDevice.MasterSh2.SR & 1u) != 0, "TAS.B should set T when the tested byte is zero");
+    AssertEqual((byte)0x80, shiftAndTasDevice.Sdram[0]);
+
+    byte[] macRom = new byte[0x100];
+    WriteWord(macRom, 0x00, 0xD105); // MOV.L @(literal,PC),R1
+    WriteWord(macRom, 0x02, 0xD206); // MOV.L @(literal,PC),R2
+    WriteWord(macRom, 0x04, 0x412F); // MAC.W @R2+,@R1+
+    WriteWord(macRom, 0x06, 0xD407); // MOV.L @(literal,PC),R4
+    WriteWord(macRom, 0x08, 0xD308); // MOV.L @(literal,PC),R3
+    WriteWord(macRom, 0x0A, 0x043F); // MAC.L @R3+,@R4+
+    WriteWord(macRom, 0x0C, 0x001B); // SLEEP
+    WriteLong(macRom, 0x18, ThirtyTwoXHardwareProfile.Sh2SdramStart + 2);
+    WriteLong(macRom, 0x1C, ThirtyTwoXHardwareProfile.Sh2SdramStart + 4);
+    WriteLong(macRom, 0x24, ThirtyTwoXHardwareProfile.Sh2SdramStart);
+    WriteLong(macRom, 0x2C, ThirtyTwoXHardwareProfile.Sh2SdramStart + 8);
+    ThirtyTwoXDevice macDevice = new(macRom);
+    macDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    ThirtyTwoXDevice.ThirtyTwoXState macState = macDevice.CaptureState();
+    macState.Sdram[3] = 2;
+    macState.Sdram[5] = 3;
+    macState.Sdram[11] = 4;
+    macDevice.RestoreState(macState);
+    macDevice.MasterSh2.Run(16);
+    AssertEqual(0x0000_000Eu, macDevice.MasterSh2.MACL);
+    AssertEqual(0x0000_0000u, macDevice.MasterSh2.MACH);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2SdramStart + 4, macDevice.MasterSh2.R[1]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2SdramStart + 6, macDevice.MasterSh2.R[2]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2SdramStart + 4, macDevice.MasterSh2.R[4]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2SdramStart + 12, macDevice.MasterSh2.R[3]);
+
+    byte[] trapRom = new byte[0x100];
+    WriteWord(trapRom, 0x00, 0xC301); // TRAPA #1
+    WriteWord(trapRom, 0x02, 0xE111); // MOV #$11,R1 after RTE
+    WriteWord(trapRom, 0x04, 0x001B); // SLEEP
+    WriteWord(trapRom, 0x10, 0x002B); // RTE
+    WriteWord(trapRom, 0x12, 0xE222); // MOV #$22,R2 in RTE delay slot
+    WriteLong(trapRom, 0x44, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x10);
+    ThirtyTwoXDevice trapDevice = new(trapRom);
+    trapDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    trapDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    trapDevice.MasterSh2.R[15] = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
+    trapDevice.MasterSh2.Run(16);
+    AssertEqual(0x0000_0011u, trapDevice.MasterSh2.R[1]);
+    AssertEqual(0x0000_0022u, trapDevice.MasterSh2.R[2]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100, trapDevice.MasterSh2.R[15]);
+    AssertTrue(trapDevice.MasterSh2.Halted, "SH-2 trap/RTE program should return and halt");
+
+    byte[] interruptRom = new byte[0x200];
+    WriteWord(interruptRom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(interruptRom, 0x02, 0x400E); // LDC R0,SR, leaving level-8 command interrupts unmasked
+    WriteWord(interruptRom, 0x04, 0xAFFE); // BRA *
+    WriteWord(interruptRom, 0x06, 0x0009); // NOP
+    WriteWord(interruptRom, 0x80, 0xE155); // MOV #$55,R1
+    WriteWord(interruptRom, 0x82, 0x001B); // SLEEP
+    WriteLong(interruptRom, 0x40 + (65 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    WriteLong(interruptRom, 0x40 + (72 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x90);
+    WriteWord(interruptRom, 0x90, 0xE166); // Wrong vector if level is used as the vector index.
+    WriteWord(interruptRom, 0x92, 0x001B);
+    ThirtyTwoXDevice interruptDevice = new(interruptRom);
+    interruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    interruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    interruptDevice.MasterSh2.Run(3);
+    interruptDevice.MasterSh2.RequestInterrupt(8, 65);
+    interruptDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_0055u, interruptDevice.MasterSh2.R[1]);
+    AssertTrue(interruptDevice.MasterSh2.Halted, "32X command interrupts should use the supplied autovector number, not 64 + level");
+
+    byte[] srMaskRom = new byte[0x40];
+    WriteWord(srMaskRom, 0x00, 0xE0F1); // MOV #$F1,R0 sign-extends to $FFFFFFF1.
+    WriteWord(srMaskRom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(srMaskRom, 0x04, 0x0102); // STC SR,R1
+    WriteWord(srMaskRom, 0x06, 0x001B); // SLEEP
+    ThirtyTwoXDevice srMaskDevice = new(srMaskRom);
+    srMaskDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    srMaskDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_03F1u, srMaskDevice.MasterSh2.R[1]);
+    AssertEqual(0x0000_03F1u, srMaskDevice.MasterSh2.SR);
+
+    byte[] delaySlotPcRelativeRom = new byte[0x40];
+    WriteWord(delaySlotPcRelativeRom, 0x00, 0xA002); // BRA $08
+    WriteWord(delaySlotPcRelativeRom, 0x02, 0x9100); // MOV.W @(0,PC),R1 in the delay slot
+    WriteWord(delaySlotPcRelativeRom, 0x04, 0x5678); // Would be read if the slot used branch PC + 4.
+    WriteWord(delaySlotPcRelativeRom, 0x06, 0x9ABC); // Would be read if the slot used its own PC + 4.
+    WriteWord(delaySlotPcRelativeRom, 0x08, 0x001B); // SLEEP
+    WriteWord(delaySlotPcRelativeRom, 0x0A, 0x1234); // Correct source: branch destination + 2.
+    ThirtyTwoXDevice delaySlotPcRelativeDevice = new(delaySlotPcRelativeRom);
+    delaySlotPcRelativeDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    delaySlotPcRelativeDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_1234u, delaySlotPcRelativeDevice.MasterSh2.R[1]);
+
+    byte[] sleepWakeRom = new byte[0x200];
+    WriteWord(sleepWakeRom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(sleepWakeRom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(sleepWakeRom, 0x04, 0x001B); // SLEEP
+    WriteWord(sleepWakeRom, 0x80, 0xE377); // MOV #$77,R3
+    WriteWord(sleepWakeRom, 0x82, 0x001B); // SLEEP
+    WriteLong(sleepWakeRom, 0x40 + (65 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    ThirtyTwoXDevice sleepWakeDevice = new(sleepWakeRom);
+    sleepWakeDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    sleepWakeDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    sleepWakeDevice.MasterSh2.Run(3);
+    AssertTrue(sleepWakeDevice.MasterSh2.Halted, "SH-2 SLEEP should halt until an interrupt is accepted");
+    sleepWakeDevice.MasterSh2.RequestInterrupt(8, 65);
+    sleepWakeDevice.MasterSh2.Run(4);
+    AssertEqual(0x0000_0077u, sleepWakeDevice.MasterSh2.R[3]);
+    AssertTrue(sleepWakeDevice.MasterSh2.Halted, "SH-2 should wake from SLEEP for an unmasked interrupt and run the handler");
+
+    ThirtyTwoXDevice clearedInterruptDevice = new(interruptRom);
+    clearedInterruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    clearedInterruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    clearedInterruptDevice.MasterSh2.Run(3);
+    clearedInterruptDevice.MasterSh2.RequestInterrupt(8, 65);
+    clearedInterruptDevice.MasterSh2.ClearPendingInterrupt(8, 65);
+    clearedInterruptDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_0000u, clearedInterruptDevice.MasterSh2.R[1]);
+    AssertTrue(!clearedInterruptDevice.MasterSh2.Halted, "cleared pending SH-2 interrupts should not fire after SR unmasks them");
+
+    byte[] illegalRom = new byte[0x100];
+    WriteWord(illegalRom, 0x00, 0xFFFF); // undefined on SH-2
+    WriteWord(illegalRom, 0x02, 0xE155); // MOV #$55,R1 after illegal handler returns
+    WriteWord(illegalRom, 0x04, 0x001B); // SLEEP
+    WriteWord(illegalRom, 0x20, 0x002B); // RTE
+    WriteWord(illegalRom, 0x22, 0xE266); // MOV #$66,R2 in RTE delay slot
+    WriteLong(illegalRom, 0x50, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x20);
+    ThirtyTwoXDevice illegalDevice = new(illegalRom);
+    illegalDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    illegalDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    illegalDevice.MasterSh2.R[15] = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
+    illegalDevice.MasterSh2.Run(16);
+    AssertEqual(0x0000_0055u, illegalDevice.MasterSh2.R[1]);
+    AssertEqual(0x0000_0066u, illegalDevice.MasterSh2.R[2]);
+    AssertTrue(illegalDevice.MasterSh2.Halted, "SH-2 illegal opcode should vector through the general illegal handler");
+}
+
+void ThirtyTwoXSh2DtBfDelayLoopFastForward()
+{
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0x4010); // DT R0
+    WriteWord(rom, 0x02, 0x8BFD); // BF $-6 back to DT
+    WriteWord(rom, 0x04, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    device.MasterSh2.R[0] = 100;
+
+    int partial = device.RunSh2Cycles(20);
+    AssertTrue(partial <= 2, "partial DT/BF loop should collapse to at most one scheduler step per SH-2");
+    AssertEqual(90u, device.MasterSh2.R[0]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, device.MasterSh2.PC);
+    AssertTrue(!device.MasterSh2.Halted, "partial DT/BF fast-forward should remain in the loop");
+
+    int completed = device.RunSh2Cycles(200);
+    AssertTrue(completed <= 4, "completed DT/BF fast-forward should collapse the remaining loop");
+    AssertEqual(0u, device.MasterSh2.R[0]);
+    AssertTrue(device.MasterSh2.Halted, "SH-2 should execute the instruction after the collapsed delay loop");
+}
+
+void ThirtyTwoXSh2NopDtBfDelayLoopFastForward()
+{
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0x0009); // NOP
+    WriteWord(rom, 0x02, 0x0009); // NOP
+    WriteWord(rom, 0x04, 0x0009); // NOP
+    WriteWord(rom, 0x06, 0x4010); // DT R0
+    WriteWord(rom, 0x08, 0x8BFA); // BF $-12 back to first NOP
+    WriteWord(rom, 0x0A, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    device.MasterSh2.R[0] = 50;
+
+    int partial = device.RunSh2Cycles(25);
+    AssertTrue(partial <= 2, "partial NOP/DT/BF loop should collapse to at most one scheduler step per SH-2");
+    AssertEqual(45u, device.MasterSh2.R[0]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, device.MasterSh2.PC);
+    AssertTrue(!device.MasterSh2.Halted, "partial NOP/DT/BF fast-forward should remain in the loop");
+
+    int completed = device.RunSh2Cycles(250);
+    AssertTrue(completed <= 4, "completed NOP/DT/BF fast-forward should collapse the remaining loop");
+    AssertEqual(0u, device.MasterSh2.R[0]);
+    AssertTrue(device.MasterSh2.Halted, "SH-2 should execute the instruction after the collapsed NOP delay loop");
+}
+
+void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0100;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD102); // MOV.L @(2,PC),R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x6213); // MOV R1,R2
+    bus.WriteInstructionWord(LoopPc + 4, 0x2228); // TST R2,R2
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop
+    bus.WriteLong(LoopPc + 0x0C, 0x2000_4020);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardMovLiteralTstBfPollLoop(300, out int cycles), "MOV literal/TST/BF register poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x2000_4020u, cpu.R[1]);
+    AssertEqual(0x2000_4020u, cpu.R[2]);
+}
+
+void ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0100;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD005); // MOV.L @(5,PC),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x6001); // MOV.W @R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x89FB); // BT loop
+    bus.WriteLong(LoopPc + 0x18, 0x2000_4020);
+    bus.WriteWord(0x2000_4020, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(300, out int cycles), "MOV literal/MOV.W/CMP/EQ/BT zero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteWord(0x2000_4020, 0x0001);
+    AssertTrue(!cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(300, out _), "non-matching poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0200;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    bus.WriteWord(0x2000_4020, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = 0x2000_4020;
+    AssertTrue(cpu.TryFastForwardWordCmpEqBtPollLoop(300, out int cycles), "MOV.W/CMP/EQ/BT zero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0x2000_4020u, cpu.R[1]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteWord(0x2000_4020, 0x0001);
+    AssertTrue(!cpu.TryFastForwardWordCmpEqBtPollLoop(300, out _), "non-matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2TstBfsDelayAddLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0200;
+    SyntheticSh2Bus interpretedBus = new();
+    LoadLoop(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "test");
+    interpreted.Reset(LoopPc);
+    interpreted.R[4] = 7;
+    interpreted.InstructionObserver = _ => { };
+    interpreted.Run(24);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadLoop(fastBus);
+    Sh2Cpu fast = new(fastBus, "test");
+    fast.Reset(LoopPc);
+    fast.R[4] = 7;
+    AssertTrue(fast.TryFastForwardTstBfsDelayAddLoop(128, out int cycles), "TST/BF/S delay ADD loop should fast-forward");
+    AssertEqual(21, cycles);
+    fast.Step();
+    fast.Step();
+    fast.Step();
+    fast.Step();
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.R[4], fast.R[4]);
+    AssertEqual(interpreted.SR, fast.SR);
+
+    static void LoadLoop(SyntheticSh2Bus bus)
+    {
+        bus.WriteInstructionWord(LoopPc + 0, 0x2448); // TST R4,R4
+        bus.WriteInstructionWord(LoopPc + 2, 0x8FFD); // BF/S LoopPc
+        bus.WriteInstructionWord(LoopPc + 4, 0x74FF); // ADD #-1,R4
+        bus.WriteInstructionWord(LoopPc + 6, 0x001B); // SLEEP
+    }
+}
+
+void ThirtyTwoXSh2TwoStageWordPollRingFastForward()
+{
+    const uint SetupEntryPc = 0x0600_07F4;
+    const uint SetupPc = 0x0600_03C0;
+    const uint PollPc = 0x0600_0820;
+    const uint BranchPc = 0x0600_0826;
+    const uint FirstAddress = 0xFFFF_FF40;
+    const uint PollAddress = 0x0600_079E;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(SetupEntryPc + 0, 0xADE4); // BRA setup
+    bus.WriteInstructionWord(SetupEntryPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(SetupPc + 0, 0xD834); // MOV.L @(literal,PC),R8
+    bus.WriteInstructionWord(SetupPc + 2, 0x6181); // MOV.W @R8,R1
+    bus.WriteInstructionWord(SetupPc + 4, 0x8581); // MOV.W @(2,R8),R0
+    bus.WriteInstructionWord(SetupPc + 6, 0x3100); // CMP/EQ R0,R1
+    bus.WriteInstructionWord(SetupPc + 8, 0x8B02); // BF exit
+    bus.WriteInstructionWord(SetupPc + 10, 0xA229); // BRA poll
+    bus.WriteInstructionWord(SetupPc + 12, 0x0009); // NOP
+    bus.WriteInstructionWord(PollPc + 0, 0xD808); // MOV.L @(literal,PC),R8
+    bus.WriteInstructionWord(PollPc + 2, 0x6081); // MOV.W @R8,R0
+    bus.WriteInstructionWord(PollPc + 4, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(BranchPc, 0x89E5); // BT setup entry
+    bus.WriteLong(SetupPc + 0xD4, FirstAddress);
+    bus.WriteLong(PollPc + 0x24, PollAddress);
+    bus.WriteWord(FirstAddress, 0x0000);
+    bus.WriteWord(FirstAddress + 2, 0x0000);
+    bus.WriteWord(PollAddress, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(BranchPc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.SR), 0x0000_00F1u);
+    AssertTrue(cpu.TryFastForwardTwoStageWordZeroPollRing(2000, out int cycles), "two-stage word zero poll ring should fast-forward");
+    AssertEqual(512, cycles);
+    AssertEqual(BranchPc, cpu.PC);
+    AssertEqual(PollAddress, cpu.R[8]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.R[1]);
+
+    bus.WriteWord(PollAddress, 0x0001);
+    AssertTrue(!cpu.TryFastForwardTwoStageWordZeroPollRing(2000, out _), "nonzero poll word should not fast-forward");
+}
+
+void ThirtyTwoXSh2MovWordSwapCopyLoopFastForward()
+{
+    const uint LoopPc = 0x0600_1000;
+    const uint Source = 0x0600_2000;
+    const uint DestinationEnd = 0x0600_3008;
+    SyntheticSh2Bus interpretedBus = new();
+    LoadSwapCopyLoop(interpretedBus);
+    SeedSwapCopyData(interpretedBus);
+    Sh2Cpu interpreted = CreateSwapCopyCpu(interpretedBus);
+    interpreted.InstructionObserver = _ => { };
+    interpreted.Run(64);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadSwapCopyLoop(fastBus);
+    SeedSwapCopyData(fastBus);
+    Sh2Cpu fast = CreateSwapCopyCpu(fastBus);
+    AssertTrue(
+        fast.TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(256, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+        "MOV.W postincrement/swap/predecrement copy loop should fast-forward");
+    AssertTrue(cycles > 0, "fast-forwarded copy loop should consume cycles");
+    fast.Step();
+    fast.Step();
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.R[1], fast.R[1]);
+    AssertEqual(interpreted.R[4], fast.R[4]);
+    AssertEqual(interpreted.R[8], fast.R[8]);
+    AssertEqual(interpretedBus.ReadWord(DestinationEnd - 2), fastBus.ReadWord(DestinationEnd - 2));
+    AssertEqual(interpretedBus.ReadWord(DestinationEnd - 4), fastBus.ReadWord(DestinationEnd - 4));
+    AssertEqual(interpretedBus.ReadWord(DestinationEnd - 6), fastBus.ReadWord(DestinationEnd - 6));
+    AssertEqual(interpretedBus.ReadWord(DestinationEnd - 8), fastBus.ReadWord(DestinationEnd - 8));
+
+    static void LoadSwapCopyLoop(SyntheticSh2Bus bus)
+    {
+        bus.WriteInstructionWord(LoopPc + 0, 0x6045); // MOV.W @R4+,R0
+        bus.WriteInstructionWord(LoopPc + 2, 0x4110); // DT R1
+        bus.WriteInstructionWord(LoopPc + 4, 0x6008); // SWAP.B R0,R0
+        bus.WriteInstructionWord(LoopPc + 6, 0x8FFB); // BF/S loop
+        bus.WriteInstructionWord(LoopPc + 8, 0x2805); // MOV.W R0,@-R8
+        bus.WriteInstructionWord(LoopPc + 10, 0x001B); // SLEEP
+    }
+
+    static void SeedSwapCopyData(SyntheticSh2Bus bus)
+    {
+        bus.WriteWord(Source + 0, 0x1122);
+        bus.WriteWord(Source + 2, 0x3344);
+        bus.WriteWord(Source + 4, 0x5566);
+        bus.WriteWord(Source + 6, 0x7788);
+    }
+
+    static Sh2Cpu CreateSwapCopyCpu(SyntheticSh2Bus bus)
+    {
+        Sh2Cpu cpu = new(bus, "test");
+        cpu.Reset(LoopPc);
+        cpu.R[1] = 4;
+        cpu.R[4] = Source;
+        cpu.R[8] = DestinationEnd;
+        return cpu;
+    }
+}
+
+void ThirtyTwoXSh2FrameBufferWordFillLoopFastForward()
+{
+    byte[] rom = new byte[0x80];
+    WriteWord(rom, 0x00, 0xD006); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xD107); // MOV.L @(literal,PC),R1
+    WriteWord(rom, 0x04, 0xE203); // MOV #3,R2
+    WriteWord(rom, 0x06, 0x2101); // MOV.W R0,@R1
+    WriteWord(rom, 0x08, 0x7102); // ADD #2,R1
+    WriteWord(rom, 0x0A, 0x4210); // DT R2
+    WriteWord(rom, 0x0C, 0x8BFB); // BF $-10 back to MOV.W
+    WriteWord(rom, 0x0E, 0x001B); // SLEEP
+    WriteLong(rom, 0x1C, 0x0000_0202);
+    WriteLong(rom, 0x20, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart + 0x100);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+
+    int steps = device.RunSh2Cycles(128);
+    AssertTrue(steps < 20, "framebuffer fill loop should collapse repeated MOV.W/ADD/DT/BF iterations");
+    AssertTrue(device.MasterSh2.Halted, "master SH-2 should leave the collapsed fill loop");
+    AssertEqual(0u, device.MasterSh2.R[2]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2FrameBufferStart + 0x106, device.MasterSh2.R[1]);
+    AssertEqual((byte)0x02, device.DrawFrameBuffer[0x100]);
+    AssertEqual((byte)0x02, device.DrawFrameBuffer[0x101]);
+    AssertEqual((byte)0x02, device.DrawFrameBuffer[0x104]);
+    AssertEqual((byte)0x02, device.DrawFrameBuffer[0x105]);
+}
+
+void ThirtyTwoXSh2SdramMirrors()
+{
+    byte[] rom = new byte[0x80];
+    WriteWord(rom, 0x00, 0xD006); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xD107); // MOV.L @(literal,PC),R1
+    WriteWord(rom, 0x04, 0xD207); // MOV.L @(literal,PC),R2
+    WriteWord(rom, 0x06, 0x2012); // MOV.L R1,@R0
+    WriteWord(rom, 0x08, 0x6322); // MOV.L @R2,R3
+    WriteWord(rom, 0x0A, 0x001B); // SLEEP
+    WriteLong(rom, 0x1C, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0001_2340);
+    WriteLong(rom, 0x20, 0x1357_2468);
+    WriteLong(rom, 0x24, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0041_2340);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    device.MasterSh2.Run(16);
+
+    AssertEqual(0x1357_2468u, device.MasterSh2.R[3]);
+}
+
+void ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward()
+{
+    byte[] rom = new byte[0x40];
+    WriteWord(rom, 0x00, 0xD002); // MOV.L @(2,PC),R0
+    WriteWord(rom, 0x02, 0x401E); // LDC R0,GBR
+    WriteWord(rom, 0x04, 0xC608); // MOV.L @(8,GBR),R0
+    WriteWord(rom, 0x06, 0x8800); // CMP/EQ #0,R0
+    WriteWord(rom, 0x08, 0x8BFC); // BF $-8 back to MOV.L
+    WriteWord(rom, 0x0A, 0x001B); // SLEEP
+    WriteLong(rom, 0x0C, ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0001);
+
+    int partial = device.RunSh2Cycles(300);
+    AssertTrue(partial <= 6, "GBR CMP/EQ poll loop should collapse repeated status checks");
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x04, device.MasterSh2.PC);
+    AssertEqual(0x0001_0000u, device.MasterSh2.R[0]);
+    AssertTrue(!device.MasterSh2.Halted, "non-zero poll value should keep the SH-2 in the loop");
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
+    device.RunSh2Cycles(80);
+    AssertTrue(device.MasterSh2.Halted, "zero poll value should let the SH-2 leave the loop and sleep");
+}
+
+void ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter()
+{
+    const uint LoopPc = 0x0603_040C;
+    const uint RechainPc = 0x0603_044C;
+    const uint ReturnPc = 0x0603_06B0;
+    const uint Root = 0x0600_0000;
+    const uint Existing = 0x0600_0100;
+    const uint NewNode = 0x0600_0200;
+    const uint RechainTail = 0x0600_0300;
+    const uint Threshold = 0x0000_0800;
+
+    static void LoadSdkInsertRoutine(SyntheticSh2Bus bus, uint basePc)
+    {
+        ushort[] opcodes =
+        [
+            0x5312, // MOV.L @(8,R1),R3
+            0x6213, // MOV R1,R2
+            0x5111, // MOV.L @(4,R1),R1
+            0x3303, // CMP/GE R0,R3
+            0x8904, // BT exit
+            0x5312, // MOV.L @(8,R1),R3
+            0x6213, // MOV R1,R2
+            0x5111, // MOV.L @(4,R1),R1
+            0x3303, // CMP/GE R0,R3
+            0x8BF5, // BF loop
+            0x5120, // MOV.L @(0,R2),R1
+            0x1410, // MOV.L R1,@(0,R4)
+            0x1421, // MOV.L R2,@(4,R4)
+            0x1141, // MOV.L R4,@(4,R1)
+            0x000B, // RTS
+            0x1240, // MOV.L R4,@R2
+        ];
+
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(basePc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(basePc + (uint)(opcodes.Length * 2), 0x0009);
+    }
+
+    static void LoadSdkRechainRoutine(SyntheticSh2Bus bus, uint basePc)
+    {
+        ushort[] opcodes =
+        [
+            0x5632, // MOV.L @(8,R3),R6
+            0x5431, // MOV.L @(4,R3),R4
+            0x3963, // CMP/GE R6,R9
+            0x5130, // MOV.L @(0,R3),R1
+            0x1141, // MOV.L R4,@(4,R1)
+            0x1410, // MOV.L R1,@(0,R4)
+            0x8905, // BT insert
+            0x0009, // NOP
+            0x6783, // MOV R8,R7
+            0x5881, // MOV.L @(4,R8),R8
+            0x5982, // MOV.L @(8,R8),R9
+            0x3967, // CMP/GE R6,R9
+            0x8BFA, // BF walk
+            0x1731, // MOV.L R3,@(4,R7)
+            0x1830, // MOV.L R3,@(0,R8)
+            0x1370, // MOV.L R7,@(0,R3)
+            0x6733, // MOV R3,R7
+            0x1381, // MOV.L R8,@(4,R3)
+            0x3540, // CMP/EQ R4,R5
+            0x8FEB, // BF/S loop
+            0x6343, // MOV R4,R3
+            0x000B, // RTS
+        ];
+
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(basePc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(basePc + (uint)(opcodes.Length * 2), 0x0009);
+    }
+
+    static void SeedList(SyntheticSh2Bus bus)
+    {
+        bus.WriteLong(Root, Existing);
+        bus.WriteLong(Root + 4, Existing);
+        bus.WriteLong(Root + 8, 0);
+        bus.WriteLong(Existing, Root);
+        bus.WriteLong(Existing + 4, Root);
+        bus.WriteLong(Existing + 8, 0x0000_1000);
+        bus.WriteLong(NewNode, 0);
+        bus.WriteLong(NewNode + 4, 0);
+        bus.WriteLong(NewNode + 8, Threshold);
+    }
+
+    static void SeedRechainList(SyntheticSh2Bus bus)
+    {
+        bus.WriteLong(Root, RechainTail);
+        bus.WriteLong(Root + 4, Existing);
+        bus.WriteLong(Root + 8, 0);
+        bus.WriteLong(Existing, Root);
+        bus.WriteLong(Existing + 4, RechainTail);
+        bus.WriteLong(Existing + 8, 0x0000_0100);
+        bus.WriteLong(RechainTail, Existing);
+        bus.WriteLong(RechainTail + 4, Root);
+        bus.WriteLong(RechainTail + 8, 0x0000_0200);
+    }
+
+    static Sh2Cpu CreateCpu(SyntheticSh2Bus bus)
+    {
+        Sh2Cpu cpu = new(bus, "test");
+        cpu.Reset(LoopPc);
+        SetSh2Property(cpu, nameof(Sh2Cpu.PR), ReturnPc);
+        cpu.R[0] = Threshold;
+        cpu.R[1] = Existing;
+        cpu.R[2] = Root;
+        cpu.R[3] = 0;
+        cpu.R[4] = NewNode;
+        return cpu;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    LoadSdkInsertRoutine(interpretedBus, LoopPc);
+    interpretedBus.WriteInstructionWord(ReturnPc, 0x001B);
+    SeedList(interpretedBus);
+    Sh2Cpu interpreted = CreateCpu(interpretedBus);
+    interpreted.InstructionObserver = _ => { };
+    interpreted.Run(64);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadSdkInsertRoutine(fastBus, LoopPc);
+    SeedList(fastBus);
+    Sh2Cpu fast = CreateCpu(fastBus);
+    bool accelerated = fast.TryFastForwardSdramLinkedListInsertRoutine(
+        1000,
+        fastBus.TryReadLong,
+        fastBus.TryWriteLong,
+        observer: null,
+        out int cycles);
+
+    AssertTrue(accelerated, "valid SDK linked-list insert should fast-forward");
+    AssertTrue(cycles > 0, "fast-forwarded insert should consume cycles");
+    AssertEqual(ReturnPc, fast.PC);
+    AssertEqual(interpreted.R[1], fast.R[1]);
+    AssertEqual(interpreted.R[2], fast.R[2]);
+    AssertEqual(interpretedBus.ReadLong(Root), fastBus.ReadLong(Root));
+    AssertEqual(interpretedBus.ReadLong(Root + 4), fastBus.ReadLong(Root + 4));
+    AssertEqual(interpretedBus.ReadLong(Existing), fastBus.ReadLong(Existing));
+    AssertEqual(interpretedBus.ReadLong(NewNode), fastBus.ReadLong(NewNode));
+    AssertEqual(interpretedBus.ReadLong(NewNode + 4), fastBus.ReadLong(NewNode + 4));
+
+    SyntheticSh2Bus invalidBus = new();
+    LoadSdkInsertRoutine(invalidBus, LoopPc);
+    SeedList(invalidBus);
+    Sh2Cpu invalid = CreateCpu(invalidBus);
+    invalid.Reset(LoopPc + 16);
+    SetSh2Property(invalid, nameof(Sh2Cpu.PR), ReturnPc);
+    invalid.R[0] = 0x5797_FFFF;
+    invalid.R[1] = 0xE002_2080;
+    invalid.R[2] = 0x0600_0808;
+    invalid.R[3] = 0x0C03_2080;
+    invalid.R[4] = NewNode;
+    AssertTrue(
+        invalid.TryFastForwardSdramLinkedListInsertRoutine(1000, invalidBus.TryReadLong, invalidBus.TryWriteLong, observer: null, out _),
+        "Runlength SDK invalid linked-list cursor should complete as a bounded no-op");
+    AssertEqual(ReturnPc, invalid.PC);
+    AssertEqual(0u, invalidBus.ReadLong(NewNode));
+    AssertEqual(0u, invalidBus.ReadLong(NewNode + 4));
+
+    const uint RunlengthSdkLoopPc = 0x0603_040C;
+    SyntheticSh2Bus runlengthInvalidBus = new();
+    LoadSdkInsertRoutine(runlengthInvalidBus, RunlengthSdkLoopPc);
+    SeedList(runlengthInvalidBus);
+    Sh2Cpu runlengthInvalid = CreateCpu(runlengthInvalidBus);
+    runlengthInvalid.Reset(RunlengthSdkLoopPc + 16);
+    SetSh2Property(runlengthInvalid, nameof(Sh2Cpu.PR), ReturnPc);
+    runlengthInvalid.R[0] = 0x5797_FFFF;
+    runlengthInvalid.R[1] = 0x0000_0003;
+    runlengthInvalid.R[2] = 0x0600_0808;
+    runlengthInvalid.R[3] = 0;
+    runlengthInvalid.R[4] = NewNode;
+    AssertTrue(
+        runlengthInvalid.TryFastForwardSdramLinkedListInsertRoutine(1000, runlengthInvalidBus.TryReadLong, runlengthInvalidBus.TryWriteLong, observer: null, out int invalidCycles),
+        "Runlength SDK invalid linked-list cursor should be treated as a bounded no-op");
+    AssertTrue(invalidCycles > 0, "Runlength SDK invalid no-op should consume cycles");
+    AssertEqual(ReturnPc, runlengthInvalid.PC);
+    AssertEqual(0u, runlengthInvalidBus.ReadLong(NewNode));
+    AssertEqual(0u, runlengthInvalidBus.ReadLong(NewNode + 4));
+
+    SyntheticSh2Bus currentIsNewNodeBus = new();
+    LoadSdkInsertRoutine(currentIsNewNodeBus, LoopPc);
+    SeedList(currentIsNewNodeBus);
+    Sh2Cpu currentIsNewNode = CreateCpu(currentIsNewNodeBus);
+    currentIsNewNode.Reset(LoopPc + 28);
+    SetSh2Property(currentIsNewNode, nameof(Sh2Cpu.PR), ReturnPc);
+    currentIsNewNode.R[1] = Existing;
+    currentIsNewNode.R[2] = NewNode;
+    currentIsNewNode.R[4] = NewNode;
+    AssertTrue(
+        !currentIsNewNode.TryFastForwardSdramLinkedListInsertRoutine(1000, currentIsNewNodeBus.TryReadLong, currentIsNewNodeBus.TryWriteLong, observer: null, out _),
+        "linked-list insert should not fast-forward when the insertion cursor is the new node itself");
+
+    SyntheticSh2Bus interpretedRechainBus = new();
+    LoadSdkRechainRoutine(interpretedRechainBus, RechainPc);
+    interpretedRechainBus.WriteInstructionWord(ReturnPc, 0x001B);
+    SeedRechainList(interpretedRechainBus);
+    Sh2Cpu interpretedRechain = new(interpretedRechainBus, "test");
+    interpretedRechain.Reset(RechainPc);
+    SetSh2Property(interpretedRechain, nameof(Sh2Cpu.PR), ReturnPc);
+    interpretedRechain.R[3] = Existing;
+    interpretedRechain.R[5] = RechainTail;
+    interpretedRechain.R[7] = Root;
+    interpretedRechain.R[8] = RechainTail;
+    interpretedRechain.R[9] = 0x0000_0200;
+    interpretedRechain.InstructionObserver = _ => { };
+    interpretedRechain.Run(64);
+
+    SyntheticSh2Bus fastRechainBus = new();
+    LoadSdkRechainRoutine(fastRechainBus, RechainPc);
+    SeedRechainList(fastRechainBus);
+    Sh2Cpu fastRechain = new(fastRechainBus, "test");
+    fastRechain.Reset(RechainPc);
+    SetSh2Property(fastRechain, nameof(Sh2Cpu.PR), ReturnPc);
+    fastRechain.R[3] = Existing;
+    fastRechain.R[5] = RechainTail;
+    fastRechain.R[7] = Root;
+    fastRechain.R[8] = RechainTail;
+    fastRechain.R[9] = 0x0000_0200;
+    AssertTrue(
+        fastRechain.TryFastForwardRunlengthSdkRechainRoutine(1000, fastRechainBus.TryReadLong, fastRechainBus.TryWriteLong, observer: null, out int rechainCycles),
+        "Runlength SDK rechain routine should fast-forward valid short lists");
+    AssertTrue(rechainCycles > 0, "Runlength SDK rechain fast-forward should consume cycles");
+    AssertEqual(ReturnPc, fastRechain.PC);
+    AssertEqual(interpretedRechain.R[3], fastRechain.R[3]);
+    AssertEqual(interpretedRechain.R[4], fastRechain.R[4]);
+    AssertEqual(interpretedRechain.R[7], fastRechain.R[7]);
+    AssertEqual(interpretedRechainBus.ReadLong(Root), fastRechainBus.ReadLong(Root));
+    AssertEqual(interpretedRechainBus.ReadLong(Root + 4), fastRechainBus.ReadLong(Root + 4));
+    AssertEqual(interpretedRechainBus.ReadLong(Existing), fastRechainBus.ReadLong(Existing));
+    AssertEqual(interpretedRechainBus.ReadLong(Existing + 4), fastRechainBus.ReadLong(Existing + 4));
+    AssertEqual(interpretedRechainBus.ReadLong(RechainTail), fastRechainBus.ReadLong(RechainTail));
+    AssertEqual(interpretedRechainBus.ReadLong(RechainTail + 4), fastRechainBus.ReadLong(RechainTail + 4));
+}
+
+void ThirtyTwoXSh2DmaTransferSizeBits()
+{
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    byte[] rom = new byte[0x180];
+    WriteWord(rom, 0xC0, 0x1234);
+    WriteWord(rom, 0xC2, 0x5678);
+    WriteWord(rom, 0xC4, 0x9ABC);
+    WriteWord(rom, 0xC6, 0xDEF0);
+
+    int pc = 0;
+    int literal = 0x80;
+    void EmitMovLongLiteral(int register, uint value)
+    {
+        WriteLong(rom, literal, value);
+        int baseAddress = (pc + 4) & ~3;
+        int displacement = (literal - baseAddress) / 4;
+        WriteWord(rom, pc, (ushort)(0xD000 | (register << 8) | displacement));
+        pc += 2;
+        literal += 4;
+    }
+
+    void EmitStoreR1AtR0()
+    {
+        WriteWord(rom, pc, 0x2012); // MOV.L R1,@R0
+        pc += 2;
+    }
+
+    EmitMovLongLiteral(0, 0xFFFF_FF80);
+    EmitMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0xC0);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF84);
+    EmitMovLongLiteral(1, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF88);
+    EmitMovLongLiteral(1, 2);
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FF8C);
+    EmitMovLongLiteral(1, 0x0000_5611); // Word-sized auto-request DMA with source/destination increment.
+    EmitStoreR1AtR0();
+    EmitMovLongLiteral(0, 0xFFFF_FFB0);
+    EmitMovLongLiteral(1, 1);
+    EmitStoreR1AtR0();
+    WriteWord(rom, pc, 0x001B);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.MasterSh2.Run(80);
+
+    AssertEqual((byte)0x12, device.Sdram[0x100]);
+    AssertEqual((byte)0x34, device.Sdram[0x101]);
+    AssertEqual((byte)0x56, device.Sdram[0x102]);
+    AssertEqual((byte)0x78, device.Sdram[0x103]);
+    AssertEqual((byte)0x00, device.Sdram[0x104]);
+
+    ThirtyTwoXDevice interruptDevice = new(rom);
+    interruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    WriteSh2ByteForTest(interruptDevice, 0xFFFF_FEE2, 0x07); // DMAC priority = 7 in IPRA bits 11-8.
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FFA0, 0x5500_0000); // VCRDMA0 vector.
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FF80, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0xC0);
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FF84, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x120);
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FF88, 1);
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FFB0, 1);
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FF8C, 0x0000_5615); // Word transfer, incrementing source/destination, IE + DE.
+
+    AssertEqual((byte)0x12, interruptDevice.Sdram[0x120]);
+    AssertEqual((byte)0x34, interruptDevice.Sdram[0x121]);
+    AssertEqual(7, interruptDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(0x55, interruptDevice.MasterSh2.PendingInterruptVectorNumber);
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FF8C, 0x0000_5614); // Clear TE, preserve IE and transfer mode.
+    AssertEqual(0, interruptDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(0, interruptDevice.MasterSh2.PendingInterruptVectorNumber);
+}
+
+void ThirtyTwoXSh2ArithmeticFlags()
+{
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0xE0FF); // MOV #-1,R0
+    WriteWord(rom, 0x02, 0xE101); // MOV #1,R1
+    WriteWord(rom, 0x04, 0x3107); // DIV0S R0,R1
+    WriteWord(rom, 0x06, 0x0229); // MOVT R2
+    WriteWord(rom, 0x08, 0x311E); // ADDC R1,R1
+    WriteWord(rom, 0x0A, 0x0329); // MOVT R3
+    WriteWord(rom, 0x0C, 0x351A); // SUBC R1,R5
+    WriteWord(rom, 0x0E, 0x0729); // MOVT R7
+    WriteWord(rom, 0x10, 0xE87F); // MOV #$7F,R8
+    WriteWord(rom, 0x12, 0x688C); // EXTU.B R8,R8
+    WriteWord(rom, 0x14, 0x4818); // SHLL8 R8
+    WriteWord(rom, 0x16, 0x4818); // SHLL8 R8
+    WriteWord(rom, 0x18, 0x4818); // SHLL8 R8 => $7F000000
+    WriteWord(rom, 0x1A, 0x6983); // MOV R8,R9
+    WriteWord(rom, 0x1C, 0x398F); // ADDV R8,R9
+    WriteWord(rom, 0x1E, 0x0A29); // MOVT R10
+    WriteWord(rom, 0x20, 0xEB80); // MOV #$80,R11
+    WriteWord(rom, 0x22, 0x6BBC); // EXTU.B R11,R11
+    WriteWord(rom, 0x24, 0x4B18); // SHLL8 R11
+    WriteWord(rom, 0x26, 0x4B18); // SHLL8 R11
+    WriteWord(rom, 0x28, 0x4B18); // SHLL8 R11 => $80000000
+    WriteWord(rom, 0x2A, 0xEC01); // MOV #1,R12
+    WriteWord(rom, 0x2C, 0x3BCB); // SUBV R12,R11
+    WriteWord(rom, 0x2E, 0x0D29); // MOVT R13
+    WriteWord(rom, 0x30, 0x03B2); // STC R3_BANK,R3
+    WriteWord(rom, 0x32, 0x4BCE); // LDC R11,R4_BANK
+    WriteWord(rom, 0x34, 0x03C2); // STC R4_BANK,R3
+    WriteWord(rom, 0x36, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.MasterSh2.Run(32);
+
+    AssertEqual(1u, device.MasterSh2.R[2]);
+    AssertEqual(0xFFFF_FFFDu, device.MasterSh2.R[5]);
+    AssertEqual(1u, device.MasterSh2.R[7]);
+    AssertEqual(0xFE00_0000u, device.MasterSh2.R[9]);
+    AssertEqual(1u, device.MasterSh2.R[10]);
+    AssertEqual(0x7FFF_FFFFu, device.MasterSh2.R[11]);
+    AssertEqual(1u, device.MasterSh2.R[13]);
+    AssertEqual(0x7FFF_FFFFu, device.MasterSh2.R[3]);
+    AssertEqual(0x7FFF_FFFFu, device.MasterSh2.BankedR[4]);
+    AssertTrue(device.MasterSh2.Halted, "SH-2 arithmetic flag synthetic program should halt");
+
+    SyntheticSh2Bus div1Bus = new();
+    div1Bus.WriteInstructionWord(0, 0x3124); // DIV1 R2,R1
+    Sh2Cpu div1Cpu = new(div1Bus, "div1");
+    div1Cpu.Reset();
+    div1Cpu.R[1] = 0x8000_0000u;
+    div1Cpu.R[2] = 0x0000_0001u;
+    div1Cpu.Run(1);
+    AssertEqual(0xFFFF_FFFFu, div1Cpu.R[1]);
+    AssertEqual(0x0000_0001u, div1Cpu.SR & 0x101u);
+
+    SyntheticSh2Bus div0uBus = new();
+    div0uBus.WriteInstructionWord(0, 0x0019); // DIV0U
+    Sh2Cpu div0uCpu = new(div0uBus, "div0u");
+    div0uCpu.Reset();
+    SetSh2Property(div0uCpu, nameof(Sh2Cpu.SR), 0x0000_03F1u);
+    div0uCpu.Run(1);
+    AssertEqual(0x0000_00F0u, div0uCpu.SR);
+
+    SyntheticSh2Bus xtrctBus = new();
+    xtrctBus.WriteInstructionWord(0, 0x201D); // XTRCT R1,R0
+    Sh2Cpu xtrctCpu = new(xtrctBus, "xtrct");
+    xtrctCpu.Reset();
+    xtrctCpu.R[0] = 0x1122_3344u;
+    xtrctCpu.R[1] = 0xAABB_CCDDu;
+    xtrctCpu.Run(1);
+    AssertEqual(0xCCDD_1122u, xtrctCpu.R[0]);
+
+    byte[] tstImmediateRom = new byte[0x20];
+    WriteWord(tstImmediateRom, 0x00, 0xE000); // MOV #0,R0
+    WriteWord(tstImmediateRom, 0x02, 0xC802); // TST #2,R0
+    WriteWord(tstImmediateRom, 0x04, 0x0029); // MOVT R0
+    WriteWord(tstImmediateRom, 0x06, 0x001B); // SLEEP
+    ThirtyTwoXDevice tstImmediateDevice = new(tstImmediateRom);
+    tstImmediateDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    tstImmediateDevice.MasterSh2.Run(8);
+    AssertEqual(1u, tstImmediateDevice.MasterSh2.R[0]);
+
+    WriteWord(tstImmediateRom, 0x00, 0xE002); // MOV #2,R0
+    tstImmediateDevice = new ThirtyTwoXDevice(tstImmediateRom);
+    tstImmediateDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    tstImmediateDevice.MasterSh2.Run(8);
+    AssertEqual(0u, tstImmediateDevice.MasterSh2.R[0]);
+
+    byte[] cmpImmediateRom = new byte[0x20];
+    WriteWord(cmpImmediateRom, 0x00, 0xE080); // MOV #-128,R0
+    WriteWord(cmpImmediateRom, 0x02, 0x8880); // CMP/EQ #-128,R0
+    WriteWord(cmpImmediateRom, 0x04, 0x0129); // MOVT R1
+    WriteWord(cmpImmediateRom, 0x06, 0xE07F); // MOV #127,R0
+    WriteWord(cmpImmediateRom, 0x08, 0x887F); // CMP/EQ #127,R0
+    WriteWord(cmpImmediateRom, 0x0A, 0x0229); // MOVT R2
+    WriteWord(cmpImmediateRom, 0x0C, 0xC880); // TST #$80,R0, remains distinct from CMP/EQ
+    WriteWord(cmpImmediateRom, 0x0E, 0x0329); // MOVT R3
+    WriteWord(cmpImmediateRom, 0x10, 0x001B); // SLEEP
+    ThirtyTwoXDevice cmpImmediateDevice = new(cmpImmediateRom);
+    cmpImmediateDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    cmpImmediateDevice.MasterSh2.Run(16);
+    AssertEqual(1u, cmpImmediateDevice.MasterSh2.R[1]);
+    AssertEqual(1u, cmpImmediateDevice.MasterSh2.R[2]);
+    AssertEqual(1u, cmpImmediateDevice.MasterSh2.R[3]);
+
+    byte[] indexedDisplacementRom = new byte[0x80];
+    WriteWord(indexedDisplacementRom, 0x00, 0xD10A); // MOV.L @(literal,PC),R1
+    WriteWord(indexedDisplacementRom, 0x02, 0xE07B); // MOV #$7B,R0
+    WriteWord(indexedDisplacementRom, 0x04, 0x8119); // MOV.W R0,@(9,R1), uses 4-bit displacement
+    WriteWord(indexedDisplacementRom, 0x06, 0xE000); // MOV #0,R0
+    WriteWord(indexedDisplacementRom, 0x08, 0x8519); // MOV.W @(9,R1),R0
+    WriteWord(indexedDisplacementRom, 0x0A, 0x001B); // SLEEP
+    WriteLong(indexedDisplacementRom, 0x2C, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x20);
+    ThirtyTwoXDevice indexedDisplacementDevice = new(indexedDisplacementRom);
+    indexedDisplacementDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    indexedDisplacementDevice.MasterSh2.Run(16);
+    AssertEqual(0x0000_007Bu, indexedDisplacementDevice.MasterSh2.R[0]);
+    AssertEqual((byte)0x7B, indexedDisplacementDevice.Sdram[0x33]);
+    AssertEqual((byte)0x00, indexedDisplacementDevice.Sdram[0x53]);
+}
+
+void ThirtyTwoXUserHeaderLoadsInitialProgram()
+{
+    byte[] rom = new byte[0x10000];
+    WriteAscii(rom, 0x3C0, "MARS TEST HEADER");
+    WriteLong(rom, 0x3D0, 0x0000_0001);
+    WriteLong(rom, 0x3D4, 0x0000_5000);
+    WriteLong(rom, 0x3D8, 0x0000_0100);
+    WriteLong(rom, 0x3DC, 0x0000_0020);
+    WriteLong(rom, 0x3E0, 0x0000_0100);
+    WriteLong(rom, 0x3E4, 0x0600_0120);
+    WriteLong(rom, 0x3E8, 0x0600_0000);
+    WriteLong(rom, 0x3EC, 0x0600_0400);
+    WriteWord(rom, 0x5000, 0xE177); // MOV #$77,R1
+    WriteWord(rom, 0x5002, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+
+    AssertTrue(device.UserHeader.IsValid, "MARS user header should be parsed");
+    AssertEqual(0x0000_0001u, device.UserHeader.Version);
+    AssertEqual(0x0600_0100u, device.MasterSh2.PC);
+    AssertEqual(0x0600_0120u, device.SlaveSh2.PC);
+    AssertEqual(0x0600_0000u, device.MasterSh2.VBR);
+    AssertEqual(0x0600_0400u, device.SlaveSh2.VBR);
+    AssertEqual((byte)0xE1, device.Sdram[0x100]);
+    AssertEqual((byte)0x77, device.Sdram[0x101]);
+    AssertEqual((byte)0x00, device.Sdram[0x102]);
+    AssertEqual((byte)0x1B, device.Sdram[0x103]);
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    device.MasterSh2.Run(4);
+    AssertEqual(0x0000_0077u, device.MasterSh2.R[1]);
+    AssertTrue(device.MasterSh2.Halted, "loaded initial program should execute from SDRAM");
+
+    byte[] titleHeaderRom = new byte[0x10000];
+    WriteAscii(titleHeaderRom, 0x3C0, "STAR WARS ARCADE");
+    WriteLong(titleHeaderRom, 0x3D0, 0x0000_0000);
+    WriteLong(titleHeaderRom, 0x3D4, 0x0000_5000);
+    WriteLong(titleHeaderRom, 0x3D8, 0x0000_0000);
+    WriteLong(titleHeaderRom, 0x3DC, 0x0000_0020);
+    WriteLong(titleHeaderRom, 0x3E0, 0x0600_0400);
+    WriteLong(titleHeaderRom, 0x3E4, 0x0600_0402);
+    WriteLong(titleHeaderRom, 0x3E8, 0x0600_0000);
+    WriteLong(titleHeaderRom, 0x3EC, 0x0600_0200);
+    WriteWord(titleHeaderRom, 0x5000, 0xE188); // MOV #$88,R1
+    WriteWord(titleHeaderRom, 0x5002, 0x001B); // SLEEP
+
+    ThirtyTwoXDevice titleHeaderDevice = new(titleHeaderRom);
+    titleHeaderDevice.Reset();
+    AssertTrue(titleHeaderDevice.UserHeader.IsValid, "MARS user header should allow game module names instead of only the literal MARS string");
+    AssertEqual(0x0600_0400u, titleHeaderDevice.MasterSh2.PC);
+    AssertEqual(0x0600_0402u, titleHeaderDevice.SlaveSh2.PC);
+    AssertEqual((byte)0xE1, titleHeaderDevice.Sdram[0]);
+    AssertEqual((byte)0x88, titleHeaderDevice.Sdram[1]);
+
+    byte[] stackAliasRom = new byte[0x10000];
+    WriteAscii(stackAliasRom, 0x3C0, "MARS STACK TEST");
+    WriteLong(stackAliasRom, 0x3D4, 0x0000_5000);
+    WriteLong(stackAliasRom, 0x3D8, 0x0000_0000);
+    WriteLong(stackAliasRom, 0x3DC, 0x0000_0120);
+    WriteLong(stackAliasRom, 0x3E0, 0x0600_0000);
+    WriteLong(stackAliasRom, 0x3E4, 0x0600_0006);
+    WriteLong(stackAliasRom, 0x3E8, 0x0600_0100);
+    WriteLong(stackAliasRom, 0x3EC, 0x0600_0100);
+    WriteWord(stackAliasRom, 0x5000, 0xD004); // MOV.L literal,R0
+    WriteWord(stackAliasRom, 0x5002, 0x2F06); // MOV.L R0,@-R15
+    WriteWord(stackAliasRom, 0x5004, 0x61F6); // MOV.L @R15+,R1
+    WriteWord(stackAliasRom, 0x5006, 0x001B); // SLEEP
+    WriteLong(stackAliasRom, 0x5014, 0x1234_5678);
+    WriteLong(stackAliasRom, 0x5104, 0x0C04_0000);
+    ThirtyTwoXDevice stackAliasDevice = new(stackAliasRom);
+    stackAliasDevice.Reset();
+    stackAliasDevice.MasterSh2.Run(8);
+    AssertEqual(0x1234_5678u, stackAliasDevice.MasterSh2.R[1]);
+
+}
+
+void ThirtyTwoXAdapterControlAndCommunicationPorts()
+{
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0x6101); // MOV.W @R0,R1
+    WriteWord(rom, 0x04, 0x001B); // SLEEP
+    WriteLong(rom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x1234);
+    AssertEqual(0, device.RunSh2(8));
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertTrue(!device.Sh2HeldInReset, "adapter control should release SH-2s");
+    int executed = device.RunSh2(8);
+
+    AssertEqual(6, executed);
+    AssertEqual(0x0000_1234u, device.MasterSh2.R[1]);
+    AssertEqual(0x0000_1234u, device.SlaveSh2.R[1]);
+    AssertTrue(device.MasterSh2.Halted, "SH-2 should stop on SLEEP after reading communication port");
+
+    byte[] cachedAliasRom = new byte[0x100];
+    WriteWord(cachedAliasRom, 0x00, 0xD006); // MOV.L @(literal,PC),R0
+    WriteWord(cachedAliasRom, 0x02, 0x6101); // MOV.W @R0,R1
+    WriteWord(cachedAliasRom, 0x04, 0xD207); // MOV.L @(literal,PC),R2
+    WriteWord(cachedAliasRom, 0x06, 0x2211); // MOV.W R1,@R2
+    WriteWord(cachedAliasRom, 0x08, 0x001B); // SLEEP
+    WriteLong(cachedAliasRom, 0x1C, ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart + ThirtyTwoXHardwareProfile.CommunicationPortOffset);
+    WriteLong(cachedAliasRom, 0x24, ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart + ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2);
+    ThirtyTwoXDevice cachedAliasDevice = new(cachedAliasRom);
+    cachedAliasDevice.Reset();
+    cachedAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0xBEEF);
+    cachedAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    cachedAliasDevice.RunSh2(12);
+    AssertEqual(0xFFFF_BEEFu, cachedAliasDevice.MasterSh2.R[1]);
+    AssertEqual((ushort)0xBEEF, cachedAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice handshakeDevice = new();
+    handshakeDevice.Reset();
+    handshakeDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertEqual((ushort)0x4D5F, handshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((ushort)0x4F4B, handshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x535F, handshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4F4B, handshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        handshakeDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertEqual((ushort)0x0000, handshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((byte)0x00, handshakeDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+
+    ThirtyTwoXDevice twoPhaseHandshakeDevice = new();
+    twoPhaseHandshakeDevice.Reset();
+    twoPhaseHandshakeDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        twoPhaseHandshakeDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(twoPhaseHandshakeDevice.BootRomHandshakePending, "clearing boot communication before reading the signature should keep the boot signature available");
+    AssertEqual((ushort)0x4D5F, twoPhaseHandshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((ushort)0x535F, twoPhaseHandshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        twoPhaseHandshakeDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(!twoPhaseHandshakeDevice.BootRomHandshakePending, "clearing the boot signature after it was observed should release the SH-2 program");
+    AssertEqual((ushort)0x0000, twoPhaseHandshakeDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+
+    byte[] sh2ReadyRom = new byte[0x600];
+    WriteWord(sh2ReadyRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(sh2ReadyRom, 0x02, 0xE14D); // MOV #$4D,R1
+    WriteWord(sh2ReadyRom, 0x04, 0x2010); // MOV.B R1,@R0
+    WriteWord(sh2ReadyRom, 0x06, 0x001B); // SLEEP
+    WriteLong(sh2ReadyRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    WriteAscii(sh2ReadyRom, 0x3C0, "MARS READY TEST");
+    WriteLong(sh2ReadyRom, 0x3D4, 0x0000_0000);
+    WriteLong(sh2ReadyRom, 0x3D8, 0x0000_0000);
+    WriteLong(sh2ReadyRom, 0x3DC, 0x0000_0020);
+    WriteLong(sh2ReadyRom, 0x3E0, 0x0600_0000);
+    WriteLong(sh2ReadyRom, 0x3E4, 0x0600_0000);
+    WriteLong(sh2ReadyRom, 0x3E8, 0x0600_0000);
+    WriteLong(sh2ReadyRom, 0x3EC, 0x0600_0000);
+    ThirtyTwoXDevice sh2ReadyDevice = new(sh2ReadyRom);
+    sh2ReadyDevice.Reset();
+    sh2ReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertTrue(sh2ReadyDevice.BootRomHandshakePending, "boot signature should be pending immediately after SH-2 release");
+    AssertEqual(0, sh2ReadyDevice.RunSh2(8));
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        sh2ReadyDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "MARS user programs should run after the post-start boot signature is published");
+    AssertEqual((ushort)0x4D5F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "post-start boot signature should be readable without holding normal MARS user code");
+    AssertEqual((ushort)0x535F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+
+    AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
+    AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
+    AssertEqual((byte)0x4D, sh2ReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+
+    byte[] launchRom = new byte[0x6000];
+    WriteAscii(launchRom, 0x3C0, "STAR LAUNCH TEST");
+    WriteLong(launchRom, 0x3D4, 0x0000_5000);
+    WriteLong(launchRom, 0x3D8, 0x0000_0000);
+    WriteLong(launchRom, 0x3DC, 0x0000_0500);
+    WriteLong(launchRom, 0x3E0, 0x0600_0400);
+    WriteLong(launchRom, 0x3E4, 0x0600_0402);
+    WriteLong(launchRom, 0x3E8, 0x0600_0000);
+    WriteLong(launchRom, 0x3EC, 0x0600_0200);
+    WriteWord(launchRom, 0x5400, 0x001B); // SLEEP
+    WriteWord(launchRom, 0x5402, 0x001B); // SLEEP
+    ThirtyTwoXDevice launchDevice = new(launchRom);
+    launchDevice.Reset();
+    launchDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    launchDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        launchDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(!launchDevice.BootRomHandshakePending, "STAR launch headers should expose the post-start boot ready signature without a handshake hold");
+    AssertTrue(launchDevice.BootRomLaunchPending, "STAR launch headers should hold SH-2 user code until the 68000 sends a launch command");
+    AssertEqual((ushort)0x4D5F, launchDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        launchDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(launchDevice.BootRomLaunchPending, "clearing the post-start signature should not release STAR launch headers");
+    AssertEqual(0, launchDevice.RunSh2(4));
+    launchDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x5348);
+    AssertTrue(!launchDevice.BootRomLaunchPending, "host launch command should release STAR SH-2 user code");
+    AssertEqual(2, launchDevice.RunSh2(4));
+    AssertTrue(launchDevice.MasterSh2.Halted && launchDevice.SlaveSh2.Halted, "released STAR SH-2 programs should execute after launch command");
+
+    byte[] launchChecksumRom = (byte[])launchRom.Clone();
+    WriteWord(launchChecksumRom, 0x18E, 0x1234);
+    ThirtyTwoXDevice launchChecksumDevice = new(launchChecksumRom);
+    launchChecksumDevice.Reset();
+    launchChecksumDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    launchChecksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        launchChecksumDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(launchChecksumDevice.BootRomLaunchPending, "STAR launch headers with checksums should still wait for the host launch command");
+    launchChecksumDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0, 0x53);
+    launchChecksumDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1, 0x48);
+    launchChecksumDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x47);
+    launchChecksumDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3, 0x4F);
+    AssertTrue(!launchChecksumDevice.BootRomLaunchPending, "byte-wise SHGO should release STAR SH-2 user code even when the ROM has a checksum");
+    AssertEqual(2, launchChecksumDevice.RunSh2(4));
+
+    byte[] checksumRom = new byte[0x200];
+    WriteWord(checksumRom, 0x18E, 0xBEEF);
+    ThirtyTwoXDevice checksumDevice = new(checksumRom);
+    checksumDevice.Reset();
+    checksumDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertEqual((ushort)0xBEEF, checksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+
+    byte[] maskRom = new byte[0x100];
+    WriteWord(maskRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(maskRom, 0x02, 0xE10F); // MOV #$0F,R1
+    WriteWord(maskRom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(maskRom, 0x06, 0x001B); // SLEEP
+    WriteLong(maskRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset));
+    ThirtyTwoXDevice maskDevice = new(maskRom);
+    maskDevice.Reset();
+    maskDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    maskDevice.MasterSh2.Run(8);
+    AssertTrue((maskDevice.MasterInterruptMask & 0x000F) == 0x000F, "SH-2 writes to $20004000 should update the SH-2 interrupt mask");
+    AssertEqual((ushort)0x0083, maskDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset));
+
+    byte[] commandInterruptRom = new byte[0x200];
+    WriteWord(commandInterruptRom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(commandInterruptRom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(commandInterruptRom, 0x04, 0xAFFE); // BRA *
+    WriteWord(commandInterruptRom, 0x06, 0x0009); // NOP
+    WriteWord(commandInterruptRom, 0x80, 0xE155); // MOV #$55,R1
+    WriteWord(commandInterruptRom, 0x82, 0x001B); // SLEEP
+    WriteLong(commandInterruptRom, 0x40 + (68 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+    ThirtyTwoXDevice commandInterruptDevice = new(commandInterruptRom);
+    commandInterruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    commandInterruptDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    commandInterruptDevice.MasterSh2.Run(3);
+    commandInterruptDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset, 0x0001);
+    AssertEqual((ushort)0x0001, commandInterruptDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    commandInterruptDevice.MasterSh2.RequestInterrupt(8, 68);
+    commandInterruptDevice.MasterSh2.Run(8);
+    AssertEqual(0x0000_0055u, commandInterruptDevice.MasterSh2.R[1]);
+    AssertEqual((ushort)0x0001, commandInterruptDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+
+    byte[] commandClearRom = new byte[0x40];
+    WriteWord(commandClearRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(commandClearRom, 0x02, 0xE101); // MOV #1,R1
+    WriteWord(commandClearRom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(commandClearRom, 0x06, 0x001B); // SLEEP
+    WriteLong(commandClearRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommandInterruptClearOffset));
+    ThirtyTwoXDevice commandClearDevice = new(commandClearRom);
+    commandClearDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    commandClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset, 0x0002);
+    AssertEqual((ushort)0x0002, commandClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    commandClearDevice.SlaveSh2.Run(4);
+    AssertEqual((ushort)0x0000, commandClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0081);
+    AssertTrue(device.Sh2HeldInReset, "clearing RES with REN set should hold SH-2s in reset");
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, device.MasterSh2.PC);
+}
+
+void ThirtyTwoXCommunicationByteReadWriteEdge()
+{
+    byte[] rom = new byte[0x100];
+    WriteWord(rom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xE144); // MOV #$44,R1
+    WriteWord(rom, 0x04, 0x2010); // MOV.B R1,@R0
+    WriteWord(rom, 0x06, 0x001B); // SLEEP
+    WriteLong(rom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.MasterSh2.Run(4);
+
+    AssertEqual((byte)0x44, device.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x4400, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    byte[] staleRom = new byte[0x100];
+    WriteWord(staleRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(staleRom, 0x02, 0xE144); // MOV #$44,R1
+    WriteWord(staleRom, 0x04, 0x2010); // MOV.B R1,@R0
+    WriteWord(staleRom, 0x06, 0x001B); // SLEEP
+    WriteLong(staleRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+
+    ThirtyTwoXDevice staleDevice = new(staleRom);
+    staleDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    staleDevice.MasterSh2.Run(4);
+
+    AssertEqual((byte)0x00, staleDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((byte)0x44, staleDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+
+    byte[] oddLaneRom = new byte[0x100];
+    WriteWord(oddLaneRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(oddLaneRom, 0x02, 0xE144); // MOV #$44,R1
+    WriteWord(oddLaneRom, 0x04, 0x2010); // MOV.B R1,@R0
+    WriteWord(oddLaneRom, 0x06, 0x001B); // SLEEP
+    WriteLong(oddLaneRom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3));
+
+    ThirtyTwoXDevice oddLaneDevice = new(oddLaneRom);
+    oddLaneDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    oddLaneDevice.MasterSh2.Run(4);
+
+    AssertEqual((byte)0x44, oddLaneDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    oddLaneDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x00);
+    AssertEqual((ushort)0x0000, oddLaneDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+}
+
+void ThirtyTwoXM68kSystemHandshakesSyncSh2()
+{
+    byte[] rom = new byte[0x400];
+    WriteAscii(rom, 0x100, "SEGA 32X");
+    WriteWord(rom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(rom, 0x02, 0xE15A); // MOV #$5A,R1
+    WriteWord(rom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(rom, 0x06, 0x001B); // SLEEP
+    WriteLong(rom, 0x14, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+
+    GenesisBus bus = new(CartridgeImage.FromBytes(rom), new Vdp(), new Psg(), new Ym2612());
+    AssertTrue(bus.ThirtyTwoX is not null, "32X test cartridge should attach the 32X device");
+    ThirtyTwoXDevice device = bus.ThirtyTwoX!;
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6, 0x0001);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6, 0x0000);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    bus.CurrentMasterCycle = 128;
+
+    AssertEqual((ushort)0x0000, bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset)));
+    AssertEqual((ushort)0x005A, bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset)));
+    AssertTrue(device.MasterSh2.Halted, "68000 communication read should give the SH-2 enough time to publish its handshake word");
+
+    byte[] irqRom = new byte[0x400];
+    WriteAscii(irqRom, 0x100, "SEGA 32X");
+    WriteWord(irqRom, 0x00, 0x001B); // SLEEP
+    WriteLong(irqRom, 68 * 4, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x100);
+    WriteLong(irqRom, 0x120, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommandInterruptClearOffset));
+    WriteWord(irqRom, 0x100, 0xD107); // MOV.L @(literal,PC),R1
+    WriteWord(irqRom, 0x102, 0xE201); // MOV #1,R2
+    WriteWord(irqRom, 0x104, 0x2121); // MOV.W R2,@R1
+    WriteWord(irqRom, 0x106, 0x001B); // SLEEP
+    WriteAscii(irqRom, 0x180, "32X");
+    GenesisBus irqBus = new(CartridgeImage.FromBytes(irqRom), new Vdp(), new Psg(), new Ym2612());
+    AssertTrue(irqBus.ThirtyTwoX is not null, "32X interrupt test cartridge should attach the 32X device");
+    ThirtyTwoXDevice irqDevice = irqBus.ThirtyTwoX!;
+    irqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6, 0x0001);
+    irqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    irqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6, 0x0000);
+    irqDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    irqDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    irqBus.CurrentMasterCycle = 256;
+    irqBus.WriteByte(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.InterruptControlOffset + 1), 0x01);
+    AssertEqual((ushort)0x0001, irqBus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.InterruptControlOffset)));
+}
+
+void ThirtyTwoXSh2WatchdogKeyedWrites()
+{
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
+        return (byte)method.Invoke(target, [address, 0])!;
+    }
+
+    static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+    AssertEqual((byte)0x18, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE81));
+    AssertEqual((byte)0x1F, ReadSh2ByteForTest(device, 0xFFFF_FE83));
+
+    WriteSh2WordForTest(device, 0xFFFF_FE80, 0x5AFF);
+    AssertEqual((byte)0x18, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0xFF, ReadSh2ByteForTest(device, 0xFFFF_FE81));
+
+    WriteSh2WordForTest(device, 0xFFFF_FE80, 0xA538);
+    AssertEqual((byte)0x38, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+
+    WriteSh2WordForTest(device, 0xFFFF_FE80, 0x1234);
+    AssertEqual((byte)0x38, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0xFF, ReadSh2ByteForTest(device, 0xFFFF_FE81));
+}
+
+void ThirtyTwoXSh2WatchdogIntervalInterrupt()
+{
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
+        return (byte)method.Invoke(target, [address, 0])!;
+    }
+
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static void InvokePrivate(ThirtyTwoXDevice target, string name, params object[] args)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException($"{name} helper was not found");
+        method.Invoke(target, args);
+    }
+
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+    WriteSh2ByteForTest(device, 0xFFFF_FEE3, 0xF0);
+    WriteSh2ByteForTest(device, 0xFFFF_FEE4, 0x40);
+    WriteSh2WordForTest(device, 0xFFFF_FE80, 0x5AFF);
+    WriteSh2WordForTest(device, 0xFFFF_FE80, 0xA538);
+
+    InvokePrivate(device, "AdvanceSh2Watchdog", 0, 2);
+    InvokePrivate(device, "RequestPendingInterrupts");
+
+    AssertEqual((byte)0xB8, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE81));
+    AssertEqual(15, device.MasterSh2.PendingInterruptLevel);
+    AssertEqual(0x40, device.MasterSh2.PendingInterruptVectorNumber);
+}
+
+void ThirtyTwoXSh2DivisionUnit()
+{
+    static uint ReadSh2LongForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Long helper was not found");
+        return (uint)(method.Invoke(target, [address, 0]) ?? 0u);
+    }
+
+    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Word helper was not found");
+        return (ushort)(method.Invoke(target, [address, 0]) ?? (ushort)0);
+    }
+
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+        method.Invoke(target, [address, value, 0]);
+    }
+
+    ThirtyTwoXDevice device = new(new byte[0x100]);
+    device.Reset();
+    WriteSh2LongForTest(device, 0xFFFF_FF00, 7);
+    WriteSh2LongForTest(device, 0xFFFF_FF04, 100);
+    AssertEqual(14u, ReadSh2LongForTest(device, 0xFFFF_FF04));
+    AssertEqual(2u, ReadSh2LongForTest(device, 0xFFFF_FF10));
+    AssertEqual(0u, ReadSh2LongForTest(device, 0xFFFF_FF08));
+
+    WriteSh2LongForTest(device, 0xFFFF_FF00, unchecked((uint)-8));
+    WriteSh2LongForTest(device, 0xFFFF_FF04, 100);
+    AssertEqual(unchecked((uint)-12), ReadSh2LongForTest(device, 0xFFFF_FF04));
+    AssertEqual(4u, ReadSh2LongForTest(device, 0xFFFF_FF10));
+
+    WriteSh2LongForTest(device, 0xFFFF_FF00, 9);
+    WriteSh2LongForTest(device, 0xFFFF_FF10, 0);
+    WriteSh2LongForTest(device, 0xFFFF_FF14, 0x0000_0100);
+    AssertEqual(28u, ReadSh2LongForTest(device, 0xFFFF_FF14));
+    AssertEqual(4u, ReadSh2LongForTest(device, 0xFFFF_FF10));
+    AssertEqual(28u, ReadSh2LongForTest(device, 0xFFFF_FF1C));
+    AssertEqual(4u, ReadSh2LongForTest(device, 0xFFFF_FF18));
+
+    WriteSh2WordForTest(device, 0xFFFF_FF08, 0);
+    WriteSh2LongForTest(device, 0xFFFF_FF00, 0);
+    WriteSh2LongForTest(device, 0xFFFF_FF04, 123);
+    AssertEqual(0x7FFF_FFFFu, ReadSh2LongForTest(device, 0xFFFF_FF04));
+    AssertEqual((ushort)1, ReadSh2WordForTest(device, 0xFFFF_FF08));
+}
+
+void ThirtyTwoXPwmInterruptsAdvanceWithExecutedSh2Cycles()
+{
+    byte[] rom = new byte[0x300];
+    WriteWord(rom, 0x00, 0xE002); // MOV #2,R0
+    WriteWord(rom, 0x02, 0x400E); // LDC R0,SR
+    WriteWord(rom, 0x04, 0xAFFE); // BRA *
+    WriteWord(rom, 0x06, 0x0009); // NOP
+    WriteWord(rom, 0x80, 0xE15A); // MOV #$5A,R1
+    WriteWord(rom, 0x82, 0x001B); // SLEEP
+    WriteLong(rom, 0x40 + (67 * 4), ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x80);
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    device.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    device.MasterSh2.Run(3);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0001,
+    });
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0105);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0100);
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0200);
+
+    device.RunSh2Cycles(4);
+    AssertEqual(0, device.MasterSh2.PendingInterruptLevel);
+    AssertTrue(!device.CaptureState().MasterPwmInterruptPending, "short SH-2 run should not pre-fire a whole budget worth of PWM time");
+
+    device.RunSh2Cycles(512);
+    AssertEqual(0x0000_005Au, device.MasterSh2.R[1]);
+
+    ThirtyTwoXDevice tmZeroDevice = new(rom);
+    tmZeroDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    tmZeroDevice.MasterSh2.SetVbr(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0x40);
+    tmZeroDevice.MasterSh2.Run(3);
+    tmZeroDevice.RestoreState(tmZeroDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0001,
+    });
+
+    tmZeroDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0005);
+    tmZeroDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0010);
+    tmZeroDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0200);
+    tmZeroDevice.RunSh2Cycles(64);
+    AssertTrue(!tmZeroDevice.CaptureState().MasterPwmInterruptPending, "PWM TM=0 should not behave like a one-cycle interval");
+    tmZeroDevice.RunSh2Cycles(512);
+    AssertTrue(tmZeroDevice.CaptureState().MasterPwmInterruptPending, "PWM TM=0 should decode as the longest 4-bit timer interval");
+
+    ThirtyTwoXDevice retunedDevice = new(rom);
+    retunedDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    retunedDevice.RestoreState(retunedDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        VdpAccessGrantedToSh2 = true,
+        MasterInterruptMask = 0x0001,
+        PwmCycleCounter = 1,
+        PwmTimerCounter = 1,
+    });
+    retunedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmControlOffset, 0x0005);
+    retunedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmCycleOffset, 0x0100);
+    retunedDevice.RunSh2Cycles(4);
+    AssertTrue(!retunedDevice.CaptureState().MasterPwmInterruptPending, "rewriting PWM timing registers should reset stale near-expired counters");
+}
+
+void ThirtyTwoXM68kBusShell()
+{
+    byte[] rom = new byte[0x400000];
+    WriteAscii(rom, 0x100, "SEGA 32X");
+    rom[0x1234] = 0x5A;
+    rom[0x1235] = 0xC3;
+    rom[0x000010] = 0x11;
+    rom[0x000011] = 0x22;
+    rom[0x100010] = 0x33;
+    rom[0x100011] = 0x44;
+    rom[0x200010] = 0x55;
+    rom[0x200011] = 0x66;
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+
+    AssertTrue(machine.Bus.ThirtyTwoX is not null, "32X cartridge should attach the 32X shell");
+    AssertEqual((uint)0x4D415253, machine.Bus.ReadLong(0xA1_30EC));
+
+    machine.Bus.WriteWord(0xA1_5134, 0x0AAA);
+    ThirtyTwoXDevice.PwmSnapshot pwm = machine.Bus.ThirtyTwoX!.CapturePwm();
+    AssertEqual(1, pwm.Left.Length);
+    AssertEqual((ushort)0x0AAA, pwm.Left[0]);
+    AssertEqual((ushort)0x0AAA, machine.Bus.ReadWord(0xA1_5134));
+
+    machine.Bus.WriteWord(0xA1_5200, 0x7ACE);
+    AssertEqual((ushort)0x7ACE, machine.Bus.ReadWord(0xA1_5200));
+    AssertTrue((machine.Bus.ThirtyTwoX.MasterInterruptMask & 0x8000) != 0, "68000-side 32X palette access should hand VDP access back to the SH-2 side");
+
+    machine.Bus.WriteWord(0x84_0000, 0xBEEF);
+    AssertEqual((byte)0xBE, machine.Bus.ThirtyTwoX.DrawFrameBuffer[0]);
+    AssertEqual((byte)0xEF, machine.Bus.ThirtyTwoX.DrawFrameBuffer[1]);
+    machine.Bus.WriteWord(0x86_0000, 0x00AA);
+    AssertEqual((byte)0xBE, machine.Bus.ThirtyTwoX.DrawFrameBuffer[0]);
+    AssertEqual((byte)0xAA, machine.Bus.ThirtyTwoX.DrawFrameBuffer[1]);
+    machine.Bus.WriteWord(0xA1_5100, 0x0083);
+    machine.Bus.WriteWord(0xA1_518A, 0x0001);
+    machine.Bus.ThirtyTwoX.StepScanline(224, pal: false);
+    AssertEqual(0, machine.Bus.ThirtyTwoX.DrawFrameBufferIndex);
+    AssertEqual((ushort)0x0000, machine.Bus.ReadWord(0x84_0000));
+
+    AssertEqual((ushort)0x5AC3, machine.Bus.ReadWord(0x88_1234));
+    AssertEqual((ushort)0x1122, machine.Bus.ReadWord(0x90_0010));
+    machine.Bus.WriteWord(0xA1_5104, 0x0001);
+    AssertEqual((ushort)0x3344, machine.Bus.ReadWord(0x90_0010));
+    AssertEqual((ushort)0x1122, machine.Bus.ReadWord(0x88_0010));
+    machine.Bus.WriteByte(0xA1_5105, 0x02);
+    AssertEqual((ushort)0x5566, machine.Bus.ReadWord(0x90_0010));
+
+    MegaDrive.MegaDriveState state = machine.CaptureState();
+    machine.Bus.WriteWord(0xA1_5200, 0x0000);
+    machine.RestoreState(state);
+    AssertEqual((ushort)0x7ACE, machine.Bus.ReadWord(0xA1_5200));
+    AssertEqual((ushort)0x0000, machine.Bus.ReadWord(0x84_0000));
+}
+
+void ThirtyTwoXM68kVectorRomMapping()
+{
+    byte[] rom = new byte[0x400000];
+    WriteAscii(rom, 0x100, "SEGA 32X");
+    WriteLong(rom, 0x78, 0x0000_09D0);
+    WriteLong(rom, 0xC0, 0x08F9_0000);
+    WriteLong(rom, 0x02B4, 0xDEAD_BEEF);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+
+    AssertEqual(0x0000_09D0u, machine.Bus.ReadLong(0x0000_0078));
+    AssertEqual(0x0000_0000u, machine.Bus.ReadLong(0x0000_0000));
+    AssertEqual(0x08F9_0000u, machine.Bus.ReadLong(0x0000_00C0));
+    machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0083);
+    AssertEqual(0x0088_02B4u, machine.Bus.ReadLong(0x0000_0078));
+    AssertEqual((ushort)0x0088, machine.Bus.ReadWord(0x0000_0078));
+    AssertEqual((ushort)0x02B4, machine.Bus.ReadWord(0x0000_007A));
+    AssertEqual((byte)0xB4, machine.Bus.ReadByte(0x0000_007B));
+    AssertEqual(0x0000_0000u, machine.Bus.ReadLong(0x0000_0000));
+    AssertEqual(0x08F9_0000u, machine.Bus.ReadLong(0x0000_00C0));
+    AssertEqual((ushort)0xDEAD, machine.Bus.ReadWord(0x0088_02B4));
+    AssertEqual((ushort)0xFFFF, machine.Bus.ReadWord(0x0000_0200));
+    machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset), 0x0001);
+    AssertEqual((ushort)0xDEAD, machine.Bus.ReadWord(0x0000_02B4));
+}
+
+void ThirtyTwoXM68kVBlankRemainsLevel6()
+{
+    byte[] rom = new byte[0x400000];
+    WriteAscii(rom, 0x100, "SEGA 32X");
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0088_0200);
+    WriteLong(rom, 0x074, 0x0000_0310); // Native level 5 vector before ADEN.
+    WriteLong(rom, 0x078, 0x0000_0320); // Native level 6 vector before ADEN.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2300,SR
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2300
+    EmitWord(rom, ref pc, 0x2300);
+    EmitWord(rom, ref pc, 0x60FE); // BRA *
+
+    pc = 0x02AE; // Vector 29 custom ROM target: $008802AE.
+    EmitWord(rom, ref pc, 0x4EF9); // JMP $00880310
+    EmitLong(rom, ref pc, 0x0088_0310);
+    pc = 0x02B4; // Vector 30 custom ROM target: $008802B4.
+    EmitWord(rom, ref pc, 0x4EF9); // JMP $00880320
+    EmitLong(rom, ref pc, 0x0088_0320);
+
+    pc = 0x310;
+    EmitWord(rom, ref pc, 0x7A05); // MOVEQ #5,D5
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    pc = 0x320;
+    EmitWord(rom, ref pc, 0x7C06); // MOVEQ #6,D6
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0083);
+    machine.Vdp.WriteControlPort(0x8120); // Enable VBlank interrupt.
+
+    for (int i = 0; i < 2; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop before 32X VBlank");
+    machine.RunFrame(20_000);
+    AssertEqual(0u, machine.MainCpu.D[5]);
+    AssertEqual(6u, machine.MainCpu.D[6]);
+}
+
+void ThirtyTwoXSh2BootRomReadyMarker()
+{
+    ThirtyTwoXDevice device = new();
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte reflection hook missing");
+        return (byte)method.Invoke(target, [address, 0])!;
+    }
+
+    AssertEqual((byte)0x80, ReadSh2ByteForTest(device, 0x0000_0000));
+    AssertEqual((byte)0x80, ReadSh2ByteForTest(device, 0x2000_0000));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0x0000_0001));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0x0000_0FFF));
 }
 
 void CpuResetAndSimpleInstructions()
@@ -505,6 +3410,30 @@ void VdpDmaMemoryCopyWritesVramAndCram()
 
     AssertEqual((ushort)0x000E, machine.Vdp.Cram[0]);
     AssertEqual(2, machine.Vdp.DmaEvents.Count);
+
+    byte[] x32Rom = CreateRom();
+    WriteAscii(x32Rom, 0x100, "SEGA 32X");
+    MegaDrive x32Machine = new(CartridgeImage.FromBytes(x32Rom));
+    x32Machine.Reset();
+    x32Machine.Bus.WriteWord(0x00FF_0200, 0x1111);
+    x32Machine.Bus.WriteWord(0x00FF_0202, 0x2222);
+    x32Machine.Bus.WriteWord(0x00FF_0204, 0x3333);
+    x32Machine.Bus.WriteWord(0x00FF_0206, 0x4444);
+    x32Machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset), 0x00FF);
+    x32Machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister((ushort)(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset + 2)), 0x0200);
+    x32Machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqLengthOffset), 0x0004);
+    x32Machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset), 0x0001);
+    ConfigureDma(x32Machine.Vdp, lengthWords: 4, sourceAddress: 0x00FF_0200, mode: 0);
+    x32Machine.Bus.WriteWord(0x00C0_0004, 0x4000);
+    x32Machine.Bus.WriteWord(0x00C0_0004, 0x0080);
+
+    AssertEqual((ushort)0x8000, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
+    AssertEqual((ushort)0x0000, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqLengthOffset)));
+    AssertEqual((ushort)0x1111, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
+    AssertEqual((ushort)0x2222, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
+    AssertEqual((ushort)0x3333, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
+    AssertEqual((ushort)0x4444, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
+    AssertEqual((ushort)0x4000, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 }
 
 void VdpLongDmaTimingScalesWithTransferLength()
@@ -710,6 +3639,20 @@ void ControllerDataAndControlPorts()
     AssertTrue((low & 0x04) == 0, "Left line should identify a 3-button controller through the data port when TH is low");
     AssertTrue((low & 0x08) == 0, "Right line should identify a 3-button controller through the data port when TH is low");
     AssertTrue((low & 0x20) == 0, "Start should be visible through the data port when TH is low");
+}
+
+void ControllerInputPinsDoNotDriveTh()
+{
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()));
+    machine.Reset();
+
+    machine.Bus.WriteByte(0x00A1_000B, 0x39); // TH remains an input on port 2.
+    machine.Bus.WriteByte(0x00A1_0005, 0x00);
+    machine.Bus.WriteByte(0x00A1_0005, 0x09);
+
+    byte value = machine.Bus.ReadByte(0x00A1_0005);
+    AssertEqual(0x06, value & 0x06);
+    AssertTrue((value & 0x40) != 0, "TH should remain pulled high when its control bit is input");
 }
 
 void SegaTeamPlayerAdapterProtocol()
@@ -3007,6 +5950,33 @@ void SaveStateRoundTrip()
     AssertEqual(0xBEEF, svpMachine.Bus.ReadWord(0x0030_0000));
     AssertEqual(0xCAFE, svpMachine.Bus.ReadWord(0x00A1_5000));
     File.Delete(svpPath);
+
+    byte[] x32Rom = new byte[0x400000];
+    WriteAscii(x32Rom, 0x100, "SEGA 32X");
+    WriteWord(x32Rom, 0x000, 0x001B); // SLEEP
+    MegaDrive x32Machine = new(CartridgeImage.FromBytes(x32Rom));
+    x32Machine.Reset();
+    x32Machine.Bus.WriteWord(0xA1_5100, 0x0083);
+    x32Machine.Bus.WriteWord(0xA1_5120, 0x1357);
+    x32Machine.Bus.WriteWord(0xA1_5200, 0x2468);
+    x32Machine.Bus.WriteWord(0xA1_5130, 0x0105);
+    x32Machine.Bus.WriteWord(0xA1_5132, 0x0800);
+    x32Machine.Bus.WriteWord(0xA1_5134, 0x0100);
+    x32Machine.Bus.WriteWord(0xA1_5134, 0x0200);
+    x32Machine.Bus.WriteWord(0xA1_5134, 0x0300);
+    string x32Path = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}.mdss");
+
+    SaveStateSerializer.Save(x32Machine, x32Path);
+    x32Machine.Bus.WriteWord(0xA1_5100, 0x0081);
+    x32Machine.Bus.WriteWord(0xA1_5120, 0x0000);
+    x32Machine.Bus.WriteWord(0xA1_5200, 0x0000);
+    SaveStateSerializer.Load(x32Machine, x32Path);
+
+    AssertEqual((ushort)0x1357, x32Machine.Bus.ReadWord(0xA1_5120));
+    AssertEqual((ushort)0x2468, x32Machine.Bus.ReadWord(0xA1_5200));
+    AssertTrue((x32Machine.Bus.ReadWord(0xA1_5134) & 0x8000) != 0, "32X save state should restore PWM FIFO status");
+    AssertTrue(x32Machine.Bus.ThirtyTwoX is not null && !x32Machine.Bus.ThirtyTwoX.Sh2HeldInReset, "32X save state should restore adapter control state");
+    File.Delete(x32Path);
 }
 
 void SyntheticGenesisStartupRom()
@@ -3180,6 +6150,56 @@ void ExpandedCpuInstructions()
     AssertEqual(0x00FF_1FFCu, machine.MainCpu.A[7]);
     AssertEqual(0x00FF_3000u, machine.Bus.ReadLong(0x00FF_1FFC));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after expanded instruction program");
+}
+
+void M68kMoveByteDbfFillLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x7200); // MOVEQ #0,D1
+    EmitWord(rom, ref pc, 0x123C); // MOVE.B #$7F,D1
+    EmitWord(rom, ref pc, 0x007F);
+    EmitWord(rom, ref pc, 0x207C); // MOVEA.L #$00FF1000,A0
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #3,D0
+    EmitWord(rom, ref pc, 0x0003);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x10C1); // MOVE.B D1,(A0)+
+    EmitWord(rom, ref pc, 0x51C8); // DBF D0,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(machine.MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(36, out int cycles, out int instructions), "fast-forward should recognize the fill loop");
+    AssertEqual(36, cycles);
+    AssertEqual(4, instructions);
+    AssertEqual(0x00FF_1002u, machine.MainCpu.A[0]);
+    AssertEqual(1u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1000));
+    AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1001));
+    AssertEqual((byte)0x00, machine.Bus.ReadByte(0x00FF_1002));
+
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x00FF_1004u, machine.MainCpu.A[0]);
+    AssertEqual(0xFFFFu, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1002));
+    AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1003));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the fill loop");
 }
 
 void MovemPredecrementStoresOriginalAddressRegister()
@@ -3810,6 +6830,67 @@ void BraWordUsesDisplacementWordOrigin()
 
     AssertEqual(3u, machine.MainCpu.D[0]);
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after BRA.W target");
+}
+
+void ProgramCounterUses24BitAddressBus()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x4EB9); // JSR $06000300, high byte should not appear on the 68000 address bus.
+    EmitLong(rom, ref pc, 0x0600_0300);
+    EmitWord(rom, ref pc, 0x7201); // MOVEQ #1,D1
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0
+    EmitWord(rom, ref pc, 0x4E75); // RTS
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertEqual(1u, machine.MainCpu.D[1]);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should return from a high-byte absolute JSR through the 24-bit bus address");
+}
+
+void PcRelativeEffectiveAddressUsesExtensionWordOrigin()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x41FA); // LEA label(PC),A0; extension word is at $0202.
+    EmitWord(rom, ref pc, 0x001E);
+    EmitWord(rom, ref pc, 0x303A); // MOVE.W label(PC),D0; extension word is at $0206.
+    EmitWord(rom, ref pc, 0x001A);
+    EmitWord(rom, ref pc, 0x7202); // MOVEQ #2,D1 for indexed PC-relative addressing.
+    EmitWord(rom, ref pc, 0x343B); // MOVE.W label2(PC,D1.W),D2; extension word is at $020C.
+    EmitWord(rom, ref pc, 0x1014);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+    WriteWord(rom, 0x220, 0xBEEF);
+    WriteWord(rom, 0x222, 0xCAFE);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x0000_0220u, machine.MainCpu.A[0]);
+    AssertEqual(0xBEEFu, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual(0xCAFEu, machine.MainCpu.D[2] & 0xFFFF);
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after PC-relative EA checks");
 }
 
 void ImmediateRmwAbsoluteLongEvaluatesEaOnce()
@@ -5114,21 +8195,81 @@ int PixelOffset(int x, int y)
     return ((y * Vdp.ScreenWidth) + x) * 3;
 }
 
-void AssertEqual<T>(T expected, T actual)
+void AssertEqual<T>(T expected, T actual, [CallerLineNumber] int line = 0)
     where T : IEquatable<T>
 {
     if (!expected.Equals(actual))
     {
-        throw new InvalidOperationException($"expected {expected}, got {actual}");
+        throw new InvalidOperationException($"line {line}: expected {expected}, got {actual}");
     }
 }
 
-void AssertTrue(bool condition, string message)
+void AssertTrue(bool condition, string message, [CallerLineNumber] int line = 0)
 {
     if (!condition)
     {
-        throw new InvalidOperationException(message);
+        throw new InvalidOperationException($"line {line}: {message}");
     }
 }
 
+static void SetSh2Property(Sh2Cpu cpu, string propertyName, uint value)
+{
+    typeof(Sh2Cpu).GetProperty(propertyName)!.SetValue(cpu, value);
+}
+
 readonly record struct EepromPins(uint SdaInAddress, int SdaInBit, uint SdaOutAddress, int SdaOutBit, uint SclAddress, int SclBit, bool WordAccess = false);
+
+sealed class SyntheticSh2Bus : ISh2Bus, ISh2PeekBus
+{
+    private readonly Dictionary<uint, byte> _memory = [];
+
+    public byte ReadByte(uint address) => _memory.TryGetValue(address, out byte value) ? value : (byte)0x00;
+
+    public ushort ReadWord(uint address) => (ushort)((ReadByte(address) << 8) | ReadByte(address + 1));
+
+    public uint ReadLong(uint address) => (uint)((ReadWord(address) << 16) | ReadWord(address + 2));
+
+    public void WriteByte(uint address, byte value) => _memory[address] = value;
+
+    public void WriteWord(uint address, ushort value)
+    {
+        WriteByte(address, (byte)(value >> 8));
+        WriteByte(address + 1, (byte)value);
+    }
+
+    public void WriteLong(uint address, uint value)
+    {
+        WriteWord(address, (ushort)(value >> 16));
+        WriteWord(address + 2, (ushort)value);
+    }
+
+    public void WriteInstructionWord(uint address, ushort value) => WriteWord(address, value);
+
+    public bool TryPeekByte(uint address, out byte value)
+    {
+        value = ReadByte(address);
+        return true;
+    }
+
+    public bool TryPeekWord(uint address, out ushort value)
+    {
+        value = ReadWord(address);
+        return true;
+    }
+
+    public uint? TryReadLong(uint address) => ReadLong(address);
+
+    public ushort? TryReadWord(uint address) => ReadWord(address);
+
+    public bool TryWriteWord(uint address, ushort value)
+    {
+        WriteWord(address, value);
+        return true;
+    }
+
+    public bool TryWriteLong(uint address, uint value)
+    {
+        WriteLong(address, value);
+        return true;
+    }
+}

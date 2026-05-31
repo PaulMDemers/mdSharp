@@ -94,7 +94,7 @@ The manifest can select ROMs by filename substrings, choose a built-in script su
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --cart-info "roms\game.md"
 ```
 
-Prints header metadata, save hardware, expected bank-switch register usage, warnings, and known unsupported hardware such as 32X requirements. SVP cartridges are reported as supported coprocessor cartridges.
+Prints header metadata, save hardware, expected bank-switch register usage, warnings, and known unsupported hardware such as 32X requirements. SVP cartridges are reported as supported coprocessor cartridges. 32X cartridges are recognized by header metadata or `.32x` filename extension and are currently reported as requiring unsupported add-on hardware.
 
 Scan a full folder without running emulation:
 
@@ -102,7 +102,15 @@ Scan a full folder without running emulation:
 dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --cart-scan roms render-output\cartridges.csv
 ```
 
-The CSV is helpful before a broad compatibility run because it highlights save hardware, bank-switched games, known unsupported hardware, SVP cartridges, and cartridge input devices such as J-Cart extra controller ports.
+The CSV is helpful before a broad compatibility run because it highlights save hardware, bank-switched games, known unsupported hardware, SVP cartridges, 32X requirements, and cartridge input devices such as J-Cart extra controller ports.
+
+Trace the current 32X SH-2 interpreter against a local 32X ROM:
+
+```powershell
+dotnet run --project src\MdSharp.App\MdSharp.App.csproj -c Release -- --32x-sh2-trace "32x_roms\game.32x" 10000 master
+```
+
+This command is an implementation aid rather than a compatibility promise. It releases the 32X shell reset state, runs either the master or slave SH-2, and reports the first unsupported opcode and PC. Pass an optional start PC such as `$22000400` when investigating a known SH-2 entry point.
 
 ## Compatibility Summary
 

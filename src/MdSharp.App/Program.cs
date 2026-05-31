@@ -3,8 +3,10 @@ using MdSharp.Core.Audio;
 using MdSharp.Core.Bus;
 using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
+using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Input;
 using MdSharp.Core.State;
+using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
 using System.Globalization;
 using System.IO.Compression;
@@ -14,7 +16,8 @@ using System.Text.Json;
 
 const int DefaultInstructionBudget = 100_000;
 const int SonicTitleMusicStartFrame = 559;
-string[] romExtensions = [".bin", ".md", ".gen", ".smd", ".rom"];
+const double ThirtyTwoXSweepAdaptiveTimeLimitSeconds = 180.0;
+string[] romExtensions = [".bin", ".md", ".gen", ".smd", ".rom", ".32x"];
 
 if (args.Length == 1 && args[0] is "--version" or "-v")
 {
@@ -31,6 +34,20 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --sweep <rom-folder> [instructions]");
     Console.WriteLine("  mdsharp --cart-info <rom-file>");
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
+    Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
+    Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-fill-loop-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-runlength-list-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+    Console.WriteLine("  mdsharp --32x-runlength-rechain-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+    Console.WriteLine("  mdsharp --32x-sh2-fault-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [history]");
+    Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
+    Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
+    Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
+    Console.WriteLine("  mdsharp --32x-node-dump <rom-file> [frames] [instructions-per-frame] [address] [count] [linear|next|prev]");
+    Console.WriteLine("  mdsharp --32x-cache-inspect <rom-file> [frames] [instructions-per-frame] [address]");
+    Console.WriteLine("  mdsharp --32x-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
+    Console.WriteLine("  mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>]");
     Console.WriteLine("  mdsharp --render <rom-file> <output.ppm> [frames] [instructions-per-frame] [--trace-cpu] [--trace-vdp]");
     Console.WriteLine("  mdsharp --render-sequence <rom-file> <output-folder> <start-frame> <end-frame> [step] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --sprite-trace <rom-file> [frames] [instructions-per-frame]");
@@ -71,6 +88,12 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --audio-reference-suite <manifest.json> <rom-folder> <output-folder> [instructions-per-frame]");
     Console.WriteLine("  mdsharp --audio-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --z80-trace <rom-file> <output.csv> [frames] [max-lines] [instructions-per-frame] [start-frame]");
+    Console.WriteLine("  mdsharp --m68k-live-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [pc-start] [pc-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-m68k-exception-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-sdk-monitor-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --m68k-memory-read-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --m68k-memory-write-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --m68k-interrupt-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --inspect <rom-file> [frames] [instructions-per-frame] [address] [bytes]");
     Console.WriteLine("  mdsharp --watch <rom-file> <start-frame> <frames> <address> <bytes> [instructions-per-frame]");
     Console.WriteLine("  mdsharp --io-trace <rom-file> <start-frame> <frames> [instructions-per-frame]");
@@ -123,6 +146,244 @@ if (args[0].Equals("--cart-scan", StringComparison.OrdinalIgnoreCase))
     }
 
     ScanCartridges(args[1], args[2]);
+    return;
+}
+
+if (args[0].Equals("--32x-sh2-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
+        return;
+    }
+
+    int instructions = args.Length > 2 && int.TryParse(args[2], out int parsedInstructions) ? parsedInstructions : 10_000;
+    string cpu = args.Length > 3 ? args[3] : "master";
+    uint? startPc = args.Length > 4 ? ParseNumber(args[4]) : null;
+    TraceThirtyTwoXSh2(args[1], instructions, cpu, startPc);
+    return;
+}
+
+if (args[0].Equals("--32x-live-sh2-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    string cpu = args.Length > 5 ? args[5] : "both";
+    uint? pcStart = args.Length > 6 ? ParseNumber(args[6]) : null;
+    uint? pcEnd = args.Length > 7 ? ParseNumber(args[7]) : pcStart;
+    int maxLines = args.Length > 8 && int.TryParse(args[8], out int parsedMaxLines) ? parsedMaxLines : 250_000;
+    int startFrame = args.Length > 9 && int.TryParse(args[9], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    TraceThirtyTwoXLiveSh2(args[1], args[2], frames, instructionsPerFrame, cpu, pcStart, pcEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-fill-loop-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-fill-loop-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    TraceThirtyTwoXFillLoops(args[1], args[2], frames, instructionsPerFrame, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-runlength-list-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-runlength-list-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? Math.Max(1, parsedMaxLines) : 50_000;
+    TraceThirtyTwoXRunlengthList(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines);
+    return;
+}
+
+if (args[0].Equals("--32x-runlength-rechain-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-runlength-rechain-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? Math.Max(1, parsedMaxLines) : 50_000;
+    TraceThirtyTwoXRunlengthRechain(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines);
+    return;
+}
+
+if (args[0].Equals("--32x-sh2-fault-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sh2-fault-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [history]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int history = args.Length > 5 && int.TryParse(args[5], out int parsedHistory) ? parsedHistory : 2_000;
+    TraceThirtyTwoXSh2Fault(args[1], args[2], frames, instructionsPerFrame, history);
+    return;
+}
+
+if (args[0].Equals("--32x-bus-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint? addressStart = args.Length > 5 ? ParseNumber(args[5]) : null;
+    uint? addressEnd = args.Length > 6 ? ParseNumber(args[6]) : addressStart;
+    int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? parsedMaxLines : 250_000;
+    string traceMode = args.Length > 8 ? args[8] : "all";
+    bool writesOnly = traceMode.Equals("writes", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("writes-exact", StringComparison.OrdinalIgnoreCase);
+    bool exactAddressMatch = traceMode.Equals("exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("all-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("writes-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("changes-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase);
+    bool changesOnly = traceMode.Equals("changes-exact", StringComparison.OrdinalIgnoreCase);
+    bool nonzeroOnly = traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase);
+    int startFrame = args.Length > 9 && int.TryParse(args[9], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    TraceThirtyTwoXBus(args[1], args[2], frames, instructionsPerFrame, addressStart, addressEnd, maxLines, writesOnly, exactAddressMatch, startFrame, changesOnly, nonzeroOnly);
+    return;
+}
+
+if (args[0].Equals("--32x-comm-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? Math.Max(1, parsedMaxLines) : 50_000;
+    ushort offsetStart = args.Length > 7 ? (ushort)ParseNumber(args[7]) : ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+    ushort offsetEnd = args.Length > 8 ? (ushort)ParseNumber(args[8]) : (ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0F);
+    TraceThirtyTwoXCommunication(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines, offsetStart, offsetEnd);
+    return;
+}
+
+if (args[0].Equals("--32x-inspect", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
+        return;
+    }
+
+    int frames = args.Length > 2 && int.TryParse(args[2], out int parsedFrames) ? parsedFrames : 0;
+    int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint address = args.Length > 4 ? ParseNumber(args[4]) : ThirtyTwoXHardwareProfile.Sh2SdramStart;
+    int words = args.Length > 5 && int.TryParse(args[5], out int parsedWords) ? parsedWords : 32;
+    InspectThirtyTwoX(args[1], frames, instructionsPerFrame, address, words);
+    return;
+}
+
+if (args[0].Equals("--32x-cache-inspect", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-cache-inspect <rom-file> [frames] [instructions-per-frame] [address]");
+        return;
+    }
+
+    int frames = args.Length > 2 && int.TryParse(args[2], out int parsedFrames) ? parsedFrames : 0;
+    int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint address = args.Length > 4 ? ParseNumber(args[4]) : 0;
+    InspectThirtyTwoXCache(args[1], frames, instructionsPerFrame, address);
+    return;
+}
+
+if (args[0].Equals("--32x-rle-dump", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
+        return;
+    }
+
+    int frames = args.Length > 2 && int.TryParse(args[2], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int line = args.Length > 4 && int.TryParse(args[4], out int parsedLine) ? parsedLine : 112;
+    int maxSpans = args.Length > 5 && int.TryParse(args[5], out int parsedMaxSpans) ? parsedMaxSpans : 64;
+    DumpThirtyTwoXRleLine(args[1], frames, instructionsPerFrame, line, maxSpans);
+    return;
+}
+
+if (args[0].Equals("--32x-node-dump", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-node-dump <rom-file> [frames] [instructions-per-frame] [address] [count] [linear|next|prev]");
+        return;
+    }
+
+    int frames = args.Length > 2 && int.TryParse(args[2], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint address = args.Length > 4 ? ParseNumber(args[4]) : 0x0602_9874;
+    int count = args.Length > 5 && int.TryParse(args[5], out int parsedCount) ? parsedCount : 32;
+    string mode = args.Length > 6 ? args[6] : "linear";
+    DumpThirtyTwoXNodeRecords(args[1], frames, instructionsPerFrame, address, count, mode);
+    return;
+}
+
+if (args[0].Equals("--32x-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    TraceThirtyTwoX(args[1], args[2], frames, instructionsPerFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-sweep", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 600;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    bool screenshots = args.Any(arg => arg.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));
+    bool resume = args.Any(arg => arg.Equals("--resume", StringComparison.OrdinalIgnoreCase));
+    string? filter = GetOptionValue(args, "--filter");
+    int? limit = TryGetPositiveOption(args, "--limit");
+    SweepThirtyTwoX(args[1], args[2], frames, instructionsPerFrame, screenshots, resume, filter, limit);
     return;
 }
 
@@ -192,7 +453,7 @@ if (args[0].Equals("--scripted-render", StringComparison.OrdinalIgnoreCase))
     if (args.Length < 4)
     {
         Console.Error.WriteLine("Usage: mdsharp --scripted-render <rom-file> <output.ppm> <script> [frames] [instructions-per-frame] [--no-svp-diagnostics] [--no-line-vram-snapshots] [--no-svp-dma-step] [--svp-mld-z] [--svp-al-broad] [--svp-al-mame] [--svp-pmac-loose] [--svp-write-rpl] [--svp-mame-timing]");
-    Console.Error.WriteLine("Scripts: none, start, repeat-start, p1-repeat-start, virtua-racing-drive, sonic1-start, sonic3-start, streets, bloodlines");
+    Console.Error.WriteLine("Scripts: none, start, repeat-start, p1-repeat-start, virtua-racing-drive, sonic1-start, sonic3-start, chaotix-title-start, streets, bloodlines");
         Environment.Exit(1);
     }
 
@@ -746,6 +1007,108 @@ if (args[0].Equals("--z80-trace", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--m68k-live-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --m68k-live-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [pc-start] [pc-end] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint pcStart = args.Length > 5 ? ParseNumber(args[5]) : 0;
+    uint pcEnd = args.Length > 6 ? ParseNumber(args[6]) : uint.MaxValue;
+    int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 8 && int.TryParse(args[8], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceM68kLive(args[1], args[2], frames, instructionsPerFrame, pcStart, pcEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-m68k-exception-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-m68k-exception-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int maxLines = args.Length > 5 && int.TryParse(args[5], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceThirtyTwoXM68kExceptions(args[1], args[2], frames, instructionsPerFrame, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-sdk-monitor-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sdk-monitor-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int maxLines = args.Length > 5 && int.TryParse(args[5], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceThirtyTwoXSdkMonitor(args[1], args[2], frames, instructionsPerFrame, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--m68k-memory-write-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --m68k-memory-write-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint addressStart = args.Length > 5 ? ParseNumber(args[5]) : 0;
+    uint addressEnd = args.Length > 6 ? ParseNumber(args[6]) : uint.MaxValue;
+    int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 8 && int.TryParse(args[8], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceM68kMemoryWrites(args[1], args[2], frames, instructionsPerFrame, addressStart, addressEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--m68k-memory-read-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --m68k-memory-read-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint addressStart = args.Length > 5 ? ParseNumber(args[5]) : 0;
+    uint addressEnd = args.Length > 6 ? ParseNumber(args[6]) : uint.MaxValue;
+    int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 8 && int.TryParse(args[8], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceM68kMemoryReads(args[1], args[2], frames, instructionsPerFrame, addressStart, addressEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--m68k-interrupt-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --m68k-interrupt-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int maxLines = args.Length > 5 && int.TryParse(args[5], out int parsedMaxLines) ? parsedMaxLines : 4096;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    TraceM68kInterrupts(args[1], args[2], frames, instructionsPerFrame, maxLines, startFrame);
+    return;
+}
+
 if (args[0].Equals("--inspect", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 2)
@@ -1133,6 +1496,19 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
     MegaDrive machine = CreateMachine(romPath);
     machine.Vdp.TraceEnabled = traceVdp;
     machine.MainCpu.TraceEnabled = traceCpu;
+    List<ThirtyTwoXDevice.SystemRegisterWriteTrace> thirtyTwoXCommWrites = [];
+    if (traceCpu && machine.Bus.ThirtyTwoX is ThirtyTwoXDevice traceThirtyTwoX)
+    {
+        traceThirtyTwoX.SystemRegisterWriteObserver = write =>
+        {
+            if (write.Offset is >= ThirtyTwoXHardwareProfile.CommunicationPortOffset and < ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8 &&
+                thirtyTwoXCommWrites.Count < 256)
+            {
+                thirtyTwoXCommWrites.Add(write);
+            }
+        };
+    }
+
     machine.Reset();
 
     int completedFrames = 0;
@@ -1148,7 +1524,7 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
         Console.WriteLine($"Execution stopped while rendering: {ex.Message}");
     }
 
-    byte[] framebuffer = machine.Vdp.RenderFrameRgb();
+    byte[] framebuffer = machine.RenderFrameRgb();
     int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
     WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
     WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
@@ -1168,6 +1544,38 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
     Console.WriteLine($"Rendered tile atlas to {atlasPath}");
     Console.WriteLine($"Rendered tile atlas from tile ${firstTile:X3} to {nonzeroAtlasPath}");
     Console.WriteLine($"Rendered frame mode={machine.Vdp.LastRenderMode} nonBackgroundPixels={nonBackgroundPixels:N0}");
+    if (machine.Bus.ThirtyTwoX is ThirtyTwoXDevice thirtyTwoX)
+    {
+        if (traceCpu && thirtyTwoXCommWrites.Count > 0)
+        {
+            Console.WriteLine("32X comm writes:");
+            foreach (ThirtyTwoXDevice.SystemRegisterWriteTrace write in thirtyTwoXCommWrites)
+            {
+                Console.WriteLine($"{write.Source} ${write.Offset:X2}=${write.Value:X2}");
+            }
+        }
+
+        Console.WriteLine(
+            $"32X mode={thirtyTwoX.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} " +
+            $"fbctl=${thirtyTwoX.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} " +
+            $"draw={thirtyTwoX.DrawFrameBufferIndex} display={thirtyTwoX.DisplayFrameBufferIndex} " +
+            $"swapPending={thirtyTwoX.FrameBufferSwapPending} vblank={thirtyTwoX.VBlank} hblank={thirtyTwoX.HBlank} " +
+            $"compositeMode={thirtyTwoX.LastCompositeMode} fallback={thirtyTwoX.LastCompositeUsedFallback} " +
+            $"vdpWrites={thirtyTwoX.VdpRegisterWriteCount} modeWrites={thirtyTwoX.BitmapModeWriteCount}/${thirtyTwoX.LastBitmapModeWrite:X4} fbWrites={thirtyTwoX.FrameBufferControlWriteCount}/${thirtyTwoX.LastFrameBufferControlWrite:X4} fbBytes={thirtyTwoX.FrameBufferByteWriteCount:N0} fbDenied={thirtyTwoX.DeniedFrameBufferAccessCount:N0} palBytes={thirtyTwoX.PaletteByteWriteCount:N0} dreqWords={thirtyTwoX.DreqDmaWordTransferCount:N0} compositePixels={thirtyTwoX.LastCompositeWrittenPixels:N0} " +
+            $"irqMask=${thirtyTwoX.MasterInterruptMask:X4}/${thirtyTwoX.SlaveInterruptMask:X4} pendingIrq={thirtyTwoX.MasterSh2.PendingInterruptLevel}/{thirtyTwoX.SlaveSh2.PendingInterruptLevel} " +
+            $"bootPending={thirtyTwoX.BootRomHandshakePending} bootRead={thirtyTwoX.BootRomSignatureRead} bootLaunch={thirtyTwoX.BootRomLaunchPending} " +
+            $"fbNonzero={CountNonzeroBytes(thirtyTwoX.DisplayFrameBuffer):N0}/{CountNonzeroBytes(thirtyTwoX.DrawFrameBuffer):N0} " +
+            $"palNonzero={CountNonzeroBytes(thirtyTwoX.Palette):N0} " +
+            $"sh2Sched={machine.ThirtyTwoXScheduledInstructionRequests:N0} sh2Exec={machine.ThirtyTwoXExecutedInstructionSteps:N0} " +
+            $"master=${thirtyTwoX.MasterSh2.PC:X8} slave=${thirtyTwoX.SlaveSh2.PC:X8}");
+        Console.WriteLine($"32X sys={FormatThirtyTwoXWords(thirtyTwoX, system: true, 0x00, 0x40)}");
+        Console.WriteLine($"32X vdp={FormatThirtyTwoXWords(thirtyTwoX, system: false, 0x00, 0x10)}");
+        Console.WriteLine($"32X masterRegs={FormatSh2Registers(thirtyTwoX.MasterSh2)}");
+        Console.WriteLine($"32X slaveRegs={FormatSh2Registers(thirtyTwoX.SlaveSh2)}");
+        Console.WriteLine($"32X masterCode={FormatThirtyTwoXCodeWindow(thirtyTwoX, machine.Bus.Cartridge, thirtyTwoX.MasterSh2.PC)}");
+        Console.WriteLine($"32X slaveCode={FormatThirtyTwoXCodeWindow(thirtyTwoX, machine.Bus.Cartridge, thirtyTwoX.SlaveSh2.PC)}");
+    }
+
     Console.WriteLine(FormatState(machine));
     Console.WriteLine(FormatVdpState(machine.Vdp));
     if (traceCpu)
@@ -1235,7 +1643,7 @@ void RenderSequence(string romPath, string outputFolder, int startFrame, int end
             continue;
         }
 
-        byte[] framebuffer = machine.Vdp.RenderFrameRgb();
+        byte[] framebuffer = machine.RenderFrameRgb();
         string basePath = Path.Combine(fullOutputFolder, $"frame-{frame:000000}");
         WriteBmp(basePath + ".bmp", Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
         written++;
@@ -1270,7 +1678,7 @@ void TraceSprites(string romPath, int frames, int instructionsPerFrame, Func<int
     machine.Bus.Controller1.Pressed = GenesisButton.None;
     machine.Bus.Controller2.Pressed = GenesisButton.None;
 
-    _ = machine.Vdp.RenderFrameRgb();
+    _ = machine.RenderFrameRgb();
     Vdp vdp = machine.Vdp;
     ReadOnlySpan<byte> registers = vdp.Registers;
     int activeWidth = (registers[12] & 0x01) != 0 ? 320 : 256;
@@ -1460,7 +1868,7 @@ void RenderScriptedRomWithControllers(string romPath, string outputPath, int fra
 
     machine.Bus.Controller1.Pressed = GenesisButton.None;
     machine.Bus.Controller2.Pressed = GenesisButton.None;
-    byte[] framebuffer = machine.Vdp.RenderFrameRgb();
+    byte[] framebuffer = machine.RenderFrameRgb();
     int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
     WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
     WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
@@ -1801,7 +2209,7 @@ void RenderInputMovie(string romPath, string moviePath, string outputPath, int f
 
     machine.Bus.Controller1.Pressed = GenesisButton.None;
     machine.Bus.Controller2.Pressed = GenesisButton.None;
-    byte[] framebuffer = machine.Vdp.RenderFrameRgb();
+    byte[] framebuffer = machine.RenderFrameRgb();
     int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
     WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
     WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
@@ -1872,6 +2280,12 @@ void PrintCartridgeInfo(string romPath)
     Console.WriteLine($"Save hardware: {FormatSaveHardware(diagnostics)}");
     Console.WriteLine($"Bank-switch registers: {(diagnostics.UsesBankSwitchRegisters ? "expected" : "not expected")}");
     Console.WriteLine($"SVP coprocessor: {(diagnostics.HasSvp ? "yes" : "no")}");
+    Console.WriteLine($"32X hardware: {(diagnostics.Requires32X ? "required" : "not required")}");
+    if (diagnostics.Requires32X)
+    {
+        Console.WriteLine($"32X runtime pieces: {string.Join("; ", ThirtyTwoXHardwareProfile.RequiredSubsystems)}");
+    }
+
     if (diagnostics.HasUnsupportedHardware)
     {
         Console.WriteLine($"Unsupported hardware: {string.Join(", ", diagnostics.UnsupportedHardware)}");
@@ -1895,7 +2309,7 @@ void ScanCartridges(string romFolder, string outputCsv)
     int warnings = 0;
 
     using StreamWriter writer = new(outputCsv, false, Encoding.UTF8);
-    writer.WriteLine("rom,domestic,overseas,product,region,romSize,headerRomEnd,saveHardware,saveRange,saveLanes,eepromSize,bankSwitchRegisters,svp,unsupportedHardware,warnings");
+    writer.WriteLine("rom,domestic,overseas,product,region,romSize,headerRomEnd,saveHardware,saveRange,saveLanes,eepromSize,bankSwitchRegisters,svp,requires32x,unsupportedHardware,warnings");
     foreach (string file in files)
     {
         string relative = Path.GetRelativePath(fullRomFolder, file);
@@ -1924,6 +2338,7 @@ void ScanCartridges(string romFolder, string outputCsv)
                 diagnostics.EepromSize?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                 diagnostics.UsesBankSwitchRegisters ? "true" : "false",
                 diagnostics.HasSvp ? "true" : "false",
+                diagnostics.Requires32X ? "true" : "false",
                 Csv(string.Join("; ", diagnostics.UnsupportedHardware)),
                 Csv(string.Join("; ", diagnostics.Warnings.Concat(filenameWarnings).Distinct(StringComparer.Ordinal)))));
         }
@@ -1944,6 +2359,7 @@ void ScanCartridges(string romFolder, string outputCsv)
                 string.Empty,
                 "false",
                 "false",
+                "false",
                 string.Empty,
                 Csv(ex.Message)));
             warnings++;
@@ -1952,6 +2368,2045 @@ void ScanCartridges(string romFolder, string outputCsv)
 
     Console.WriteLine($"Scanned {files.Length:N0} ROM(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Save hardware: {saveHardware:N0}; bank switching expected: {bankSwitching:N0}; unsupported hardware: {unsupported:N0}; warnings: {warnings:N0}");
+}
+
+void TraceThirtyTwoXSh2(string romPath, int instructionLimit, string cpuName, uint? startPc)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    Sh2Cpu cpu = cpuName.Equals("slave", StringComparison.OrdinalIgnoreCase) ? device.SlaveSh2 : device.MasterSh2;
+    if (startPc is uint pc)
+    {
+        cpu.Reset(pc);
+    }
+
+    Console.WriteLine($"32X SH-2 trace: {Path.GetFullPath(romPath)}");
+    Console.WriteLine($"CPU: {(ReferenceEquals(cpu, device.SlaveSh2) ? "slave" : "master")}; limit: {instructionLimit:N0}; start PC=${cpu.PC:X8}");
+    int executed = 0;
+    try
+    {
+        while (!cpu.Halted && executed < instructionLimit)
+        {
+            cpu.Step();
+            executed++;
+        }
+
+        Console.WriteLine($"Completed {executed:N0} instruction(s). halted={(cpu.Halted ? "yes" : "no")} PC=${cpu.PC:X8} last=${cpu.LastOpcode:X4}@${cpu.LastOpcodePc:X8} cycles={cpu.Cycles:N0}");
+    }
+    catch (Sh2Exception ex)
+    {
+        Console.WriteLine($"Stopped after {executed:N0} instruction(s): {ex.Message}");
+        Console.WriteLine($"PC=${cpu.PC:X8} last=${cpu.LastOpcode:X4}@${cpu.LastOpcodePc:X8} R0=${cpu.R[0]:X8} R1=${cpu.R[1]:X8} R2=${cpu.R[2]:X8} R3=${cpu.R[3]:X8} R4=${cpu.R[4]:X8} R15=${cpu.R[15]:X8} SR=${cpu.SR:X8} PR=${cpu.PR:X8}");
+    }
+}
+
+void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int instructionsPerFrame, string cpuFilter, uint? pcStart, uint? pcEnd, int maxLines, int startFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    uint start = pcStart ?? 0;
+    uint end = pcEnd ?? uint.MaxValue;
+    if (end < start)
+    {
+        (start, end) = (end, start);
+    }
+
+    bool traceMaster = cpuFilter.Equals("both", StringComparison.OrdinalIgnoreCase) || cpuFilter.Equals("master", StringComparison.OrdinalIgnoreCase);
+    bool traceSlave = cpuFilter.Equals("both", StringComparison.OrdinalIgnoreCase) || cpuFilter.Equals("slave", StringComparison.OrdinalIgnoreCase);
+    int currentFrame = 0;
+    int sequence = 0;
+    bool limitReached = false;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,type,cpu,pc,opcode,nextPc,delaySlot,beforeCycles,cycles,stepCycles,masterCycle,scanline,lineCycle,beforeSr,beforeR0,beforeR1,beforeR2,beforeR3,beforeR4,beforeR5,beforeR6,beforeR7,beforeR8,beforeR9,beforeR10,beforeR11,beforeR12,beforeR13,beforeR14,beforeR15,sr,r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,beforePr,beforeGbr,beforeVbr,pr,gbr,vbr,interruptLevel,interruptVector,handlerPc,asm");
+
+    void WriteInstruction(Sh2Cpu.Sh2InstructionTrace trace)
+    {
+        if (limitReached || trace.Pc < start || trace.Pc > end)
+        {
+            return;
+        }
+
+        if (!ShouldTraceCpu(trace.Cpu))
+        {
+            return;
+        }
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            "instruction",
+            Csv(trace.Cpu),
+            $"${trace.Pc:X8}",
+            $"${trace.Opcode:X4}",
+            $"${trace.NextPc:X8}",
+            trace.DelaySlot ? "true" : "false",
+            trace.BeforeCycles.ToString(CultureInfo.InvariantCulture),
+            trace.Cycles.ToString(CultureInfo.InvariantCulture),
+            trace.StepCycles.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture),
+            $"${trace.BeforeSr:X8}",
+            $"${trace.BeforeR0:X8}",
+            $"${trace.BeforeR1:X8}",
+            $"${trace.BeforeR2:X8}",
+            $"${trace.BeforeR3:X8}",
+            $"${trace.BeforeR4:X8}",
+            $"${trace.BeforeR5:X8}",
+            $"${trace.BeforeR6:X8}",
+            $"${trace.BeforeR7:X8}",
+            $"${trace.BeforeR8:X8}",
+            $"${trace.BeforeR9:X8}",
+            $"${trace.BeforeR10:X8}",
+            $"${trace.BeforeR11:X8}",
+            $"${trace.BeforeR12:X8}",
+            $"${trace.BeforeR13:X8}",
+            $"${trace.BeforeR14:X8}",
+            $"${trace.BeforeR15:X8}",
+            $"${trace.Sr:X8}",
+            $"${trace.R0:X8}",
+            $"${trace.R1:X8}",
+            $"${trace.R2:X8}",
+            $"${trace.R3:X8}",
+            $"${trace.R4:X8}",
+            $"${trace.R5:X8}",
+            $"${trace.R6:X8}",
+            $"${trace.R7:X8}",
+            $"${trace.R8:X8}",
+            $"${trace.R9:X8}",
+            $"${trace.R10:X8}",
+            $"${trace.R11:X8}",
+            $"${trace.R12:X8}",
+            $"${trace.R13:X8}",
+            $"${trace.R14:X8}",
+            $"${trace.R15:X8}",
+            $"${trace.BeforePr:X8}",
+            $"${trace.BeforeGbr:X8}",
+            $"${trace.BeforeVbr:X8}",
+            $"${trace.Pr:X8}",
+            $"${trace.Gbr:X8}",
+            $"${trace.Vbr:X8}",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            Csv(DisassembleSh2(trace.Opcode, trace.Pc))));
+        if (sequence >= maxLines)
+        {
+            limitReached = true;
+            DisableObservers();
+        }
+    }
+
+    void WriteInterrupt(Sh2Cpu.Sh2InterruptTrace trace)
+    {
+        if (limitReached || !ShouldTraceCpu(trace.Cpu) || trace.HandlerPc < start || trace.HandlerPc > end)
+        {
+            return;
+        }
+
+        string[] columns = new string[58];
+        columns[0] = currentFrame.ToString(CultureInfo.InvariantCulture);
+        columns[1] = (++sequence).ToString(CultureInfo.InvariantCulture);
+        columns[2] = "interrupt";
+        columns[3] = Csv(trace.Cpu);
+        columns[31] = $"${trace.Sr:X8}";
+        columns[47] = $"${trace.R15:X8}";
+        columns[54] = trace.Level.ToString(CultureInfo.InvariantCulture);
+        columns[55] = trace.VectorNumber.ToString(CultureInfo.InvariantCulture);
+        columns[56] = $"${trace.HandlerPc:X8}";
+        writer.WriteLine(string.Join(',', columns));
+        if (sequence >= maxLines)
+        {
+            limitReached = true;
+            DisableObservers();
+        }
+    }
+
+    bool ShouldTraceCpu(string cpuName)
+    {
+        return traceMaster && cpuName.Contains("master", StringComparison.OrdinalIgnoreCase) ||
+            traceSlave && cpuName.Contains("slave", StringComparison.OrdinalIgnoreCase);
+    }
+
+    void DisableObservers()
+    {
+        device.MasterSh2.InstructionObserver = null;
+        device.SlaveSh2.InstructionObserver = null;
+        device.MasterSh2.InterruptObserver = null;
+        device.SlaveSh2.InterruptObserver = null;
+    }
+
+    device.MasterSh2.InstructionObserver = WriteInstruction;
+    device.SlaveSh2.InstructionObserver = WriteInstruction;
+    device.MasterSh2.InterruptObserver = WriteInterrupt;
+    device.SlaveSh2.InterruptObserver = WriteInterrupt;
+
+    int endFrame = startFrame + frames;
+    Console.WriteLine($"32X live SH-2 trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, cpu={cpuFilter}, pc=${start:X8}-${end:X8}");
+    for (currentFrame = 0; currentFrame < endFrame && !limitReached; currentFrame++)
+    {
+        try
+        {
+            if (currentFrame == 0 && startFrame > 0)
+            {
+                DisableObservers();
+            }
+
+            if (currentFrame == startFrame)
+            {
+                device.MasterSh2.InstructionObserver = WriteInstruction;
+                device.SlaveSh2.InstructionObserver = WriteInstruction;
+                device.MasterSh2.InterruptObserver = WriteInterrupt;
+                device.SlaveSh2.InterruptObserver = WriteInterrupt;
+            }
+
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            writer.WriteLine(string.Join(
+                ',',
+                currentFrame.ToString(CultureInfo.InvariantCulture),
+                (++sequence).ToString(CultureInfo.InvariantCulture),
+                "error",
+                Csv(ex.GetType().Name),
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                Csv(ex.Message)));
+            break;
+        }
+    }
+
+    DisableObservers();
+    Console.WriteLine($"Wrote {sequence:N0} SH-2 trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+}
+
+void TraceThirtyTwoXFillLoops(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    Dictionary<string, Queue<Sh2Cpu.Sh2InstructionTrace>> history = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["master"] = new Queue<Sh2Cpu.Sh2InstructionTrace>(4),
+        ["slave"] = new Queue<Sh2Cpu.Sh2InstructionTrace>(4),
+    };
+    Dictionary<FillLoopKey, FillLoopSummary> summaries = [];
+    int currentFrame = 0;
+
+    void Observe(Sh2Cpu.Sh2InstructionTrace trace)
+    {
+        string cpu = trace.Cpu.Contains("slave", StringComparison.OrdinalIgnoreCase) ? "slave" : "master";
+        Queue<Sh2Cpu.Sh2InstructionTrace> queue = history[cpu];
+        queue.Enqueue(trace);
+        while (queue.Count > 4)
+        {
+            queue.Dequeue();
+        }
+
+        if (currentFrame < startFrame || queue.Count < 4)
+        {
+            return;
+        }
+
+        Sh2Cpu.Sh2InstructionTrace[] recent = queue.ToArray();
+        Sh2Cpu.Sh2InstructionTrace store = recent[0];
+        Sh2Cpu.Sh2InstructionTrace add = recent[1];
+        Sh2Cpu.Sh2InstructionTrace dt = recent[2];
+        Sh2Cpu.Sh2InstructionTrace branch = recent[3];
+        if (!TryDecodeSh2WordStoreAddDtBfLoop(store.Opcode, add.Opcode, dt.Opcode, branch.Opcode, store.Pc, out int addressRegister, out int sourceRegister, out int countRegister, out int increment))
+        {
+            return;
+        }
+
+        uint address = GetBeforeRegister(store, addressRegister);
+        uint value = GetBeforeRegister(store, sourceRegister) & 0xFFFF;
+        uint countBefore = GetBeforeRegister(dt, countRegister);
+        uint countAfter = GetAfterRegister(dt, countRegister);
+        string target = ClassifySh2WriteAddress(address);
+        FillLoopKey key = new(currentFrame, cpu, store.Pc, target);
+        if (!summaries.TryGetValue(key, out FillLoopSummary? summary))
+        {
+            summary = new FillLoopSummary(key)
+            {
+                FirstMasterCycle = machine.Bus.CurrentMasterCycle,
+                FirstScanline = machine.Vdp.CurrentScanline,
+                FirstAddress = address,
+                FirstCount = countBefore,
+                Value = value,
+                Increment = increment,
+                AddressRegister = addressRegister,
+                SourceRegister = sourceRegister,
+                CountRegister = countRegister,
+            };
+            summaries.Add(key, summary);
+        }
+
+        summary.Hits++;
+        summary.LastMasterCycle = machine.Bus.CurrentMasterCycle;
+        summary.LastScanline = machine.Vdp.CurrentScanline;
+        summary.LastAddress = address;
+        summary.LastCount = countAfter;
+        summary.FrameBufferControl = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+        summary.BitmapMode = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset);
+        summary.DrawFrameBufferIndex = device.DrawFrameBufferIndex;
+        summary.DisplayFrameBufferIndex = device.DisplayFrameBufferIndex;
+        summary.SwapPending = device.FrameBufferSwapPending;
+        summary.DeniedFrameBufferAccessCount = device.DeniedFrameBufferAccessCount;
+        summary.FrameBufferByteWriteCount = device.FrameBufferByteWriteCount;
+    }
+
+    device.MasterSh2.InstructionObserver = Observe;
+    device.SlaveSh2.InstructionObserver = Observe;
+    Console.WriteLine($"32X fill-loop trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}");
+    for (currentFrame = 0; currentFrame < frames; currentFrame++)
+    {
+        try
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            Console.WriteLine($"Stopped at frame {currentFrame:N0}: {ex.GetType().Name}: {ex.Message}");
+            break;
+        }
+    }
+
+    device.MasterSh2.InstructionObserver = null;
+    device.SlaveSh2.InstructionObserver = null;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,cpu,loopPc,target,hits,firstCycle,lastCycle,firstScanline,lastScanline,firstAddress,lastAddress,value,countFirst,countLast,increment,addressRegister,sourceRegister,countRegister,fbctl,bitmapMode,drawFb,displayFb,swapPending,deniedFbAccess,fbBytes");
+    foreach (FillLoopSummary summary in summaries.Values.OrderBy(item => item.Key.Frame).ThenBy(item => item.Key.Cpu).ThenBy(item => item.Key.LoopPc))
+    {
+        writer.WriteLine(summary.ToCsv());
+    }
+
+    Console.WriteLine($"Wrote {summaries.Count:N0} fill-loop summary row(s) to {Path.GetFullPath(outputCsv)}");
+}
+
+void TraceThirtyTwoXRunlengthList(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    Dictionary<string, HashSet<uint>> seenNodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["master"] = [],
+        ["slave"] = [],
+    };
+    Dictionary<string, uint> lastNode = new(StringComparer.OrdinalIgnoreCase);
+    int currentFrame = 0;
+    int sequence = 0;
+    bool limitReached = false;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,cpu,pc,half,masterCycle,scanline,lineCycle,threshold,node,next,value,newNode,r1,r2,r3,r4,current,oldPrevious,writeNewNext,writeNewPrev,writeOldPrevNext,writeCurrentPrev,match,completed,noOp,repeated,sameAsPrevious,validNode,validNext,validNewNode,sdramOffset,nextOffset,newNodeOffset,sr,asm");
+
+    void Observe(Sh2Cpu.Sh2LinkedListTrace trace)
+    {
+        if (limitReached || currentFrame < startFrame)
+        {
+            return;
+        }
+
+        string cpu = trace.Cpu.Contains("slave", StringComparison.OrdinalIgnoreCase) ? "slave" : "master";
+        uint threshold = trace.Threshold;
+        uint node = trace.Node;
+        uint next = trace.Next;
+        uint value = trace.Value;
+        uint newNode = trace.NewNode;
+        bool match = trace.Match;
+        bool repeated = !seenNodes[cpu].Add(node);
+        bool sameAsPrevious = lastNode.TryGetValue(cpu, out uint previousNode) && previousNode == node;
+        lastNode[cpu] = node;
+        bool validNode = TryMapThirtyTwoXSdramMirror(node, out int sdramOffset);
+        bool validNext = TryMapThirtyTwoXSdramMirror(next, out int nextOffset);
+        bool validNewNode = TryMapThirtyTwoXSdramMirror(newNode, out int newNodeOffset);
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            Csv(cpu),
+            $"${trace.Pc:X8}",
+            trace.Half,
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture),
+            $"${threshold:X8}",
+            $"${node:X8}",
+            $"${next:X8}",
+            $"${value:X8}",
+            $"${newNode:X8}",
+            $"${trace.RegisterR1:X8}",
+            $"${trace.RegisterR2:X8}",
+            $"${trace.RegisterR3:X8}",
+            $"${trace.RegisterR4:X8}",
+            $"${trace.Current:X8}",
+            $"${trace.OldPrevious:X8}",
+            $"${trace.WriteNewNext:X8}",
+            $"${trace.WriteNewPrev:X8}",
+            $"${trace.WriteOldPrevNext:X8}",
+            $"${trace.WriteCurrentPrev:X8}",
+            match ? "true" : "false",
+            trace.Completed ? "true" : "false",
+            trace.NoOp ? "true" : "false",
+            repeated ? "true" : "false",
+            sameAsPrevious ? "true" : "false",
+            validNode ? "true" : "false",
+            validNext ? "true" : "false",
+            validNewNode ? "true" : "false",
+            validNode ? $"${sdramOffset:X5}" : string.Empty,
+            validNext ? $"${nextOffset:X5}" : string.Empty,
+            validNewNode ? $"${newNodeOffset:X5}" : string.Empty,
+            string.Empty,
+            Csv(trace.Half == "first" ? "CMP/GE R0,R3; BT" : "CMP/GE R0,R3; BF")));
+
+        if (sequence >= maxLines)
+        {
+            limitReached = true;
+            DisableObservers();
+        }
+    }
+
+    void DisableObservers()
+    {
+        device.Sh2LinkedListObserver = null;
+    }
+
+    device.Sh2LinkedListObserver = Observe;
+
+    Console.WriteLine($"32X Runlength list trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, maxLines={maxLines:N0}");
+    for (currentFrame = 0; currentFrame < frames && !limitReached; currentFrame++)
+    {
+        try
+        {
+            if (currentFrame == 0 && startFrame > 0)
+            {
+                DisableObservers();
+            }
+
+            if (currentFrame == startFrame)
+            {
+                device.Sh2LinkedListObserver = Observe;
+            }
+
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            writer.WriteLine(string.Join(
+                ',',
+                currentFrame.ToString(CultureInfo.InvariantCulture),
+                (++sequence).ToString(CultureInfo.InvariantCulture),
+                Csv(ex.GetType().Name),
+                string.Empty,
+                "error",
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                Csv(ex.Message)));
+            break;
+        }
+    }
+
+    DisableObservers();
+    Console.WriteLine($"Wrote {sequence:N0} Runlength list row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+}
+
+void TraceThirtyTwoXRunlengthRechain(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    int currentFrame = 0;
+    int sequence = 0;
+    bool limitReached = false;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,cpu,pc,phase,masterCycle,scanline,lineCycle,current,previous,next,currentValue,tail,insertPrevious,insertNext,insertValue,writePreviousNext,writeNextPrevious,writeCurrentPrevious,writeCurrentNext,match,currentOffset,previousOffset,nextOffset,tailOffset,insertPreviousOffset,insertNextOffset");
+
+    void Observe(Sh2Cpu.Sh2RechainTrace trace)
+    {
+        if (limitReached || currentFrame < startFrame)
+        {
+            return;
+        }
+
+        string cpu = trace.Cpu.Contains("slave", StringComparison.OrdinalIgnoreCase) ? "slave" : "master";
+        bool validCurrent = TryMapThirtyTwoXSdramMirror(trace.Current, out int currentOffset);
+        bool validPrevious = TryMapThirtyTwoXSdramMirror(trace.Previous, out int previousOffset);
+        bool validNext = TryMapThirtyTwoXSdramMirror(trace.Next, out int nextOffset);
+        bool validTail = TryMapThirtyTwoXSdramMirror(trace.Tail, out int tailOffset);
+        bool validInsertPrevious = TryMapThirtyTwoXSdramMirror(trace.InsertPrevious, out int insertPreviousOffset);
+        bool validInsertNext = TryMapThirtyTwoXSdramMirror(trace.InsertNext, out int insertNextOffset);
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            Csv(cpu),
+            $"${trace.Pc:X8}",
+            Csv(trace.Phase),
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture),
+            $"${trace.Current:X8}",
+            $"${trace.Previous:X8}",
+            $"${trace.Next:X8}",
+            $"${trace.CurrentValue:X8}",
+            $"${trace.Tail:X8}",
+            $"${trace.InsertPrevious:X8}",
+            $"${trace.InsertNext:X8}",
+            $"${trace.InsertValue:X8}",
+            $"${trace.WritePreviousNext:X8}",
+            $"${trace.WriteNextPrevious:X8}",
+            $"${trace.WriteCurrentPrevious:X8}",
+            $"${trace.WriteCurrentNext:X8}",
+            trace.Match ? "true" : "false",
+            validCurrent ? $"${currentOffset:X5}" : string.Empty,
+            validPrevious ? $"${previousOffset:X5}" : string.Empty,
+            validNext ? $"${nextOffset:X5}" : string.Empty,
+            validTail ? $"${tailOffset:X5}" : string.Empty,
+            validInsertPrevious ? $"${insertPreviousOffset:X5}" : string.Empty,
+            validInsertNext ? $"${insertNextOffset:X5}" : string.Empty));
+
+        if (sequence >= maxLines)
+        {
+            limitReached = true;
+            DisableObservers();
+        }
+    }
+
+    void DisableObservers()
+    {
+        device.Sh2RechainObserver = null;
+    }
+
+    device.Sh2RechainObserver = Observe;
+
+    Console.WriteLine($"32X Runlength rechain trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, maxLines={maxLines:N0}");
+    for (currentFrame = 0; currentFrame < frames && !limitReached; currentFrame++)
+    {
+        try
+        {
+            if (currentFrame == 0 && startFrame > 0)
+            {
+                DisableObservers();
+            }
+
+            if (currentFrame == startFrame)
+            {
+                device.Sh2RechainObserver = Observe;
+            }
+
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            writer.WriteLine(string.Join(
+                ',',
+                currentFrame.ToString(CultureInfo.InvariantCulture),
+                (++sequence).ToString(CultureInfo.InvariantCulture),
+                Csv(ex.GetType().Name),
+                string.Empty,
+                "error",
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                Csv(ex.Message)));
+            break;
+        }
+    }
+
+    DisableObservers();
+    Console.WriteLine($"Wrote {sequence:N0} Runlength rechain row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+}
+
+static bool TryMapThirtyTwoXSdramMirror(uint address, out int offset)
+{
+    if (address is > 0 and < ThirtyTwoXHardwareProfile.SdramBytes)
+    {
+        offset = (int)address;
+        return true;
+    }
+
+    if ((address & 0xFE00_0000u) is 0x0600_0000u or 0x2600_0000u or 0x0C00_0000u)
+    {
+        offset = (int)(address & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
+        return true;
+    }
+
+    offset = 0;
+    return false;
+}
+
+static bool TryDecodeSh2WordStoreAddDtBfLoop(ushort storeOpcode, ushort addOpcode, ushort dtOpcode, ushort branchOpcode, uint storePc, out int addressRegister, out int sourceRegister, out int countRegister, out int increment)
+{
+    addressRegister = 0;
+    sourceRegister = 0;
+    countRegister = 0;
+    increment = 0;
+    if ((storeOpcode & 0xF00F) != 0x2001 ||
+        (addOpcode & 0xF000) != 0x7000 ||
+        (dtOpcode & 0xF0FF) != 0x4010 ||
+        (branchOpcode & 0xFF00) != 0x8B00)
+    {
+        return false;
+    }
+
+    addressRegister = (storeOpcode >> 8) & 0x0F;
+    sourceRegister = (storeOpcode >> 4) & 0x0F;
+    countRegister = (dtOpcode >> 8) & 0x0F;
+    if (((addOpcode >> 8) & 0x0F) != addressRegister || countRegister == addressRegister)
+    {
+        return false;
+    }
+
+    int displacement = (sbyte)branchOpcode;
+    uint target = unchecked((uint)((int)(storePc + 10) + (displacement * 2)));
+    if (target != storePc)
+    {
+        return false;
+    }
+
+    increment = (sbyte)addOpcode;
+    return true;
+}
+
+static string ClassifySh2WriteAddress(uint address)
+{
+    uint window = address & 0xFE00_0000u;
+    if (window is 0x0400_0000u or 0x2400_0000u)
+    {
+        return (address & 0x0002_0000u) != 0 ? "overwrite" : "framebuffer";
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramStart and < ThirtyTwoXHardwareProfile.Sh2SdramStart + ThirtyTwoXHardwareProfile.SdramBytes ||
+        address is >= ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart and < ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart + ThirtyTwoXHardwareProfile.SdramBytes)
+    {
+        return "sdram";
+    }
+
+    return "other";
+}
+
+static uint GetBeforeRegister(Sh2Cpu.Sh2InstructionTrace trace, int register)
+{
+    return register switch
+    {
+        0 => trace.BeforeR0,
+        1 => trace.BeforeR1,
+        2 => trace.BeforeR2,
+        3 => trace.BeforeR3,
+        4 => trace.BeforeR4,
+        5 => trace.BeforeR5,
+        6 => trace.BeforeR6,
+        7 => trace.BeforeR7,
+        8 => trace.BeforeR8,
+        9 => trace.BeforeR9,
+        10 => trace.BeforeR10,
+        11 => trace.BeforeR11,
+        12 => trace.BeforeR12,
+        13 => trace.BeforeR13,
+        14 => trace.BeforeR14,
+        15 => trace.BeforeR15,
+        _ => 0,
+    };
+}
+
+static uint GetAfterRegister(Sh2Cpu.Sh2InstructionTrace trace, int register)
+{
+    return register switch
+    {
+        0 => trace.R0,
+        1 => trace.R1,
+        2 => trace.R2,
+        3 => trace.R3,
+        4 => trace.R4,
+        5 => trace.R5,
+        6 => trace.R6,
+        7 => trace.R7,
+        8 => trace.R8,
+        9 => trace.R9,
+        10 => trace.R10,
+        11 => trace.R11,
+        12 => trace.R12,
+        13 => trace.R13,
+        14 => trace.R14,
+        15 => trace.R15,
+        _ => 0,
+    };
+}
+
+void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instructionsPerFrame, uint? addressStart, uint? addressEnd, int maxLines, bool writesOnly, bool exactAddressMatch, int startFrame, bool changesOnly = false, bool nonzeroOnly = false)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+    uint start = addressStart ?? 0;
+    uint end = addressEnd ?? uint.MaxValue;
+    if (end < start)
+    {
+        (start, end) = (end, start);
+    }
+
+    bool AddressMatches(uint address)
+    {
+        if (exactAddressMatch)
+        {
+            return address >= start && address <= end;
+        }
+
+        uint normalized = address & 0x0FFF_FFFFu;
+        uint normalizedStart = start & 0x0FFF_FFFFu;
+        uint normalizedEnd = end & 0x0FFF_FFFFu;
+        return address >= start && address <= end || normalized >= normalizedStart && normalized <= normalizedEnd;
+    }
+
+    int currentFrame = 0;
+    int lines = 0;
+    Dictionary<string, ushort> lastValues = new(StringComparer.Ordinal);
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,source,operation,address,value,masterPc,slavePc,m68kPc,masterCycle,scanline,lineCycle");
+    void WriteRow(string source, string operation, uint address, ushort value)
+    {
+        if (lines >= maxLines)
+        {
+            return;
+        }
+
+        if (writesOnly && !IsTraceWriteOperation(operation))
+        {
+            return;
+        }
+
+        if (nonzeroOnly && value == 0)
+        {
+            return;
+        }
+
+        if (changesOnly)
+        {
+            string key = string.Concat(source, "|", operation, "|", address.ToString("X8", CultureInfo.InvariantCulture));
+            if (lastValues.TryGetValue(key, out ushort previous) && previous == value)
+            {
+                return;
+            }
+
+            lastValues[key] = value;
+        }
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            source,
+            operation,
+            $"${address:X8}",
+            $"${value:X4}",
+            $"${device.MasterSh2.PC:X8}",
+            $"${device.SlaveSh2.PC:X8}",
+            $"${machine.MainCpu.PC:X8}",
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    device.SystemRegisterAccessObserver = access =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        uint address = access.Source == "M68K"
+            ? ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + access.Offset
+            : ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + access.Offset;
+        if (AddressMatches(address))
+        {
+            WriteRow(access.Source, access.Operation, address, access.Value);
+        }
+    };
+    device.VdpRegisterAccessObserver = access =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        uint address = ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + access.Offset;
+        if (AddressMatches(address))
+        {
+            WriteRow(access.Source, access.Operation, address, access.Value);
+        }
+    };
+    device.Sh2MemoryAccessTraceFilter = AddressMatches;
+    device.Sh2MemoryAccessObserver = access =>
+    {
+        if (currentFrame >= startFrame)
+        {
+            WriteRow(access.Source, access.Operation, access.Address, access.Value);
+        }
+    };
+    device.FrameBufferAccessObserver = access =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        uint baseAddress = access.Operation.Contains("OW", StringComparison.Ordinal)
+            ? ThirtyTwoXHardwareProfile.Sh2OverwriteImageStart
+            : ThirtyTwoXHardwareProfile.Sh2FrameBufferStart;
+        uint address = baseAddress + access.Offset;
+        if (AddressMatches(address))
+        {
+            WriteRow(access.Source, access.Operation, address, access.Value);
+        }
+    };
+
+    string modeName = changesOnly ? "changes-exact" : nonzeroOnly ? "nonzero-exact" : exactAddressMatch ? (writesOnly ? "writes-exact" : "exact") : (writesOnly ? "writes" : "all");
+    int endFrame = startFrame + frames;
+    Console.WriteLine($"32X bus trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, address=${start:X8}-${end:X8}, mode={modeName}");
+    for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    device.SystemRegisterAccessObserver = null;
+    device.SystemRegisterWriteObserver = null;
+    device.VdpRegisterAccessObserver = null;
+    device.Sh2MemoryAccessObserver = null;
+    device.Sh2MemoryAccessTraceFilter = null;
+    device.FrameBufferAccessObserver = null;
+    Console.WriteLine($"Wrote {lines:N0} 32X bus trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
+void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines, ushort offsetStart, ushort offsetEnd)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    if (offsetEnd < offsetStart)
+    {
+        (offsetStart, offsetEnd) = (offsetEnd, offsetStart);
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,source,operation,offset,value,m68kAddress,sh2Address,masterPc,slavePc,m68kPc,masterCycles,slaveCycles,masterCycle,scanline,lineCycle");
+
+    void WriteRow(ThirtyTwoXDevice.SystemRegisterAccessTrace access)
+    {
+        if (currentFrame < startFrame ||
+            lines >= maxLines ||
+            access.Offset < offsetStart ||
+            access.Offset > offsetEnd)
+        {
+            return;
+        }
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            access.Source,
+            access.Operation,
+            $"${access.Offset:X2}",
+            $"${access.Value:X4}",
+            $"${ThirtyTwoXHardwareProfile.M68kSystemRegister(access.Offset):X8}",
+            $"${ThirtyTwoXHardwareProfile.Sh2SystemRegister(access.Offset):X8}",
+            $"${device.MasterSh2.PC:X8}",
+            $"${device.SlaveSh2.PC:X8}",
+            $"${machine.MainCpu.PC:X8}",
+            device.MasterSh2.Cycles.ToString(CultureInfo.InvariantCulture),
+            device.SlaveSh2.Cycles.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    device.SystemRegisterAccessObserver = WriteRow;
+    int endFrame = startFrame + frames;
+    Console.WriteLine($"32X communication trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, offsets=${offsetStart:X2}-${offsetEnd:X2}");
+    for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    device.SystemRegisterAccessObserver = null;
+    Console.WriteLine($"Wrote {lines:N0} 32X communication trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
+static bool IsTraceWriteOperation(string operation)
+{
+    return operation.StartsWith('W') ||
+        operation.StartsWith("OW", StringComparison.Ordinal) ||
+        operation.StartsWith("AF", StringComparison.Ordinal) ||
+        operation.StartsWith("DENY-W", StringComparison.Ordinal) ||
+        operation.StartsWith("DENY-OW", StringComparison.Ordinal);
+}
+
+void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int instructionsPerFrame, int history)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    history = Math.Clamp(history, 16, 250_000);
+    Sh2FaultTraceRow[] rows = new Sh2FaultTraceRow[history];
+    int sequence = 0;
+    int rowCount = 0;
+    int frame = 0;
+    int lastMasterUnhandled = 0;
+    int lastSlaveUnhandled = 0;
+    bool faultSeen = false;
+    string faultDetail = string.Empty;
+
+    void Record(Sh2Cpu.Sh2InstructionTrace trace)
+    {
+        if (device.MasterSh2.UnhandledOpcodeCount != lastMasterUnhandled ||
+            device.SlaveSh2.UnhandledOpcodeCount != lastSlaveUnhandled)
+        {
+            faultSeen = true;
+            faultDetail = device.MasterSh2.UnhandledOpcodeCount != lastMasterUnhandled
+                ? $"master ${device.MasterSh2.LastUnhandledOpcode:X4}@${device.MasterSh2.LastUnhandledOpcodePc:X8}"
+                : $"slave ${device.SlaveSh2.LastUnhandledOpcode:X4}@${device.SlaveSh2.LastUnhandledOpcodePc:X8}";
+            throw new InvalidOperationException(faultDetail);
+        }
+
+        rows[sequence % rows.Length] = new Sh2FaultTraceRow(
+            frame,
+            sequence + 1,
+            trace.Cpu,
+            trace.Pc,
+            trace.Opcode,
+            trace.NextPc,
+            trace.Sr,
+            trace.R0,
+            trace.R1,
+            trace.R2,
+            trace.R3,
+            trace.R4,
+            trace.R5,
+            trace.R6,
+            trace.R7,
+            trace.R15);
+        sequence++;
+        rowCount = Math.Min(rowCount + 1, rows.Length);
+    }
+
+    device.MasterSh2.InstructionObserver = Record;
+    device.SlaveSh2.InstructionObserver = Record;
+    Console.WriteLine($"32X SH-2 fault trace: {Path.GetFileName(romPath)}, frames={frames:N0}, budget={instructionsPerFrame:N0}, history={history:N0}");
+    for (frame = 0; frame < frames && !faultSeen; frame++)
+    {
+        lastMasterUnhandled = device.MasterSh2.UnhandledOpcodeCount;
+        lastSlaveUnhandled = device.SlaveSh2.UnhandledOpcodeCount;
+        try
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            faultSeen = true;
+            faultDetail = ex.Message;
+        }
+    }
+
+    device.MasterSh2.InstructionObserver = null;
+    device.SlaveSh2.InstructionObserver = null;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,cpu,pc,opcode,nextPc,sr,r0,r1,r2,r3,r4,r5,r6,r7,r15");
+    int first = sequence - rowCount;
+    for (int i = 0; i < rowCount; i++)
+    {
+        Sh2FaultTraceRow row = rows[(first + i) % rows.Length];
+        writer.WriteLine(string.Join(
+            ',',
+            row.Frame.ToString(CultureInfo.InvariantCulture),
+            row.Sequence.ToString(CultureInfo.InvariantCulture),
+            Csv(row.Cpu),
+            $"${row.Pc:X8}",
+            $"${row.Opcode:X4}",
+            $"${row.NextPc:X8}",
+            $"${row.Sr:X8}",
+            $"${row.R0:X8}",
+            $"${row.R1:X8}",
+            $"${row.R2:X8}",
+            $"${row.R3:X8}",
+            $"${row.R4:X8}",
+            $"${row.R5:X8}",
+            $"${row.R6:X8}",
+            $"${row.R7:X8}",
+            $"${row.R15:X8}"));
+    }
+
+    Console.WriteLine($"Fault: {(faultSeen ? faultDetail : "not observed")}");
+    Console.WriteLine($"Wrote {rowCount:N0} SH-2 trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8} unhandled={device.MasterSh2.UnhandledOpcodeCount}; slave PC=${device.SlaveSh2.PC:X8} unhandled={device.SlaveSh2.UnhandledOpcodeCount}");
+}
+
+void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uint address, int words)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
+    Console.WriteLine($"Inspected {Path.GetFileName(romPath)} after {frames} frame(s)");
+    Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8} GBR=${device.MasterSh2.GBR:X8} VBR=${device.MasterSh2.VBR:X8} PR=${device.MasterSh2.PR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8} GBR=${device.SlaveSh2.GBR:X8} VBR=${device.SlaveSh2.VBR:X8} PR=${device.SlaveSh2.PR:X8}");
+    Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
+    Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
+    for (int i = 0; i < words; i += 8)
+    {
+        uint lineAddress = address + (uint)(i * 2);
+        StringBuilder line = new();
+        line.Append('$');
+        line.Append(lineAddress.ToString("X8", CultureInfo.InvariantCulture));
+        line.Append(':');
+        for (int j = 0; j < 8 && i + j < words; j++)
+        {
+            uint wordAddress = lineAddress + (uint)(j * 2);
+            line.Append(' ');
+            line.Append(ReadThirtyTwoXDebugWord(device, cartridge, wordAddress).ToString("X4", CultureInfo.InvariantCulture));
+        }
+
+        Console.WriteLine(line.ToString());
+    }
+}
+
+void InspectThirtyTwoXCache(string romPath, int frames, int instructionsPerFrame, uint address)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    Console.WriteLine($"Inspected SH-2 cache for {Path.GetFileName(romPath)} after {frames} frame(s)");
+    Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+    Console.WriteLine(device.FormatSh2CacheLineDebug(address, cpuIndex: 0));
+    Console.WriteLine(device.FormatSh2CacheLineDebug(address, cpuIndex: 1));
+}
+
+void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame, int line, int maxSpans)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    maxSpans = Math.Max(1, maxSpans);
+    ReadOnlySpan<byte> source = device.DisplayFrameBuffer;
+    if (line < 0)
+    {
+        Console.WriteLine($"RLE summary: {Path.GetFileName(romPath)} frame={frames}");
+        Console.WriteLine($"mode={device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} fbctl=${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} draw={device.DrawFrameBufferIndex} display={device.DisplayFrameBufferIndex}");
+
+        SummarizeRleBuffer("display", device.DisplayFrameBuffer);
+        SummarizeRleBuffer("draw", device.DrawFrameBuffer);
+        return;
+
+        void SummarizeRleBuffer(string label, ReadOnlySpan<byte> buffer)
+        {
+            int populatedLines = 0;
+            int totalSpans = 0;
+            int totalColored = 0;
+            Console.WriteLine($"[{label}]");
+            for (int y = 0; y < Vdp.ScreenHeight; y++)
+            {
+                int pointer = ReadBigEndianWordSpan(buffer, y * 2) * 2;
+                if (pointer < 0 || pointer >= buffer.Length)
+                {
+                    continue;
+                }
+
+                int summaryX = 0;
+                int spans = 0;
+                int colored = 0;
+                int summarySourceIndex = pointer;
+                int firstColoredX = -1;
+                int lastColoredX = -1;
+                while (summaryX < Vdp.ScreenWidth && summarySourceIndex + 1 < buffer.Length && spans < 256)
+                {
+                    ushort span = ReadBigEndianWordSpan(buffer, summarySourceIndex);
+                    summarySourceIndex += 2;
+                    int runLength = (span >> 8) + 1;
+                    int paletteIndex = span & 0x00FF;
+                    ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
+                    if (color != 0)
+                    {
+                        int runEnd = Math.Min(Vdp.ScreenWidth - 1, summaryX + runLength - 1);
+                        firstColoredX = firstColoredX < 0 ? summaryX : firstColoredX;
+                        lastColoredX = Math.Max(lastColoredX, runEnd);
+                        colored += Math.Max(0, runEnd - summaryX + 1);
+                    }
+
+                    summaryX += runLength;
+                    spans++;
+                }
+
+                if (colored > 0)
+                {
+                    populatedLines++;
+                    totalSpans += spans;
+                    totalColored += colored;
+                    Console.WriteLine($"line={y,3} ptr=${pointer:X5} spans={spans,3} colored={colored,3} x={firstColoredX,3}-{lastColoredX,3}");
+                }
+            }
+
+            Console.WriteLine($"[{label}] populatedLines={populatedLines} totalSpans={totalSpans} totalColored={totalColored}");
+        }
+    }
+
+    line = Math.Clamp(line, 0, Vdp.ScreenHeight - 1);
+    int lineTableOffset = line * 2;
+    int lineAddress = ReadBigEndianWordSpan(source, lineTableOffset) * 2;
+
+    Console.WriteLine($"RLE dump: {Path.GetFileName(romPath)} frame={frames} line={line}");
+    Console.WriteLine($"mode={device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} fbctl=${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} draw={device.DrawFrameBufferIndex} display={device.DisplayFrameBufferIndex} linePtr=${lineAddress:X5}");
+    if (lineAddress < 0 || lineAddress >= source.Length)
+    {
+        Console.WriteLine("line pointer is outside the display frame buffer");
+        return;
+    }
+
+    int x = 0;
+    int sourceIndex = lineAddress;
+    for (int i = 0; i < maxSpans && x < Vdp.ScreenWidth && sourceIndex + 1 < source.Length; i++)
+    {
+        ushort span = ReadBigEndianWordSpan(source, sourceIndex);
+        int runLength = (span >> 8) + 1;
+        int paletteIndex = span & 0x00FF;
+        Console.WriteLine($"{i,3}: addr=${sourceIndex:X5} word=${span:X4} x={x,3}-{Math.Min(Vdp.ScreenWidth - 1, x + runLength - 1),3} len={runLength,3} pal=${paletteIndex:X2}");
+        sourceIndex += 2;
+        x += runLength;
+    }
+
+    Console.WriteLine($"decodedX={x} next=${sourceIndex:X5}");
+}
+
+void DumpThirtyTwoXNodeRecords(string romPath, int frames, int instructionsPerFrame, uint address, int count, string mode)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    count = Math.Clamp(count, 1, 4096);
+    bool followNext = mode.Equals("next", StringComparison.OrdinalIgnoreCase);
+    bool followPrev = mode.Equals("prev", StringComparison.OrdinalIgnoreCase);
+    uint current = address;
+    HashSet<uint> visited = [];
+
+    Console.WriteLine($"32X node dump: {Path.GetFileName(romPath)} frame={frames} mode={mode} start=${address:X8} count={count}");
+    Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+    Console.WriteLine("idx,address,offset,prev,next,value,w0C,w10,w14,w18,w1C,w20,w24,note");
+
+    for (int i = 0; i < count; i++)
+    {
+        if (!TryMapThirtyTwoXSdramMirror(current, out int offset) || offset + 0x27 >= device.Sdram.Length)
+        {
+            Console.WriteLine($"{i},${current:X8},,,,,,,,,,,,outside-sdram");
+            break;
+        }
+
+        uint prev = ReadBigEndianLongSpan(device.Sdram, offset);
+        uint next = ReadBigEndianLongSpan(device.Sdram, offset + 4);
+        uint value = ReadBigEndianLongSpan(device.Sdram, offset + 8);
+        uint w0C = ReadBigEndianLongSpan(device.Sdram, offset + 0x0C);
+        uint w10 = ReadBigEndianLongSpan(device.Sdram, offset + 0x10);
+        uint w14 = ReadBigEndianLongSpan(device.Sdram, offset + 0x14);
+        uint w18 = ReadBigEndianLongSpan(device.Sdram, offset + 0x18);
+        uint w1C = ReadBigEndianLongSpan(device.Sdram, offset + 0x1C);
+        uint w20 = ReadBigEndianLongSpan(device.Sdram, offset + 0x20);
+        uint w24 = ReadBigEndianLongSpan(device.Sdram, offset + 0x24);
+        string note = visited.Add(current) ? string.Empty : "cycle";
+
+        Console.WriteLine(string.Join(
+            ',',
+            i.ToString(CultureInfo.InvariantCulture),
+            $"${current:X8}",
+            $"${offset:X5}",
+            $"${prev:X8}",
+            $"${next:X8}",
+            $"${value:X8}",
+            $"${w0C:X8}",
+            $"${w10:X8}",
+            $"${w14:X8}",
+            $"${w18:X8}",
+            $"${w1C:X8}",
+            $"${w20:X8}",
+            $"${w24:X8}",
+            note));
+
+        if (!string.IsNullOrEmpty(note))
+        {
+            break;
+        }
+
+        if (followNext)
+        {
+            current = next;
+        }
+        else if (followPrev)
+        {
+            current = prev;
+        }
+        else
+        {
+            current += 0x28;
+        }
+    }
+}
+
+void TraceThirtyTwoX(string romPath, string outputCsv, int frames, int instructionsPerFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+    int frameCommWrites = 0;
+    int frameCommAccesses = 0;
+    int frameMailboxAccesses = 0;
+    int frameMailboxWrites = 0;
+    int frameFrameBufferAccesses = 0;
+    int frameFrameBufferLineTableWrites = 0;
+    int frameFrameBufferPixelWrites = 0;
+    int frameFrameBufferOverwriteWrites = 0;
+    int frameFrameBufferNonzeroWrites = 0;
+    int frameFrameBufferNonzeroPixelWrites = 0;
+    int frameFrameBufferFirstNonzeroPixelOffset = -1;
+    int frameFrameBufferLastNonzeroPixelOffset = -1;
+    string lastCommWrite = string.Empty;
+    string lastCommAccess = string.Empty;
+    string lastMailboxAccess = string.Empty;
+    string lastMailboxWrite = string.Empty;
+    string lastFrameBufferAccess = string.Empty;
+    device.SystemRegisterWriteObserver = write =>
+    {
+        if (write.Offset is >= ThirtyTwoXHardwareProfile.CommunicationPortOffset and < ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)
+        {
+            frameCommWrites++;
+            lastCommWrite = $"{write.Source} ${write.Offset:X2}=${write.Value:X2}";
+        }
+    };
+    device.SystemRegisterAccessObserver = access =>
+    {
+        if (access.Offset is >= ThirtyTwoXHardwareProfile.CommunicationPortOffset and < ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)
+        {
+            frameCommAccesses++;
+            lastCommAccess = $"{access.Source} {access.Operation} ${access.Offset:X2}=${access.Value:X4}";
+        }
+    };
+    device.Sh2MemoryAccessTraceFilter = address =>
+    {
+        uint normalized = address & 0x0FFF_FFFFu;
+        return normalized is >= 0x0600_1780u and <= 0x0600_17AFu;
+    };
+    device.Sh2MemoryAccessObserver = access =>
+    {
+        frameMailboxAccesses++;
+        lastMailboxAccess = $"{access.Source} {access.Operation} ${access.Address:X8}=${access.Value:X4}";
+        if (access.Operation.StartsWith('W'))
+        {
+            frameMailboxWrites++;
+            lastMailboxWrite = lastMailboxAccess;
+        }
+    };
+    device.FrameBufferAccessObserver = access =>
+    {
+        frameFrameBufferAccesses++;
+        if (access.Offset < 0x200)
+        {
+            frameFrameBufferLineTableWrites++;
+        }
+        else
+        {
+            frameFrameBufferPixelWrites++;
+        }
+
+        if (access.Value != 0)
+        {
+            frameFrameBufferNonzeroWrites++;
+            if (access.Offset >= 0x200)
+            {
+                frameFrameBufferNonzeroPixelWrites++;
+                int offset = (int)Math.Min(access.Offset, int.MaxValue);
+                if (frameFrameBufferFirstNonzeroPixelOffset < 0)
+                {
+                    frameFrameBufferFirstNonzeroPixelOffset = offset;
+                }
+
+                frameFrameBufferLastNonzeroPixelOffset = offset;
+            }
+        }
+
+        if (access.Operation.StartsWith("OW", StringComparison.Ordinal))
+        {
+            frameFrameBufferOverwriteWrites++;
+        }
+
+        lastFrameBufferAccess = $"{access.Source} {access.Operation} fb{access.BufferIndex}:${access.Offset:X5}=${access.Value:X4} pc=${access.Pc:X8} op=${access.Opcode:X4}";
+    };
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,status,detail,m68kPc,m68kSr,m68kExceptions,renderMode,nonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,draw,display,swapPending,vblank,hblank,masterPc,masterSr,masterLastPc,masterLastOpcode,masterPendingIrq,masterUnhandled,masterLastUnhandledPc,masterLastUnhandledOpcode,slavePc,slaveSr,slaveLastPc,slaveLastOpcode,slavePendingIrq,slaveUnhandled,slaveLastUnhandledPc,slaveLastUnhandledOpcode,masterMask,slaveMask,adapterEnabled,sh2ResetReleased,sh2HeldInReset,vdpAccessSh2,bootPending,bootRead,bootLaunch,sys00,sys02,sys20,sys22,sys24,sys26,dreq,dreqFifo,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,fbAccesses,fbLineTableWrites,fbPixelWrites,fbOverwriteWrites,fbNonzeroWrites,fbNonzeroPixelWrites,fbFirstNonzeroPixelOffset,fbLastNonzeroPixelOffset,lastFbAccess,commWrites,lastCommWrite,commAccesses,lastCommAccess,mailboxAccesses,lastMailboxAccess,mailboxWrites,lastMailboxWrite");
+    Console.WriteLine($"32X frame trace: {Path.GetFileName(romPath)}, {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        frameCommWrites = 0;
+        frameCommAccesses = 0;
+        frameMailboxAccesses = 0;
+        frameMailboxWrites = 0;
+        frameFrameBufferAccesses = 0;
+        frameFrameBufferLineTableWrites = 0;
+        frameFrameBufferPixelWrites = 0;
+        frameFrameBufferOverwriteWrites = 0;
+        frameFrameBufferNonzeroWrites = 0;
+        frameFrameBufferNonzeroPixelWrites = 0;
+        frameFrameBufferFirstNonzeroPixelOffset = -1;
+        frameFrameBufferLastNonzeroPixelOffset = -1;
+        lastCommWrite = string.Empty;
+        lastCommAccess = string.Empty;
+        lastMailboxAccess = string.Empty;
+        lastMailboxWrite = string.Empty;
+        lastFrameBufferAccess = string.Empty;
+        string status = "ok";
+        string detail = string.Empty;
+        try
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            status = ex.GetType().Name;
+            detail = ex.Message;
+        }
+
+        byte[] rgb = machine.RenderFrameRgb();
+        int nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+        Action<ThirtyTwoXDevice.SystemRegisterAccessTrace>? registerAccessObserver = device.SystemRegisterAccessObserver;
+        device.SystemRegisterAccessObserver = null;
+        ushort sys00 = device.ReadSystemRegisterWord(0x00);
+        ushort sys02 = device.ReadSystemRegisterWord(0x02);
+        ushort sys20 = device.ReadSystemRegisterWord(0x20);
+        ushort sys22 = device.ReadSystemRegisterWord(0x22);
+        ushort sys24 = device.ReadSystemRegisterWord(0x24);
+        ushort sys26 = device.ReadSystemRegisterWord(0x26);
+        ushort dreq = device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset);
+        device.SystemRegisterAccessObserver = registerAccessObserver;
+        writer.WriteLine(string.Join(
+            ',',
+            frame.ToString(CultureInfo.InvariantCulture),
+            status,
+            $"\"{EscapeCsv(detail)}\"",
+            $"${machine.MainCpu.PC:X8}",
+            $"${machine.MainCpu.SR:X4}",
+            $"\"{EscapeCsv(FormatExceptions(machine.MainCpu))}\"",
+            machine.Vdp.LastRenderMode,
+            nonBackground.ToString(CultureInfo.InvariantCulture),
+            device.LastCompositeMode.ToString(CultureInfo.InvariantCulture),
+            device.LastCompositeUsedFallback ? "true" : "false",
+            device.LastCompositeWrittenPixels.ToString(CultureInfo.InvariantCulture),
+            (device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03).ToString(CultureInfo.InvariantCulture),
+            $"${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4}",
+            device.DrawFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            device.DisplayFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            device.FrameBufferSwapPending ? "true" : "false",
+            device.VBlank ? "true" : "false",
+            device.HBlank ? "true" : "false",
+            $"${device.MasterSh2.PC:X8}",
+            $"${device.MasterSh2.SR:X8}",
+            $"${device.MasterSh2.LastOpcodePc:X8}",
+            $"${device.MasterSh2.LastOpcode:X4}",
+            device.MasterSh2.PendingInterruptLevel.ToString(CultureInfo.InvariantCulture),
+            device.MasterSh2.UnhandledOpcodeCount.ToString(CultureInfo.InvariantCulture),
+            $"${device.MasterSh2.LastUnhandledOpcodePc:X8}",
+            $"${device.MasterSh2.LastUnhandledOpcode:X4}",
+            $"${device.SlaveSh2.PC:X8}",
+            $"${device.SlaveSh2.SR:X8}",
+            $"${device.SlaveSh2.LastOpcodePc:X8}",
+            $"${device.SlaveSh2.LastOpcode:X4}",
+            device.SlaveSh2.PendingInterruptLevel.ToString(CultureInfo.InvariantCulture),
+            device.SlaveSh2.UnhandledOpcodeCount.ToString(CultureInfo.InvariantCulture),
+            $"${device.SlaveSh2.LastUnhandledOpcodePc:X8}",
+            $"${device.SlaveSh2.LastUnhandledOpcode:X4}",
+            $"${device.MasterInterruptMask:X4}",
+            $"${device.SlaveInterruptMask:X4}",
+            device.AdapterEnabled ? "true" : "false",
+            device.Sh2ResetReleased ? "true" : "false",
+            device.Sh2HeldInReset ? "true" : "false",
+            device.VdpAccessGrantedToSh2 ? "true" : "false",
+            device.BootRomHandshakePending ? "true" : "false",
+            device.BootRomSignatureRead ? "true" : "false",
+            device.BootRomLaunchPending ? "true" : "false",
+            $"${sys00:X4}",
+            $"${sys02:X4}",
+            $"${sys20:X4}",
+            $"${sys22:X4}",
+            $"${sys24:X4}",
+            $"${sys26:X4}",
+            $"${dreq:X4}",
+            device.DreqFifoCount.ToString(CultureInfo.InvariantCulture),
+            device.BitmapModeWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.FrameBufferControlWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.VdpRegisterWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.FrameBufferByteWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.PaletteByteWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.DreqFifoWriteCount.ToString(CultureInfo.InvariantCulture),
+            device.DreqDmaWordTransferCount.ToString(CultureInfo.InvariantCulture),
+            CountNonzeroBytes(device.DisplayFrameBuffer).ToString(CultureInfo.InvariantCulture),
+            CountNonzeroBytes(device.DrawFrameBuffer).ToString(CultureInfo.InvariantCulture),
+            CountFramebufferPayloadNonzero(device.DisplayFrameBuffer).ToString(CultureInfo.InvariantCulture),
+            CountFramebufferPayloadNonzero(device.DrawFrameBuffer).ToString(CultureInfo.InvariantCulture),
+            CountNonzeroBytes(device.Palette).ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferAccesses.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferLineTableWrites.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferPixelWrites.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferOverwriteWrites.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferNonzeroWrites.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferNonzeroPixelWrites.ToString(CultureInfo.InvariantCulture),
+            frameFrameBufferFirstNonzeroPixelOffset < 0 ? string.Empty : $"${frameFrameBufferFirstNonzeroPixelOffset:X5}",
+            frameFrameBufferLastNonzeroPixelOffset < 0 ? string.Empty : $"${frameFrameBufferLastNonzeroPixelOffset:X5}",
+            $"\"{EscapeCsv(lastFrameBufferAccess)}\"",
+            frameCommWrites.ToString(CultureInfo.InvariantCulture),
+            $"\"{EscapeCsv(lastCommWrite)}\"",
+            frameCommAccesses.ToString(CultureInfo.InvariantCulture),
+            $"\"{EscapeCsv(lastCommAccess)}\"",
+            frameMailboxAccesses.ToString(CultureInfo.InvariantCulture),
+            $"\"{EscapeCsv(lastMailboxAccess)}\"",
+            frameMailboxWrites.ToString(CultureInfo.InvariantCulture),
+            $"\"{EscapeCsv(lastMailboxWrite)}\""));
+
+        if (status != "ok")
+        {
+            break;
+        }
+    }
+
+    Console.WriteLine($"Wrote 32X trace to {Path.GetFullPath(outputCsv)}");
+}
+
+void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int instructionsPerFrame, bool writeScreenshots, bool resume, string? filter, int? limit)
+{
+    string fullRomFolder = Path.GetFullPath(romFolder);
+    string fullOutputFolder = Path.GetFullPath(outputFolder);
+    string screenshotFolder = Path.Combine(fullOutputFolder, "screenshots");
+    string[] files = EnumerateRomFiles(fullRomFolder)
+        .Where(IsLikelyThirtyTwoXRom)
+        .ToArray();
+    if (!string.IsNullOrWhiteSpace(filter))
+    {
+        files = files
+            .Where(path => Path.GetRelativePath(fullRomFolder, path).Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    Directory.CreateDirectory(fullOutputFolder);
+    if (writeScreenshots)
+    {
+        Directory.CreateDirectory(screenshotFolder);
+    }
+
+    string csvPath = Path.Combine(fullOutputFolder, "32x-sweep.csv");
+    HashSet<string> completed = resume ? ReadCompletedSweepRoms(csvPath) : [];
+    bool append = resume && completed.Count > 0;
+    using StreamWriter writer = new(csvPath, append, Encoding.UTF8) { AutoFlush = true };
+    if (!append)
+    {
+        writer.WriteLine(ThirtyTwoXSweepResult.CsvHeader);
+    }
+
+    Console.WriteLine($"32X sweep: {files.Length:N0} ROM(s), {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame{(resume ? $", resume skipped={completed.Count:N0}" : string.Empty)}{(limit is > 0 ? $", limit={limit.Value:N0}" : string.Empty)}");
+    int processed = 0;
+    foreach (string file in files)
+    {
+        string relative = Path.GetRelativePath(fullRomFolder, file);
+        if (completed.Contains(relative))
+        {
+            Console.WriteLine($"{"skip",-22} {relative}");
+            continue;
+        }
+
+        ThirtyTwoXSweepResult result = RunThirtyTwoXSweepCase(file, fullRomFolder, screenshotFolder, frames, instructionsPerFrame, writeScreenshots);
+        writer.WriteLine(result.ToCsv());
+        Console.WriteLine($"{result.Status,-22} {result.RelativeRom}");
+        processed++;
+        if (limit is > 0 && processed >= limit.Value)
+        {
+            break;
+        }
+    }
+
+    Console.WriteLine($"Wrote 32X sweep report to {Path.GetFullPath(csvPath)}");
+}
+
+HashSet<string> ReadCompletedSweepRoms(string csvPath)
+{
+    HashSet<string> completed = new(StringComparer.OrdinalIgnoreCase);
+    if (!File.Exists(csvPath))
+    {
+        return completed;
+    }
+
+    foreach (string line in File.ReadLines(csvPath).Skip(1))
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            continue;
+        }
+
+        string? rom = ReadFirstCsvField(line);
+        if (!string.IsNullOrWhiteSpace(rom))
+        {
+            completed.Add(rom);
+        }
+    }
+
+    return completed;
+}
+
+string? ReadFirstCsvField(string line)
+{
+    if (line.Length == 0)
+    {
+        return null;
+    }
+
+    if (line[0] != '"')
+    {
+        int comma = line.IndexOf(',');
+        return comma < 0 ? line : line[..comma];
+    }
+
+    StringBuilder value = new();
+    for (int i = 1; i < line.Length; i++)
+    {
+        char c = line[i];
+        if (c == '"')
+        {
+            if (i + 1 < line.Length && line[i + 1] == '"')
+            {
+                value.Append('"');
+                i++;
+                continue;
+            }
+
+            return value.ToString();
+        }
+
+        value.Append(c);
+    }
+
+    return value.ToString();
+}
+
+ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, string screenshotFolder, int frames, int instructionsPerFrame, bool writeScreenshot)
+{
+    string relative = Path.GetRelativePath(romRoot, romPath);
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    MegaDrive? machine = null;
+    ThirtyTwoXDevice? device = null;
+    byte[] rgb = new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    int completedFrames = 0;
+    int nonBackground = 0;
+    int maxNonBackground = 0;
+    string status = "ok";
+    string detail = string.Empty;
+    string hash = string.Empty;
+    string bmpPath = string.Empty;
+
+    try
+    {
+        CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+        if (!cartridge.Diagnostics.Requires32X)
+        {
+            status = "not-32x";
+            detail = "Cartridge header/diagnostics did not request 32X hardware.";
+        }
+        else
+        {
+            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine.Reset();
+            device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+            for (; completedFrames < frames; completedFrames++)
+            {
+                machine.RunFrameCycles(instructionsPerFrame);
+                machine.RenderFrameRgbInto(rgb);
+                nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+                maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+                if (device is not null && completedFrames >= 44)
+                {
+                    string liveStatus = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+                    if (IsDirectVisibleThirtyTwoXStatus(liveStatus))
+                    {
+                        completedFrames++;
+                        status = liveStatus;
+                        detail = $"early visible 32X classification after {completedFrames:N0} frame(s)";
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException or IOException)
+    {
+        status = ex.GetType().Name;
+        detail = ex.Message;
+        if (machine is not null)
+        {
+            machine.RenderFrameRgbInto(rgb);
+            nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+            maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+        }
+    }
+
+    stopwatch.Stop();
+    if (machine is not null)
+    {
+        if (device is not null && status == "ok")
+        {
+            status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+            if (ShouldAdaptiveResampleThirtyTwoX(status, completedFrames))
+            {
+                string initialStatus = status;
+                int initialFrames = completedFrames;
+                int adaptiveTargetFrames = Math.Max(completedFrames, 900);
+                int adaptiveInstructionBudget = Math.Max(instructionsPerFrame, 50_000);
+                for (; completedFrames < adaptiveTargetFrames; completedFrames++)
+                {
+                    if (stopwatch.Elapsed.TotalSeconds >= ThirtyTwoXSweepAdaptiveTimeLimitSeconds)
+                    {
+                        detail = $"adaptive resample time cap after {completedFrames:N0} frame(s)";
+                        break;
+                    }
+
+                    machine.RunFrameCycles(adaptiveInstructionBudget);
+                    machine.RenderFrameRgbInto(rgb);
+                    nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+                    maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+                    status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+                    if (IsVisibleThirtyTwoXStatus(status))
+                    {
+                        break;
+                    }
+                }
+
+                if (status != initialStatus)
+                {
+                    detail = $"adaptive resample: {initialStatus} at {initialFrames:N0} frame(s), {status} at {completedFrames:N0} frame(s)";
+                }
+            }
+        }
+
+        hash = Convert.ToHexString(SHA256.HashData(rgb));
+        if (writeScreenshot)
+        {
+            bmpPath = Path.Combine(screenshotFolder, $"{SanitizeFileName(relative)}.bmp");
+            WriteBmp(bmpPath, Vdp.ScreenWidth, Vdp.ScreenHeight, rgb);
+        }
+    }
+
+    double fps = completedFrames <= 0 || stopwatch.Elapsed.TotalSeconds <= 0.0
+        ? 0.0
+        : completedFrames / stopwatch.Elapsed.TotalSeconds;
+    ThirtyTwoXDevice.ThirtyTwoXState? thirtyTwoXState = device?.CaptureState();
+
+    return new ThirtyTwoXSweepResult(
+        relative,
+        status,
+        completedFrames,
+        stopwatch.ElapsedMilliseconds,
+        fps,
+        machine?.MainCpu.PC ?? 0,
+        machine is null ? string.Empty : FormatExceptions(machine.MainCpu),
+        machine?.Vdp.LastRenderMode ?? string.Empty,
+        nonBackground,
+        maxNonBackground,
+        device?.LastCompositeMode ?? 0,
+        device?.LastCompositeUsedFallback ?? false,
+        device?.LastCompositeWrittenPixels ?? 0,
+        device is null ? 0 : device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03,
+        device is null ? (ushort)0 : device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset),
+        device?.BitmapModeWriteCount ?? 0,
+        device?.FrameBufferControlWriteCount ?? 0,
+        device?.VdpRegisterWriteCount ?? 0,
+        device?.FrameBufferByteWriteCount ?? 0,
+        device?.PaletteByteWriteCount ?? 0,
+        device?.DreqFifoWriteCount ?? 0,
+        device?.DreqDmaWordTransferCount ?? 0,
+        device is null ? 0 : CountNonzeroBytes(device.DisplayFrameBuffer),
+        device is null ? 0 : CountNonzeroBytes(device.DrawFrameBuffer),
+        device is null ? 0 : CountFramebufferPayloadNonzero(device.DisplayFrameBuffer),
+        device is null ? 0 : CountFramebufferPayloadNonzero(device.DrawFrameBuffer),
+        device is null ? 0 : CountNonzeroBytes(device.Palette),
+        thirtyTwoXState is null ? (ushort)0 : ReadBigEndianWord(thirtyTwoXState.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset),
+        thirtyTwoXState is null ? (ushort)0 : ReadBigEndianWord(thirtyTwoXState.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
+        thirtyTwoXState is null ? (ushort)0 : ReadBigEndianWord(thirtyTwoXState.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4),
+        thirtyTwoXState is null ? (ushort)0 : ReadBigEndianWord(thirtyTwoXState.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6),
+        thirtyTwoXState?.MasterSh2.PC ?? 0,
+        thirtyTwoXState?.SlaveSh2.PC ?? 0,
+        thirtyTwoXState?.MasterSh2.LastOpcode ?? 0,
+        thirtyTwoXState?.SlaveSh2.LastOpcode ?? 0,
+        thirtyTwoXState?.MasterInterruptMask ?? 0,
+        thirtyTwoXState?.SlaveInterruptMask ?? 0,
+        thirtyTwoXState?.PwmLeft.Length ?? 0,
+        thirtyTwoXState?.PwmRight.Length ?? 0,
+        thirtyTwoXState?.PwmMono.Length ?? 0,
+        thirtyTwoXState?.PwmLeftHardwareFifo.Length ?? 0,
+        thirtyTwoXState?.PwmRightHardwareFifo.Length ?? 0,
+        thirtyTwoXState?.PwmMonoHardwareFifo.Length ?? 0,
+        thirtyTwoXState?.PwmCycleCounter ?? 0,
+        thirtyTwoXState?.PwmTimerCounter ?? 0,
+        thirtyTwoXState?.MasterPwmInterruptPending ?? false,
+        thirtyTwoXState?.SlavePwmInterruptPending ?? false,
+        thirtyTwoXState?.BootRomHandshakePending ?? false,
+        thirtyTwoXState?.BootRomSignatureRead ?? false,
+        thirtyTwoXState?.BootRomLaunchPending ?? false,
+        hash,
+        bmpPath,
+        detail);
+}
+
+static ushort ReadBigEndianWord(byte[] data, int offset)
+{
+    if ((uint)(offset + 1) >= (uint)data.Length)
+    {
+        return 0;
+    }
+
+    return (ushort)((data[offset] << 8) | data[offset + 1]);
+}
+
+static ushort ReadBigEndianWordSpan(ReadOnlySpan<byte> data, int offset)
+{
+    if ((uint)(offset + 1) >= (uint)data.Length)
+    {
+        return 0;
+    }
+
+    return (ushort)((data[offset] << 8) | data[offset + 1]);
+}
+
+static uint ReadBigEndianLongSpan(ReadOnlySpan<byte> data, int offset)
+{
+    if ((uint)(offset + 3) >= (uint)data.Length)
+    {
+        return 0;
+    }
+
+    return (uint)((data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3]);
+}
+
+string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int nonBackground, int maxNonBackground)
+{
+    string exceptions = FormatExceptions(machine.MainCpu);
+    int displayFbNonzero = CountNonzeroBytes(device.DisplayFrameBuffer);
+    int drawFbNonzero = CountNonzeroBytes(device.DrawFrameBuffer);
+    int displayFbPayloadNonzero = CountFramebufferPayloadNonzero(device.DisplayFrameBuffer);
+    int drawFbPayloadNonzero = CountFramebufferPayloadNonzero(device.DrawFrameBuffer);
+    int paletteNonzero = CountNonzeroBytes(device.Palette);
+    int bitmapMode = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03;
+    if (device.BootRomHandshakePending || device.BootRomLaunchPending)
+    {
+        return "boot-wait";
+    }
+
+    if (device.Sh2HeldInReset && device.BitmapModeWriteCount == 0)
+    {
+        return "sh2-reset-wait";
+    }
+
+    if (device.LastCompositeMode != 0 && device.LastCompositeWrittenPixels > 0 && nonBackground > 0)
+    {
+        string visible = device.LastCompositeUsedFallback ? "visible-32x-fallback" : "visible-32x";
+        return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+    }
+
+    if (nonBackground > 0)
+    {
+        if (displayFbNonzero + drawFbNonzero > 0)
+        {
+            if (displayFbPayloadNonzero + drawFbPayloadNonzero == 0)
+            {
+                string lineTableOnlyVisible = paletteNonzero == 0 ? "md-visible-framebuffer-line-table-only-no-palette" : "md-visible-framebuffer-line-table-only";
+                return exceptions == "none" ? lineTableOnlyVisible : $"{lineTableOnlyVisible}-m68k-exception";
+            }
+
+            string visible = paletteNonzero == 0 ? "md-visible-framebuffer-no-palette" : "md-visible-framebuffer-dark";
+            return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+        }
+
+        if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
+        {
+            string visible = "md-visible-32x-vdp-idle";
+            return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+        }
+
+        return exceptions == "none" ? "md-only" : "md-only-m68k-exception";
+    }
+
+    if (displayFbNonzero + drawFbNonzero > 0)
+    {
+        if (displayFbPayloadNonzero + drawFbPayloadNonzero == 0)
+        {
+            return paletteNonzero == 0 ? "framebuffer-line-table-only-no-palette" : "framebuffer-line-table-only";
+        }
+
+        return paletteNonzero == 0 ? "framebuffer-no-palette" : "framebuffer-dark";
+    }
+
+    if (exceptions != "none")
+    {
+        return "m68k-exception";
+    }
+
+    if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
+    {
+        return "vdp-dark";
+    }
+
+    if (device.MasterSh2.UnhandledOpcodeCount > 0 || device.SlaveSh2.UnhandledOpcodeCount > 0)
+    {
+        return "sh2-unhandled-opcode";
+    }
+
+    return "stalled";
+}
+
+bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
+{
+    if (completedFrames >= 300)
+    {
+        return false;
+    }
+
+    return status is
+        "vdp-dark" or
+        "framebuffer-dark" or
+        "framebuffer-no-palette" or
+        "framebuffer-line-table-only" or
+        "framebuffer-line-table-only-no-palette" or
+        "md-visible-32x-vdp-idle" or
+        "md-visible-32x-vdp-idle-m68k-exception" or
+        "md-visible-framebuffer-line-table-only" or
+        "md-visible-framebuffer-line-table-only-no-palette" or
+        "md-visible-framebuffer-line-table-only-m68k-exception" or
+        "md-visible-framebuffer-line-table-only-no-palette-m68k-exception" or
+        "stalled";
+}
+
+static int CountFramebufferPayloadNonzero(ReadOnlySpan<byte> frameBuffer)
+{
+    int lineTableBytes = Math.Min(frameBuffer.Length, ThirtyTwoXHardwareProfile.NtscVisibleLines * 2);
+    int count = 0;
+    for (int i = lineTableBytes; i < frameBuffer.Length; i++)
+    {
+        if (frameBuffer[i] != 0)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+bool IsVisibleThirtyTwoXStatus(string status)
+{
+    return status.StartsWith("visible-32x", StringComparison.Ordinal) ||
+        status.StartsWith("md-visible", StringComparison.Ordinal);
+}
+
+bool IsDirectVisibleThirtyTwoXStatus(string status)
+{
+    return status.StartsWith("visible-32x", StringComparison.Ordinal);
+}
+
+bool IsLikelyThirtyTwoXRom(string path)
+{
+    if (Path.GetExtension(path).Equals(".32x", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    try
+    {
+        return CartridgeImage.FromFile(path).Diagnostics.Requires32X;
+    }
+    catch
+    {
+        return false;
+    }
 }
 
 void RegressFolder(string folder, string outputCsv, int frames, int instructionsPerFrame)
@@ -1982,7 +4437,7 @@ void RegressFolder(string folder, string outputCsv, int frames, int instructions
                 machine.RunFrameCycles(instructionsPerFrame);
             }
 
-            byte[] rgb = machine.Vdp.RenderFrameRgb();
+            byte[] rgb = machine.RenderFrameRgb();
             nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
             hash = Convert.ToHexString(SHA256.HashData(rgb));
         }
@@ -2095,7 +4550,7 @@ CompatibilityResult RunCompatibilityCase(string romPath, string romRoot, string 
     {
         CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
         detail = FormatCartridgeDetail(cartridge.Diagnostics, FilenameCartridgeWarnings(romPath));
-        if (cartridge.Diagnostics.HasUnsupportedHardware)
+        if (cartridge.Diagnostics.HasUnsupportedHardware && !cartridge.Diagnostics.Requires32X)
         {
             status = "unsupported";
         }
@@ -2110,7 +4565,7 @@ CompatibilityResult RunCompatibilityCase(string romPath, string romRoot, string 
                 int frameNumber = completedFrames + 1;
                 if (frameNumber % 60 == 0 || frameNumber == frames)
                 {
-                    byte[] sample = machine.Vdp.RenderFrameRgb();
+                    byte[] sample = machine.RenderFrameRgb();
                     maxNonBackground = Math.Max(maxNonBackground, CountNonBackgroundPixels(machine.Vdp, sample));
                 }
             }
@@ -2128,7 +4583,7 @@ CompatibilityResult RunCompatibilityCase(string romPath, string romRoot, string 
     }
 
     stopwatch.Stop();
-    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    byte[] rgb = machine?.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
     string hash = Convert.ToHexString(SHA256.HashData(rgb));
     int nonBackground = machine is null ? 0 : CountNonBackgroundPixels(machine.Vdp, rgb);
     maxNonBackground = Math.Max(maxNonBackground, nonBackground);
@@ -2244,7 +4699,7 @@ PostMenuCompatibilityResult RunPostMenuCompatibilityCase(PostMenuCompatibilityCa
                 int frameNumber = completedFrames + 1;
                 if (frameNumber % 60 == 0 || frameNumber == testCase.Frames)
                 {
-                    byte[] sample = machine.Vdp.RenderFrameRgb();
+                    byte[] sample = machine.RenderFrameRgb();
                     maxNonBackground = Math.Max(maxNonBackground, CountNonBackgroundPixels(machine.Vdp, sample));
                 }
             }
@@ -2262,7 +4717,7 @@ PostMenuCompatibilityResult RunPostMenuCompatibilityCase(PostMenuCompatibilityCa
     }
 
     stopwatch.Stop();
-    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    byte[] rgb = machine?.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
     string hash = Convert.ToHexString(SHA256.HashData(rgb));
     int nonBackground = machine is null ? 0 : CountNonBackgroundPixels(machine.Vdp, rgb);
     maxNonBackground = Math.Max(maxNonBackground, nonBackground);
@@ -2528,7 +4983,7 @@ PerfSuiteResult RunPerfSuiteCase(string romPath, string romRoot, int frames, int
 
             stageAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             start = System.Diagnostics.Stopwatch.GetTimestamp();
-            machine.Vdp.RenderFrameRgbInto(framebuffer);
+            machine.RenderFrameRgbInto(framebuffer);
             renderTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
             renderAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - stageAllocatedBefore;
             if (frameProfile)
@@ -2828,6 +5283,11 @@ GenesisButton Sonic3TitleStartPulse(int frame)
     return frame is >= 1_800 and < 1_830 ? GenesisButton.Start : GenesisButton.None;
 }
 
+GenesisButton ChaotixTitleStartPulse(int frame)
+{
+    return frame is >= 1_800 and < 1_830 ? GenesisButton.Start : GenesisButton.None;
+}
+
 GenesisButton StreetsOfRageStartAndSelect(int frame)
 {
     GenesisButton buttons = GenesisButton.None;
@@ -2905,7 +5365,7 @@ VisualCheckpointResult RunVisualCheckpointCase(
         detail = ex.Message;
     }
 
-    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    byte[] rgb = machine?.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
     string sha = Convert.ToHexString(SHA256.HashData(rgb));
     string relativeRom = Path.GetRelativePath(romRoot, romPath);
     string bmpPath = Path.Combine(screenshotFolder, $"{SanitizeFileName(spec.Id)}.bmp");
@@ -3188,7 +5648,7 @@ MovieVisualCheckpointResult RunMovieVisualCheckpointCase(
         detail = AppendDetail(detail, ex.Message);
     }
 
-    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    byte[] rgb = machine?.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
     string sha = Convert.ToHexString(SHA256.HashData(rgb));
     string bmpPath = Path.Combine(screenshotFolder, $"{SanitizeFileName(spec.Id)}.bmp");
     WriteBmp(bmpPath, Vdp.ScreenWidth, Vdp.ScreenHeight, rgb);
@@ -3826,7 +6286,7 @@ MovieRegressionResult RunMovieRegressionCase(string moviePath, string movieRoot,
     }
 
     stopwatch.Stop();
-    byte[] rgb = machine?.Vdp.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
+    byte[] rgb = machine?.RenderFrameRgb() ?? new byte[Vdp.ScreenWidth * Vdp.ScreenHeight * 3];
     string hash = Convert.ToHexString(SHA256.HashData(rgb));
     int nonBackground = machine is null ? 0 : CountNonBackgroundPixels(machine.Vdp, rgb);
     int cramNonzero = machine is null ? 0 : CountNonzeroCram(machine.Vdp);
@@ -3894,6 +6354,14 @@ string? GetOptionValue(string[] values, string option)
     return null;
 }
 
+int? TryGetPositiveOption(string[] values, string option)
+{
+    string? value = GetOptionValue(values, option);
+    return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0
+        ? parsed
+        : null;
+}
+
 Dictionary<string, string> BuildRomShaIndex(string romFolder)
 {
     Dictionary<string, string> index = new(StringComparer.OrdinalIgnoreCase);
@@ -3929,7 +6397,29 @@ bool IsPalRegion(CartridgeImage cartridge)
 MegaDrive CreateMachine(string romPath)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-    return new MegaDrive(cartridge, IsPalRegion(cartridge));
+    return new MegaDrive(cartridge, IsPalRegion(cartridge), TryLoadThirtyTwoXM68kBios());
+}
+
+ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
+{
+    string[] candidates =
+    [
+        Environment.GetEnvironmentVariable("MDSHARP_32X_M68K_BIOS") ?? string.Empty,
+        Path.Combine(AppContext.BaseDirectory, "32X_G_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "32X_M68K_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_G_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_M68K_BIOS.BIN"),
+    ];
+
+    foreach (string candidate in candidates)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+        {
+            return File.ReadAllBytes(candidate);
+        }
+    }
+
+    return null;
 }
 
 long PeakAbs(short[] samples)
@@ -7387,6 +9877,510 @@ void TraceZ80(string romPath, string outputPath, int frames, int maxLines, int i
     Console.WriteLine($"Final Z80 PC=${machine.Z80.PC:X4} A=${machine.Z80.A:X2} B=${machine.Z80.B:X2} reset={(machine.Z80.ResetAsserted ? 1 : 0)} bus={(machine.Z80.BusRequested ? 1 : 0)} cycles={machine.Z80.Cycles:N0}");
 }
 
+void TraceM68kLive(string romPath, string outputPath, int frames, int instructionsPerFrame, uint pcStart, uint pcEnd, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    if (pcEnd < pcStart)
+    {
+        (pcStart, pcEnd) = (pcEnd, pcStart);
+    }
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,pc,opcode,ext0,ext1,nextPc,sr,sp,d0,d1,d2,d3,d4,d5,d6,d7,a0,a1,a2,a3,a4,a5,a6,cycles,masterCycle,scanline,lineCycle,c400,c41d,sys20,sys22,masterPc,slavePc");
+    machine.MainCpu.InstructionObserver = trace =>
+    {
+        if (currentFrame < startFrame || lines >= maxLines || trace.Pc < pcStart || trace.Pc > pcEnd)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
+        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        ushort ext0 = machine.Bus.ReadWord(trace.Pc + 2);
+        ushort ext1 = machine.Bus.ReadWord(trace.Pc + 4);
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            $"${trace.Pc:X8}",
+            $"${trace.Opcode:X4}",
+            $"${ext0:X4}",
+            $"${ext1:X4}",
+            $"${trace.NextPc:X8}",
+            $"${trace.Sr:X4}",
+            $"${trace.StackPointer:X8}",
+            $"${trace.D0:X8}",
+            $"${trace.D1:X8}",
+            $"${trace.D2:X8}",
+            $"${trace.D3:X8}",
+            $"${trace.D4:X8}",
+            $"${trace.D5:X8}",
+            $"${trace.D6:X8}",
+            $"${trace.D7:X8}",
+            $"${trace.A0:X8}",
+            $"${trace.A1:X8}",
+            $"${trace.A2:X8}",
+            $"${trace.A3:X8}",
+            $"${trace.A4:X8}",
+            $"${trace.A5:X8}",
+            $"${trace.A6:X8}",
+            trace.Cycles.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture),
+            $"${machine.Bus.ReadWord(0x00FF_C400):X4}",
+            $"${machine.Bus.ReadByte(0x00FF_C41D):X2}",
+            $"${sys20:X4}",
+            $"${sys22:X4}",
+            $"${masterPc:X8}",
+            $"${slavePc:X8}"));
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.InstructionObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 68K live trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
+void TraceM68kInterrupts(string romPath, string outputPath, int frames, int instructionsPerFrame, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,level,vector,returnPc,handlerPc,oldSr,newSr,sp,vdpReg0,vdpReg1,vInterruptPending,status,thirtyTwoXSys20,thirtyTwoXSys22");
+    machine.MainCpu.InterruptObserver = trace =>
+    {
+        if (currentFrame < startFrame || lines >= maxLines)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
+        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            trace.Level.ToString(CultureInfo.InvariantCulture),
+            trace.Vector.ToString(CultureInfo.InvariantCulture),
+            $"${trace.ReturnPc:X8}",
+            $"${trace.HandlerPc:X8}",
+            $"${trace.OldSr:X4}",
+            $"${trace.NewSr:X4}",
+            $"${trace.StackPointer:X8}",
+            $"${machine.Vdp.Registers[0]:X2}",
+            $"${machine.Vdp.Registers[1]:X2}",
+            machine.Vdp.VInterruptPending ? "1" : "0",
+            $"${machine.Vdp.Status:X4}",
+            $"${sys20:X4}",
+            $"${sys22:X4}"));
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.InterruptObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 68K interrupt trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+    Console.WriteLine(FormatVdpState(machine.Vdp));
+}
+
+void TraceThirtyTwoXM68kExceptions(string romPath, string outputPath, int frames, int instructionsPerFrame, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,vector,opcodePc,opcode,framePc,handlerPc,oldSr,newSr,sp,d0,d1,d2,d3,a0,a1,a2,a3,a4,a5,a6,rv,dreq,bank,aden,sh2Reset,sys00,sys02,sys04,sys06,sys20,sys22,vdpMode,fbctl,masterPc,slavePc,masterCycle,scanline,lineCycle");
+    machine.MainCpu.ExceptionObserver = trace =>
+    {
+        if (currentFrame < startFrame || lines >= maxLines)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys00 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x00);
+        ushort sys02 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x02);
+        ushort sys04 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x04);
+        ushort sys06 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x06);
+        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
+        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort vdpMode = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadVdpRegisterWord(0x00);
+        ushort fbctl = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadVdpRegisterWord(0x0A);
+        uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            trace.Vector.ToString(CultureInfo.InvariantCulture),
+            $"${trace.OpcodePc:X8}",
+            $"${trace.Opcode:X4}",
+            $"${trace.FramePc:X8}",
+            $"${trace.HandlerPc:X8}",
+            $"${trace.OldSr:X4}",
+            $"${trace.NewSr:X4}",
+            $"${trace.StackPointer:X8}",
+            $"${trace.D0:X8}",
+            $"${trace.D1:X8}",
+            $"${trace.D2:X8}",
+            $"${trace.D3:X8}",
+            $"${trace.A0:X8}",
+            $"${trace.A1:X8}",
+            $"${trace.A2:X8}",
+            $"${trace.A3:X8}",
+            $"${trace.A4:X8}",
+            $"${trace.A5:X8}",
+            $"${trace.A6:X8}",
+            thirtyTwoX?.RomToVramDmaActive == true ? "1" : "0",
+            $"${sys06:X4}",
+            (thirtyTwoX?.M68kCartridgeBank ?? 0).ToString(CultureInfo.InvariantCulture),
+            thirtyTwoX?.AdapterEnabled == true ? "1" : "0",
+            thirtyTwoX?.Sh2HeldInReset == true ? "1" : "0",
+            $"${sys00:X4}",
+            $"${sys02:X4}",
+            $"${sys04:X4}",
+            $"${sys06:X4}",
+            $"${sys20:X4}",
+            $"${sys22:X4}",
+            $"${vdpMode:X4}",
+            $"${fbctl:X4}",
+            $"${masterPc:X8}",
+            $"${slavePc:X8}",
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.ExceptionObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 32X 68K exception trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
+void TraceThirtyTwoXSdkMonitor(string romPath, string outputPath, int frames, int instructionsPerFrame, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,event,pc,opcode,nextPc,vector,handlerPc,sr,sp,d0,d1,d2,d3,a0,a1,a6,service,ffd0a0,ffd0a2,ffd0a4,ffd0a6,ffd0a8,ffd0aa,ffd0ac,ffd0ae,ffd0b0,ffd0b2,sys00,sys02,masterPc,slavePc,masterSr,slaveSr,masterCycle,scanline,lineCycle");
+
+    void WriteRow(
+        string eventName,
+        uint pc,
+        ushort opcode,
+        uint nextPc,
+        int vector,
+        uint handlerPc,
+        ushort sr,
+        uint sp,
+        uint d0,
+        uint d1,
+        uint d2,
+        uint d3,
+        uint a0,
+        uint a1,
+        uint a6)
+    {
+        if (currentFrame < startFrame || lines >= maxLines)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys00 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x00);
+        ushort sys02 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x02);
+        uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        uint masterSr = thirtyTwoX?.MasterSh2.SR ?? 0;
+        uint slaveSr = thirtyTwoX?.SlaveSh2.SR ?? 0;
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            Csv(eventName),
+            $"${pc:X8}",
+            $"${opcode:X4}",
+            nextPc == uint.MaxValue ? string.Empty : $"${nextPc:X8}",
+            vector < 0 ? string.Empty : vector.ToString(CultureInfo.InvariantCulture),
+            handlerPc == uint.MaxValue ? string.Empty : $"${handlerPc:X8}",
+            $"${sr:X4}",
+            $"${sp:X8}",
+            $"${d0:X8}",
+            $"${d1:X8}",
+            $"${d2:X8}",
+            $"${d3:X8}",
+            $"${a0:X8}",
+            $"${a1:X8}",
+            $"${a6:X8}",
+            $"${d0 & 0xFF:X2}",
+            $"${machine.Bus.ReadWord(0x00FF_D0A0):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0A2):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0A4):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0A6):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0A8):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0AA):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0AC):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0AE):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0B0):X4}",
+            $"${machine.Bus.ReadWord(0x00FF_D0B2):X4}",
+            $"${sys00:X4}",
+            $"${sys02:X4}",
+            $"${masterPc:X8}",
+            $"${slavePc:X8}",
+            $"${masterSr:X8}",
+            $"${slaveSr:X8}",
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    machine.MainCpu.InstructionObserver = trace =>
+    {
+        if (!IsInterestingThirtyTwoXSdkMonitorInstruction(trace.Pc, trace.Opcode))
+        {
+            return;
+        }
+
+        WriteRow(
+            "instruction",
+            trace.Pc,
+            trace.Opcode,
+            trace.NextPc,
+            -1,
+            uint.MaxValue,
+            trace.Sr,
+            trace.StackPointer,
+            trace.D0,
+            trace.D1,
+            trace.D2,
+            trace.D3,
+            trace.A0,
+            trace.A1,
+            trace.A6);
+    };
+
+    machine.MainCpu.ExceptionObserver = trace =>
+    {
+        if (!IsInterestingThirtyTwoXSdkMonitorInstruction(trace.OpcodePc, trace.Opcode) &&
+            trace.OpcodePc is < 0x00FF_0000 or >= 0x00FF_C020)
+        {
+            return;
+        }
+
+        WriteRow(
+            $"exception-{trace.Vector}",
+            trace.OpcodePc,
+            trace.Opcode,
+            trace.FramePc,
+            trace.Vector,
+            trace.HandlerPc,
+            trace.OldSr,
+            trace.StackPointer,
+            trace.D0,
+            trace.D1,
+            trace.D2,
+            trace.D3,
+            trace.A0,
+            trace.A1,
+            trace.A6);
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.InstructionObserver = null;
+        machine.MainCpu.ExceptionObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 32X SDK monitor trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
+static bool IsInterestingThirtyTwoXSdkMonitorInstruction(uint pc, ushort opcode)
+{
+    if (opcode == 0x4E40 || opcode == 0x4E4F || opcode >= 0xFF00)
+    {
+        return pc is >= 0x00FF_0000 and < 0x00FF_C020 ||
+            pc is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < 0x00A0_0000;
+    }
+
+    return pc is >= 0x00FF_0000 and < 0x00FF_0028 ||
+        pc is >= 0x00FF_00D0 and <= 0x00FF_00F4;
+}
+
+void TraceM68kMemoryWrites(string romPath, string outputPath, int frames, int instructionsPerFrame, uint addressStart, uint addressEnd, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    if (addressStart > addressEnd)
+    {
+        (addressStart, addressEnd) = (addressEnd, addressStart);
+    }
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,pc,address,value,sys20,sys22,masterPc,slavePc");
+    machine.Bus.MemoryWriteObserver = write =>
+    {
+        if (currentFrame < startFrame || lines >= maxLines || write.Address < addressStart || write.Address > addressEnd)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
+        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            $"${write.Pc:X8}",
+            $"${write.Address:X8}",
+            $"${write.Value:X2}",
+            $"${sys20:X4}",
+            $"${sys22:X4}",
+            $"${masterPc:X8}",
+            $"${slavePc:X8}"));
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.Bus.MemoryWriteObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 68K memory write trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
+void TraceM68kMemoryReads(string romPath, string outputPath, int frames, int instructionsPerFrame, uint addressStart, uint addressEnd, int maxLines, int startFrame)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    if (addressStart > addressEnd)
+    {
+        (addressStart, addressEnd) = (addressEnd, addressStart);
+    }
+
+    int currentFrame = 0;
+    int lines = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("frame,sequence,pc,address,size,value,sys20,sys22,masterPc,slavePc");
+    machine.Bus.MemoryReadObserver = read =>
+    {
+        uint endAddress = read.Address + (uint)Math.Max(0, read.Size - 1);
+        if (currentFrame < startFrame || lines >= maxLines || endAddress < addressStart || read.Address > addressEnd)
+        {
+            return;
+        }
+
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
+        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++lines).ToString(CultureInfo.InvariantCulture),
+            $"${read.Pc:X8}",
+            $"${read.Address:X8}",
+            read.Size.ToString(CultureInfo.InvariantCulture),
+            $"${read.Value:X8}",
+            $"${sys20:X4}",
+            $"${sys22:X4}",
+            $"${masterPc:X8}",
+            $"${slavePc:X8}"));
+    };
+
+    try
+    {
+        int endFrame = startFrame + frames;
+        for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.Bus.MemoryReadObserver = null;
+    }
+
+    Console.WriteLine($"Wrote {lines:N0} 68K memory read trace line(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
 void InspectMachine(string romPath, int frames, int instructionsPerFrame, uint address, int bytes)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
@@ -8086,7 +11080,7 @@ bool CheckVirtuaRacingLayout(string romPath, string outputFolder, Func<int, Cont
         machine.Bus.DmaWordObserver = null;
     }
 
-    byte[] rgb = machine.Vdp.RenderFrameRgb();
+    byte[] rgb = machine.RenderFrameRgb();
     string framePath = Path.Combine(outputFolder, "virtua-racing-layout-frame.bmp");
     WriteBmp(framePath, Vdp.ScreenWidth, Vdp.ScreenHeight, rgb);
     string dmaCsvPath = Path.Combine(outputFolder, "virtua-racing-svp-dma.csv");
@@ -8694,6 +11688,7 @@ Func<int, GenesisButton> ResolveInputScript(string script)
         "repeat-start" or "menu" => RepeatedStartPulse,
         "sonic1-start" => Sonic1TitleStartPulse,
         "sonic3-start" => Sonic3TitleStartPulse,
+        "chaotix-title-start" or "chaotix-start" => ChaotixTitleStartPulse,
         "streets" or "streets-start" => StreetsStartAndSelect,
         "bloodlines" or "bloodlines-start" => BloodlinesStartThenPlay,
         _ => throw new ArgumentException($"Unknown input script '{script}'."),
@@ -8744,7 +11739,7 @@ void RunSonicBench(string romPath, string outputFolder, int instructionsPerFrame
 
         machine.Bus.Controller1.Pressed = GenesisButton.None;
         machine.Bus.Controller2.Pressed = GenesisButton.None;
-        byte[] rgb = machine.Vdp.RenderFrameRgb();
+        byte[] rgb = machine.RenderFrameRgb();
         int nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
         string hash = Convert.ToHexString(SHA256.HashData(rgb));
         string ppmPath = Path.Combine(outputFolder, $"{preset.Name}.ppm");
@@ -8820,7 +11815,7 @@ void RunBloodlinesBench(string romPath, string outputFolder, int instructionsPer
 
         machine.Bus.Controller1.Pressed = GenesisButton.None;
         machine.Bus.Controller2.Pressed = GenesisButton.None;
-        byte[] rgb = machine.Vdp.RenderFrameRgb();
+        byte[] rgb = machine.RenderFrameRgb();
         int nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
         string hash = Convert.ToHexString(SHA256.HashData(rgb));
         string ppmPath = Path.Combine(outputFolder, $"{preset.Name}.ppm");
@@ -8948,6 +11943,11 @@ string FormatCartridgeDetail(CartridgeDiagnostics diagnostics, IEnumerable<strin
     if (diagnostics.HasUnsupportedHardware)
     {
         parts.Add($"unsupported hardware: {string.Join(", ", diagnostics.UnsupportedHardware)}");
+    }
+
+    if (diagnostics.Requires32X)
+    {
+        parts.Add("requires: Sega 32X");
     }
 
     if (diagnostics.HasSaveHardware)
@@ -9216,6 +12216,387 @@ int CountNonzeroCram(Vdp vdp)
     }
 
     return count;
+}
+
+int CountNonzeroBytes(ReadOnlySpan<byte> data)
+{
+    int count = 0;
+    foreach (byte value in data)
+    {
+        if (value != 0)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+string FormatThirtyTwoXWords(ThirtyTwoXDevice device, bool system, int start, int length)
+{
+    StringBuilder builder = new();
+    for (int offset = start; offset < start + length; offset += 2)
+    {
+        ushort value = system
+            ? device.ReadSystemRegisterWord((ushort)offset)
+            : device.ReadVdpRegisterWord((ushort)offset);
+        if (builder.Length > 0)
+        {
+            builder.Append(' ');
+        }
+
+        builder.Append('$');
+        builder.Append(offset.ToString("X2", CultureInfo.InvariantCulture));
+        builder.Append('=');
+        builder.Append(value.ToString("X4", CultureInfo.InvariantCulture));
+    }
+
+    return builder.ToString();
+}
+
+string FormatThirtyTwoXCodeWindow(ThirtyTwoXDevice device, CartridgeImage cartridge, uint pc)
+{
+    uint start = pc >= 8 ? pc - 8 : pc;
+    StringBuilder builder = new();
+    for (int i = 0; i < 8; i++)
+    {
+        uint address = start + (uint)(i * 2);
+        ushort word = ReadThirtyTwoXDebugWord(device, cartridge, address);
+        if (builder.Length > 0)
+        {
+            builder.Append(' ');
+        }
+
+        if (address == pc)
+        {
+            builder.Append('>');
+        }
+
+        builder.Append('$');
+        builder.Append(address.ToString("X8", CultureInfo.InvariantCulture));
+        builder.Append(':');
+        builder.Append(word.ToString("X4", CultureInfo.InvariantCulture));
+    }
+
+    return builder.ToString();
+}
+
+string DisassembleSh2(ushort opcode, uint pc)
+{
+    int n = (opcode >> 8) & 0x0F;
+    int m = (opcode >> 4) & 0x0F;
+    int d8 = opcode & 0xFF;
+    int d4 = opcode & 0x0F;
+    string R(int index) => $"R{index}";
+    string Disp(uint address) => $"${address:X8}";
+    string Imm(int value) => $"#{value}";
+    uint PcDisp8(int scale) => pc + 4 + (uint)(SignExtend8ForDisassembly(d8) * scale);
+    uint PcDisp12() => pc + 4 + (uint)(SignExtend12ForDisassembly(opcode & 0x0FFF) * 2);
+
+    return opcode switch
+    {
+        0x0008 => "CLRT",
+        0x0009 => "NOP",
+        0x000B => "RTS",
+        0x0018 => "SETT",
+        0x0019 => "DIV0U",
+        0x001B => "SLEEP",
+        0x0028 => "CLRMAC",
+        0x002B => "RTE",
+        _ when (opcode & 0xF0FF) == 0x400B => $"JSR @{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x402B => $"JMP @{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0003 => $"BSRF {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0023 => $"BRAF {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0002 => $"STC SR,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0012 => $"STC GBR,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0022 => $"STC VBR,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x000A => $"STS MACH,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x001A => $"STS MACL,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x002A => $"STS PR,{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x0029 => $"MOVT {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x400E => $"LDC {R(n)},SR",
+        _ when (opcode & 0xF0FF) == 0x401E => $"LDC {R(n)},GBR",
+        _ when (opcode & 0xF0FF) == 0x402E => $"LDC {R(n)},VBR",
+        _ when (opcode & 0xF0FF) == 0x400A => $"LDS {R(n)},MACH",
+        _ when (opcode & 0xF0FF) == 0x401A => $"LDS {R(n)},MACL",
+        _ when (opcode & 0xF0FF) == 0x402A => $"LDS {R(n)},PR",
+        _ when (opcode & 0xF0FF) == 0x4002 => $"STS.L MACH,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4012 => $"STS.L MACL,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4022 => $"STS.L PR,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4003 => $"STC.L SR,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4013 => $"STC.L GBR,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4023 => $"STC.L VBR,@-{R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4006 => $"LDS.L @{R(n)}+,MACH",
+        _ when (opcode & 0xF0FF) == 0x4016 => $"LDS.L @{R(n)}+,MACL",
+        _ when (opcode & 0xF0FF) == 0x4026 => $"LDS.L @{R(n)}+,PR",
+        _ when (opcode & 0xF0FF) == 0x4007 => $"LDC.L @{R(n)}+,SR",
+        _ when (opcode & 0xF0FF) == 0x4017 => $"LDC.L @{R(n)}+,GBR",
+        _ when (opcode & 0xF0FF) == 0x4027 => $"LDC.L @{R(n)}+,VBR",
+        _ when (opcode & 0xF0FF) == 0x4015 => $"CMP/PL {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4011 => $"CMP/PZ {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4010 => $"DT {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4000 => $"SHLL {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4001 => $"SHLR {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4020 => $"SHAL {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4021 => $"SHAR {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4004 => $"ROTL {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4024 => $"ROTCL {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4005 => $"ROTR {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4025 => $"ROTCR {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4008 => $"SHLL2 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4009 => $"SHLR2 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4018 => $"SHLL8 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4019 => $"SHLR8 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4028 => $"SHLL16 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x4029 => $"SHLR16 {R(n)}",
+        _ when (opcode & 0xF0FF) == 0x401B => $"TAS.B @{R(n)}",
+        _ when (opcode & 0xF00F) == 0x400C => $"SHAD {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x400D => $"SHLD {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x400F => $"MAC.W @{R(m)}+,@{R(n)}+",
+        _ when (opcode & 0xF00F) == 0x6008 => $"SWAP.B {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x6009 => $"SWAP.W {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600A => $"NEGC {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600B => $"NEG {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600C => $"EXTU.B {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600D => $"EXTU.W {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600E => $"EXTS.B {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x600F => $"EXTS.W {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x0004 => $"MOV.B {R(m)},@(R0,{R(n)})",
+        _ when (opcode & 0xF00F) == 0x0005 => $"MOV.W {R(m)},@(R0,{R(n)})",
+        _ when (opcode & 0xF00F) == 0x0006 => $"MOV.L {R(m)},@(R0,{R(n)})",
+        _ when (opcode & 0xF00F) == 0x0007 => $"MUL.L {R(m)},{R(n)}",
+        _ when (opcode & 0xF00F) == 0x000F => $"MAC.L @{R(m)}+,@{R(n)}+",
+        _ when (opcode & 0xF00F) == 0x000C => $"MOV.B @(R0,{R(m)}),{R(n)}",
+        _ when (opcode & 0xF00F) == 0x000D => $"MOV.W @(R0,{R(m)}),{R(n)}",
+        _ when (opcode & 0xF00F) == 0x000E => $"MOV.L @(R0,{R(m)}),{R(n)}",
+        _ when (opcode >> 12) == 0x1 => $"MOV.L {R(m)},@({d4 * 4},{R(n)})",
+        _ when (opcode >> 12) == 0x5 => $"MOV.L @({d4 * 4},{R(m)}),{R(n)}",
+        _ when (opcode >> 12) == 0x7 => $"ADD {Imm(SignExtend8ForDisassembly(d8))},{R(n)}",
+        _ when (opcode >> 12) == 0x9 => $"MOV.W @({Disp((pc + 4 + (uint)(d8 * 2)) & 0xFFFF_FFFE)},PC),{R(n)}",
+        _ when (opcode >> 12) == 0xA => $"BRA {Disp(PcDisp12())}",
+        _ when (opcode >> 12) == 0xB => $"BSR {Disp(PcDisp12())}",
+        _ when (opcode >> 12) == 0xD => $"MOV.L @({Disp((pc + 4 + (uint)(d8 * 4)) & 0xFFFF_FFFC)},PC),{R(n)}",
+        _ when (opcode >> 12) == 0xE => $"MOV {Imm(SignExtend8ForDisassembly(d8))},{R(n)}",
+        _ => DisassembleSh2ByGroup(opcode, pc, n, m, d4, d8, R, Disp, PcDisp8),
+    };
+}
+
+string DisassembleSh2ByGroup(ushort opcode, uint pc, int n, int m, int d4, int d8, Func<int, string> R, Func<uint, string> Disp, Func<int, uint> PcDisp8)
+{
+    return (opcode >> 12) switch
+    {
+        0x2 => (opcode & 0x0F) switch
+        {
+            0x0 => $"MOV.B {R(m)},@{R(n)}",
+            0x1 => $"MOV.W {R(m)},@{R(n)}",
+            0x2 => $"MOV.L {R(m)},@{R(n)}",
+            0x4 => $"MOV.B {R(m)},@-{R(n)}",
+            0x5 => $"MOV.W {R(m)},@-{R(n)}",
+            0x6 => $"MOV.L {R(m)},@-{R(n)}",
+            0x7 => $"DIV0S {R(m)},{R(n)}",
+            0x8 => $"TST {R(m)},{R(n)}",
+            0x9 => $"AND {R(m)},{R(n)}",
+            0xA => $"XOR {R(m)},{R(n)}",
+            0xB => $"OR {R(m)},{R(n)}",
+            0xC => $"CMP/STR {R(m)},{R(n)}",
+            0xD => $"XTRCT {R(m)},{R(n)}",
+            0xE => $"MULU.W {R(m)},{R(n)}",
+            0xF => $"MULS.W {R(m)},{R(n)}",
+            _ => "?"
+        },
+        0x3 => (opcode & 0x0F) switch
+        {
+            0x0 => $"CMP/EQ {R(m)},{R(n)}",
+            0x2 => $"CMP/HS {R(m)},{R(n)}",
+            0x3 => $"CMP/GE {R(m)},{R(n)}",
+            0x4 => $"DIV1 {R(m)},{R(n)}",
+            0x5 => $"DMULU.L {R(m)},{R(n)}",
+            0x6 => $"CMP/HI {R(m)},{R(n)}",
+            0x7 => $"CMP/GT {R(m)},{R(n)}",
+            0x8 => $"SUB {R(m)},{R(n)}",
+            0xA => $"SUBC {R(m)},{R(n)}",
+            0xB => $"SUBV {R(m)},{R(n)}",
+            0xC => $"ADD {R(m)},{R(n)}",
+            0xD => $"DMULS.L {R(m)},{R(n)}",
+            0xE => $"ADDC {R(m)},{R(n)}",
+            0xF => $"ADDV {R(m)},{R(n)}",
+            _ => "?"
+        },
+        0x6 => (opcode & 0x0F) switch
+        {
+            0x0 => $"MOV.B @{R(m)},{R(n)}",
+            0x1 => $"MOV.W @{R(m)},{R(n)}",
+            0x2 => $"MOV.L @{R(m)},{R(n)}",
+            0x3 => $"MOV {R(m)},{R(n)}",
+            0x4 => $"MOV.B @{R(m)}+,{R(n)}",
+            0x5 => $"MOV.W @{R(m)}+,{R(n)}",
+            0x6 => $"MOV.L @{R(m)}+,{R(n)}",
+            0x7 => $"NOT {R(m)},{R(n)}",
+            0xA => $"NEGC {R(m)},{R(n)}",
+            0xC => $"MOV.B @(R0,{R(m)}),{R(n)}",
+            0xD => $"MOV.W @(R0,{R(m)}),{R(n)}",
+            0xE => $"MOV.L @(R0,{R(m)}),{R(n)}",
+            _ => "?"
+        },
+        0x8 => ((opcode >> 8) & 0x0F) switch
+        {
+            0x0 => $"MOV.B R0,@({d4},{R(m)})",
+            0x1 => $"MOV.W R0,@({d4 * 2},{R(m)})",
+            0x4 => $"MOV.B @({d4},{R(m)}),R0",
+            0x5 => $"MOV.W @({d4 * 2},{R(m)}),R0",
+            0x8 => $"CMP/EQ #{SignExtend8ForDisassembly(d8)},R0",
+            0x9 => $"BT {Disp(PcDisp8(2))}",
+            0xB => $"BF {Disp(PcDisp8(2))}",
+            0xD => $"BT/S {Disp(PcDisp8(2))}",
+            0xF => $"BF/S {Disp(PcDisp8(2))}",
+            _ => "?"
+        },
+        0xC => ((opcode >> 8) & 0x0F) switch
+        {
+            0x0 => $"MOV.B R0,@({d8},GBR)",
+            0x1 => $"MOV.W R0,@({d8 * 2},GBR)",
+            0x2 => $"MOV.L R0,@({d8 * 4},GBR)",
+            0x3 => $"TRAPA #{d8}",
+            0x4 => $"MOV.B @({d8},GBR),R0",
+            0x5 => $"MOV.W @({d8 * 2},GBR),R0",
+            0x6 => $"MOV.L @({d8 * 4},GBR),R0",
+            0x7 => $"MOVA @({d8 * 4},PC),R0",
+            0x8 => $"TST #{d8},R0",
+            0x9 => $"AND #{d8},R0",
+            0xA => $"XOR #{d8},R0",
+            0xB => $"OR #{d8},R0",
+            0xC => $"TST.B #{d8},@(R0,GBR)",
+            0xD => $"AND.B #{d8},@(R0,GBR)",
+            0xE => $"XOR.B #{d8},@(R0,GBR)",
+            0xF => $"OR.B #{d8},@(R0,GBR)",
+            _ => "?"
+        },
+        _ => "?"
+    };
+}
+
+static int SignExtend8ForDisassembly(int value)
+{
+    value &= 0xFF;
+    return (value & 0x80) != 0 ? value | unchecked((int)0xFFFF_FF00) : value;
+}
+
+static int SignExtend12ForDisassembly(int value)
+{
+    value &= 0x0FFF;
+    return (value & 0x0800) != 0 ? value | unchecked((int)0xFFFF_F000) : value;
+}
+
+string FormatSh2Registers(Sh2Cpu cpu)
+{
+    StringBuilder builder = new();
+    for (int i = 0; i < cpu.R.Length; i++)
+    {
+        if (builder.Length > 0)
+        {
+            builder.Append(' ');
+        }
+
+        builder.Append('R');
+        builder.Append(i.ToString(CultureInfo.InvariantCulture));
+        builder.Append("=$");
+        builder.Append(cpu.R[i].ToString("X8", CultureInfo.InvariantCulture));
+    }
+
+    builder.Append(" SR=$");
+    builder.Append(cpu.SR.ToString("X8", CultureInfo.InvariantCulture));
+    builder.Append(" PR=$");
+    builder.Append(cpu.PR.ToString("X8", CultureInfo.InvariantCulture));
+    builder.Append(" GBR=$");
+    builder.Append(cpu.GBR.ToString("X8", CultureInfo.InvariantCulture));
+    builder.Append(" VBR=$");
+    builder.Append(cpu.VBR.ToString("X8", CultureInfo.InvariantCulture));
+    return builder.ToString();
+}
+
+ushort ReadThirtyTwoXDebugWord(ThirtyTwoXDevice device, CartridgeImage cartridge, uint address)
+{
+    if (address is >= 0xF000_0000 and < 0xF000_0000 + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+    {
+        int offset = (int)(address - 0xF000_0000);
+        ReadOnlySpan<byte> frameBuffer = device.DisplayFrameBuffer;
+        return (ushort)((frameBuffer[offset] << 8) | frameBuffer[offset + 1]);
+    }
+
+    if (address is >= 0xF100_0000 and < 0xF100_0000 + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+    {
+        int offset = (int)(address - 0xF100_0000);
+        ReadOnlySpan<byte> frameBuffer = device.DrawFrameBuffer;
+        return (ushort)((frameBuffer[offset] << 8) | frameBuffer[offset + 1]);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramStart and < ThirtyTwoXHardwareProfile.Sh2SdramStart + ThirtyTwoXHardwareProfile.SdramBytes - 1)
+    {
+        int offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramStart);
+        ReadOnlySpan<byte> sdram = device.Sdram;
+        return (ushort)((sdram[offset] << 8) | sdram[offset + 1]);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart and < ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart + ThirtyTwoXHardwareProfile.SdramBytes - 1)
+    {
+        int offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart);
+        ReadOnlySpan<byte> sdram = device.Sdram;
+        return (ushort)((sdram[offset] << 8) | sdram[offset + 1]);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x80 - 1)
+    {
+        return device.ReadVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart));
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80 - 1)
+    {
+        return device.ReadVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart));
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
+    {
+        return device.ReadPaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart));
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
+    {
+        return device.ReadPaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart));
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
+    {
+        return device.ReadPaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart));
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2FrameBufferStart and < ThirtyTwoXHardwareProfile.Sh2FrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+    {
+        return device.ReadFrameBufferWord(address - ThirtyTwoXHardwareProfile.Sh2FrameBufferStart);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2FrameBufferCachedStart and < ThirtyTwoXHardwareProfile.Sh2FrameBufferCachedStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+    {
+        return device.ReadFrameBufferWord(address - ThirtyTwoXHardwareProfile.Sh2FrameBufferCachedStart);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.M68kFrameBufferStart and < ThirtyTwoXHardwareProfile.M68kFrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+    {
+        return device.ReadFrameBufferWord(address - ThirtyTwoXHardwareProfile.M68kFrameBufferStart);
+    }
+
+    if (address is >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart and < ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x40_0000)
+    {
+        uint offset = address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart;
+        return cartridge.ReadWord(offset);
+    }
+
+    if (address >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
+    {
+        uint offset = address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart;
+        return cartridge.ReadWord(offset);
+    }
+
+    return 0xFFFF;
 }
 
 byte ExpandGenesisColor(int value)
@@ -9571,6 +12952,128 @@ file sealed record CompatibilityResult(
     }
 }
 
+file sealed record ThirtyTwoXSweepResult(
+    string RelativeRom,
+    string Status,
+    int Frames,
+    long ElapsedMs,
+    double Fps,
+    uint Pc,
+    string Exceptions,
+    string RenderMode,
+    int NonBackgroundPixels,
+    int MaxNonBackgroundPixels,
+    int CompositeMode,
+    bool CompositeFallback,
+    int CompositePixels,
+    int BitmapMode,
+    ushort FrameBufferControl,
+    int ModeWrites,
+    int FrameBufferControlWrites,
+    int VdpWrites,
+    int FrameBufferByteWrites,
+    int PaletteByteWrites,
+    int DreqWrites,
+    int DreqDmaWords,
+    int DisplayFrameBufferNonzero,
+    int DrawFrameBufferNonzero,
+    int DisplayFrameBufferPayloadNonzero,
+    int DrawFrameBufferPayloadNonzero,
+    int PaletteNonzero,
+    ushort Comm0,
+    ushort Comm2,
+    ushort Comm4,
+    ushort Comm6,
+    uint MasterPc,
+    uint SlavePc,
+    ushort MasterLastOpcode,
+    ushort SlaveLastOpcode,
+    ushort MasterInterruptMask,
+    ushort SlaveInterruptMask,
+    int PwmAudioLeft,
+    int PwmAudioRight,
+    int PwmAudioMono,
+    int PwmHardwareLeft,
+    int PwmHardwareRight,
+    int PwmHardwareMono,
+    int PwmCycleCounter,
+    int PwmTimerCounter,
+    bool MasterPwmPending,
+    bool SlavePwmPending,
+    bool BootPending,
+    bool BootRead,
+    bool BootLaunch,
+    string Sha256,
+    string BmpPath,
+    string Detail)
+{
+    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
+
+    public string ToCsv()
+    {
+        return string.Join(
+            ',',
+            $"\"{Escape(RelativeRom)}\"",
+            Status,
+            Frames.ToString(CultureInfo.InvariantCulture),
+            ElapsedMs.ToString(CultureInfo.InvariantCulture),
+            Fps.ToString("0.###", CultureInfo.InvariantCulture),
+            $"${Pc:X8}",
+            $"\"{Escape(Exceptions)}\"",
+            RenderMode,
+            NonBackgroundPixels.ToString(CultureInfo.InvariantCulture),
+            MaxNonBackgroundPixels.ToString(CultureInfo.InvariantCulture),
+            CompositeMode.ToString(CultureInfo.InvariantCulture),
+            CompositeFallback ? "true" : "false",
+            CompositePixels.ToString(CultureInfo.InvariantCulture),
+            BitmapMode.ToString(CultureInfo.InvariantCulture),
+            $"${FrameBufferControl:X4}",
+            ModeWrites.ToString(CultureInfo.InvariantCulture),
+            FrameBufferControlWrites.ToString(CultureInfo.InvariantCulture),
+            VdpWrites.ToString(CultureInfo.InvariantCulture),
+            FrameBufferByteWrites.ToString(CultureInfo.InvariantCulture),
+            PaletteByteWrites.ToString(CultureInfo.InvariantCulture),
+            DreqWrites.ToString(CultureInfo.InvariantCulture),
+            DreqDmaWords.ToString(CultureInfo.InvariantCulture),
+            DisplayFrameBufferNonzero.ToString(CultureInfo.InvariantCulture),
+            DrawFrameBufferNonzero.ToString(CultureInfo.InvariantCulture),
+            DisplayFrameBufferPayloadNonzero.ToString(CultureInfo.InvariantCulture),
+            DrawFrameBufferPayloadNonzero.ToString(CultureInfo.InvariantCulture),
+            PaletteNonzero.ToString(CultureInfo.InvariantCulture),
+            $"${Comm0:X4}",
+            $"${Comm2:X4}",
+            $"${Comm4:X4}",
+            $"${Comm6:X4}",
+            $"${MasterPc:X8}",
+            $"${SlavePc:X8}",
+            $"${MasterLastOpcode:X4}",
+            $"${SlaveLastOpcode:X4}",
+            $"${MasterInterruptMask:X4}",
+            $"${SlaveInterruptMask:X4}",
+            PwmAudioLeft.ToString(CultureInfo.InvariantCulture),
+            PwmAudioRight.ToString(CultureInfo.InvariantCulture),
+            PwmAudioMono.ToString(CultureInfo.InvariantCulture),
+            PwmHardwareLeft.ToString(CultureInfo.InvariantCulture),
+            PwmHardwareRight.ToString(CultureInfo.InvariantCulture),
+            PwmHardwareMono.ToString(CultureInfo.InvariantCulture),
+            PwmCycleCounter.ToString(CultureInfo.InvariantCulture),
+            PwmTimerCounter.ToString(CultureInfo.InvariantCulture),
+            MasterPwmPending ? "true" : "false",
+            SlavePwmPending ? "true" : "false",
+            BootPending ? "true" : "false",
+            BootRead ? "true" : "false",
+            BootLaunch ? "true" : "false",
+            Sha256,
+            $"\"{Escape(BmpPath)}\"",
+            $"\"{Escape(Detail)}\"");
+    }
+
+    private static string Escape(string value)
+    {
+        return value.Replace("\"", "\"\"", StringComparison.Ordinal);
+    }
+}
+
 file sealed class PostMenuCompatibilityManifest
 {
     public List<PostMenuCompatibilityCase> Cases { get; set; } = [];
@@ -9889,6 +13392,85 @@ file readonly record struct DmaTransferSample(
     long MasterCycleStart,
     long MasterCycleEnd,
     int Scanline);
+
+file readonly record struct Sh2FaultTraceRow(
+    int Frame,
+    int Sequence,
+    string Cpu,
+    uint Pc,
+    ushort Opcode,
+    uint NextPc,
+    uint Sr,
+    uint R0,
+    uint R1,
+    uint R2,
+    uint R3,
+    uint R4,
+    uint R5,
+    uint R6,
+    uint R7,
+    uint R15);
+
+file sealed record FillLoopKey(int Frame, string Cpu, uint LoopPc, string Target);
+
+file sealed class FillLoopSummary(FillLoopKey key)
+{
+    public FillLoopKey Key { get; } = key;
+    public int Hits { get; set; }
+    public long FirstMasterCycle { get; set; }
+    public long LastMasterCycle { get; set; }
+    public int FirstScanline { get; set; }
+    public int LastScanline { get; set; }
+    public uint FirstAddress { get; set; }
+    public uint LastAddress { get; set; }
+    public uint Value { get; set; }
+    public uint FirstCount { get; set; }
+    public uint LastCount { get; set; }
+    public int Increment { get; set; }
+    public int AddressRegister { get; set; }
+    public int SourceRegister { get; set; }
+    public int CountRegister { get; set; }
+    public ushort FrameBufferControl { get; set; }
+    public ushort BitmapMode { get; set; }
+    public int DrawFrameBufferIndex { get; set; }
+    public int DisplayFrameBufferIndex { get; set; }
+    public bool SwapPending { get; set; }
+    public int DeniedFrameBufferAccessCount { get; set; }
+    public int FrameBufferByteWriteCount { get; set; }
+
+    public string ToCsv()
+    {
+        return string.Join(
+            ',',
+            Key.Frame.ToString(CultureInfo.InvariantCulture),
+            Quote(Key.Cpu),
+            $"${Key.LoopPc:X8}",
+            Quote(Key.Target),
+            Hits.ToString(CultureInfo.InvariantCulture),
+            FirstMasterCycle.ToString(CultureInfo.InvariantCulture),
+            LastMasterCycle.ToString(CultureInfo.InvariantCulture),
+            FirstScanline.ToString(CultureInfo.InvariantCulture),
+            LastScanline.ToString(CultureInfo.InvariantCulture),
+            $"${FirstAddress:X8}",
+            $"${LastAddress:X8}",
+            $"${Value:X4}",
+            FirstCount.ToString(CultureInfo.InvariantCulture),
+            LastCount.ToString(CultureInfo.InvariantCulture),
+            Increment.ToString(CultureInfo.InvariantCulture),
+            AddressRegister.ToString(CultureInfo.InvariantCulture),
+            SourceRegister.ToString(CultureInfo.InvariantCulture),
+            CountRegister.ToString(CultureInfo.InvariantCulture),
+            $"${FrameBufferControl:X4}",
+            $"${BitmapMode:X4}",
+            DrawFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            DisplayFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            SwapPending ? "true" : "false",
+            DeniedFrameBufferAccessCount.ToString(CultureInfo.InvariantCulture),
+            FrameBufferByteWriteCount.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static string Quote(string value) => "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+}
 
 file readonly record struct VirtuaRacingExpectedDma(uint SourceAddress, uint DestinationAddress, int LengthWords);
 

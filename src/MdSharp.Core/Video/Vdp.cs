@@ -66,6 +66,8 @@ public sealed class Vdp
     private readonly uint[] _linePlaneAPacked = new uint[ScreenWidth];
     private readonly uint[] _lineSpritesPacked = new uint[ScreenWidth];
     private readonly uint[] _captureLineSpritePackedPixels = new uint[ScreenWidth];
+    private readonly bool[] _lastFrameOpaquePixels = new bool[ScreenWidth * ScreenHeight];
+    private readonly bool[] _lastFramePriorityPixels = new bool[ScreenWidth * ScreenHeight];
     private readonly int[] _linePlaneAVScroll = new int[20];
     private readonly int[] _linePlaneBVScroll = new int[20];
     private readonly SpriteInstance[] _renderSprites = new SpriteInstance[MaxSprites];
@@ -124,6 +126,7 @@ public sealed class Vdp
     public int CurrentScanline => _scanline;
     public int FifoWords => _fifoWords;
     public bool VInterruptPending => _vInterruptPending;
+    public bool VInterruptLineActive => _vInterruptPending && _vBlank;
     public bool HInterruptPending => _hInterruptPending;
     public int DmaCycleDebt { get; private set; }
     public bool UseLineVramSnapshots { get; set; } = true;
@@ -132,6 +135,8 @@ public sealed class Vdp
     public int? LastRenderFallbackNameTableBase { get; private set; }
     public int? LastRenderFallbackTileStart { get; private set; }
     public string LastRenderMode { get; private set; } = "planes";
+    public ReadOnlySpan<bool> LastFrameOpaquePixels => _lastFrameOpaquePixels;
+    public ReadOnlySpan<bool> LastFramePriorityPixels => _lastFramePriorityPixels;
 
     public byte AutoIncrement => _registers[15];
 
@@ -649,6 +654,8 @@ public sealed class Vdp
         LastRenderFallbackTileStart = null;
         LastRenderMode = "planes";
         LastRenderPerformance = default;
+        Array.Clear(_lastFrameOpaquePixels);
+        Array.Clear(_lastFramePriorityPixels);
 
         if (!IsDisplayEnabled())
         {
@@ -745,6 +752,8 @@ public sealed class Vdp
 
         _renderVram = _visibleFrameVramCaptured ? _visibleFrameVram : _vram;
         Array.Copy(_registers, _renderSavedRegisters, _registers.Length);
+        Array.Clear(_lastFrameOpaquePixels);
+        Array.Clear(_lastFramePriorityPixels);
         try
         {
             int lineY = Math.Clamp(screenY, 0, ScreenHeight - 1);
@@ -1103,6 +1112,8 @@ public sealed class Vdp
                     {
                         Rgb even = ReadCompositedColor(x, y, evenY, planeWidthTiles, planeHeightTiles, planeAHScroll, planeBHScroll, _renderEvenLineSprites, evenLineSpriteCount, background, shadowHighlightEnabled, out bool evenVisible);
                         WriteColor(framebuffer, pixelOffset, even, pixelOrder);
+                        _lastFrameOpaquePixels[(y * ScreenWidth) + xOffset + x] = evenVisible;
+                        _lastFramePriorityPixels[(y * ScreenWidth) + xOffset + x] = false;
                         pixelOffset += 3;
                         drawn += evenVisible ? 1 : 0;
                     }
@@ -1200,6 +1211,8 @@ public sealed class Vdp
 
                         Rgb fastColor = (fastPixel & PackedVisibleBit) != 0 ? _renderPalette[(fastPixel >> PackedPaletteShift) & 0x3F] : background;
                         WriteColor(framebuffer, pixelOffset, fastColor, pixelOrder);
+                        _lastFrameOpaquePixels[(y * ScreenWidth) + xOffset + x] = (fastPixel & PackedVisibleBit) != 0;
+                        _lastFramePriorityPixels[(y * ScreenWidth) + xOffset + x] = (fastPixel & (PackedVisibleBit | PackedPriorityBit)) == (PackedVisibleBit | PackedPriorityBit);
                         pixelOffset += 3;
                         drawn += (fastPixel & PackedVisibleBit) != 0 ? 1 : 0;
                         continue;
@@ -1228,6 +1241,8 @@ public sealed class Vdp
                     ShadowHighlightShade shade = ResolveShadowHighlightShadePacked(planeAPixel, planeBPixel, sprite, spriteEffect, shadowHighlightEnabled);
                     Rgb color = PackedVisible(pixel) ? ApplyShade(_renderPalette[PackedPaletteIndex(pixel)], shade) : ApplyShade(background, shade);
                     WriteColor(framebuffer, pixelOffset, color, pixelOrder);
+                    _lastFrameOpaquePixels[(y * ScreenWidth) + xOffset + x] = PackedVisible(pixel);
+                    _lastFramePriorityPixels[(y * ScreenWidth) + xOffset + x] = PackedVisible(pixel) && PackedPriority(pixel);
                     pixelOffset += 3;
                     drawn += PackedVisible(pixel) ? 1 : 0;
                 }

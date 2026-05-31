@@ -2,6 +2,7 @@ using MdSharp.Core.Audio;
 using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.Z80;
 using MdSharp.Core.Input;
+using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
 
 namespace MdSharp.Core.Bus;
@@ -10,6 +11,29 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 {
     private const long Z80BusGrantDelayMasterCycles = 64;
     private const int M68kMasterDivider = 7;
+    private const uint ThirtyTwoXVectorRomBytes = 0x100;
+    private const uint ThirtyTwoXVectorRomHelperStart = 0xC0;
+    private const uint ThirtyTwoXVectorJumpTableStart = 0x88_0200;
+    private const uint ThirtyTwoXVectorJumpTableStride = 6;
+    private const int ThirtyTwoXCommunicationReadSyncCycles = 32;
+    private const int ThirtyTwoXCommunicationWriteSyncCycles = 4096;
+    private static readonly byte[] ThirtyTwoXVectorRomHelpers =
+    [
+        0x08, 0xF9, 0x00, 0x00, 0x00, 0xA1, 0x51, 0x07,
+        0x12, 0x80,
+        0x08, 0xB9, 0x00, 0x00, 0x00, 0xA1, 0x51, 0x07,
+        0x4E, 0x75,
+        0x48, 0xE7, 0x01, 0x40,
+        0x08, 0xF9, 0x00, 0x00, 0x00, 0xA1, 0x51, 0x07,
+        0x43, 0xF9, 0x00, 0xA1, 0x30, 0xF1,
+        0x7E, 0x07,
+        0x12, 0x98,
+        0xD0, 0xFC, 0x00, 0x02,
+        0x51, 0xCF, 0xFF, 0xF8,
+        0x08, 0xB9, 0x00, 0x00, 0x00, 0xA1, 0x51, 0x07,
+        0x4C, 0xDF, 0x02, 0x80,
+        0x4E, 0x75
+    ];
     private const int Z80AreaM68kWaitCycles = 2;
     private const int Ym2612M68kWaitCycles = 2;
     private const int IoM68kWaitCycles = 2;
@@ -22,6 +46,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private readonly ThreeButtonController[] _controllers;
     private readonly SegaTeamPlayerAdapter _teamPlayer;
     private readonly SvpDevice? _svp;
+    private readonly ThirtyTwoXDevice? _thirtyTwoX;
+    private readonly byte[]? _thirtyTwoXM68kBios;
     private readonly byte[] _ioData = { 0x40, 0x40, 0x40 };
     private readonly byte[] _ioControl = new byte[3];
     private readonly byte _versionRegister;
@@ -42,7 +68,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private int _lightGunY = Vdp.ScreenHeight / 2;
     private bool _lightGunVisible;
 
-    public GenesisBus(CartridgeImage cartridge, Vdp vdp, Psg psg, Ym2612 ym2612, bool pal = false, ThreeButtonController? controller1 = null, ThreeButtonController? controller2 = null, ThreeButtonController? controller3 = null, ThreeButtonController? controller4 = null)
+    public GenesisBus(CartridgeImage cartridge, Vdp vdp, Psg psg, Ym2612 ym2612, bool pal = false, ThreeButtonController? controller1 = null, ThreeButtonController? controller2 = null, ThreeButtonController? controller3 = null, ThreeButtonController? controller4 = null, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null)
     {
         Cartridge = cartridge;
         Vdp = vdp;
@@ -58,6 +84,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         };
         _teamPlayer = new SegaTeamPlayerAdapter(_controllers);
         _svp = cartridge.Diagnostics.HasSvp ? new SvpDevice(cartridge.Rom) : null;
+        _thirtyTwoX = cartridge.Diagnostics.Requires32X ? new ThirtyTwoXDevice(cartridge.Rom, pal) : null;
+        if (_thirtyTwoX is not null && thirtyTwoXM68kBios.HasValue && !thirtyTwoXM68kBios.Value.IsEmpty)
+        {
+            _thirtyTwoXM68kBios = thirtyTwoXM68kBios.Value.ToArray();
+        }
     }
 
     public CartridgeImage Cartridge { get; }
@@ -65,6 +96,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public Psg Psg { get; }
     public Ym2612 Ym2612 { get; }
     public SvpDevice? Svp => _svp;
+    public ThirtyTwoXDevice? ThirtyTwoX => _thirtyTwoX;
     public bool StepSvpDuringDma { get; set; } = true;
     public ReadOnlySpan<byte> WorkRam => _workRam;
     public ReadOnlySpan<byte> Z80Ram => _z80Ram;
@@ -87,6 +119,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public long CurrentMasterCycle { get; set; }
     public int CurrentScanlineMasterCycleOffset { get; set; }
     public int MasterCyclesPerScanline { get; set; } = 1;
+    public Action<MemoryRead>? MemoryReadObserver { get; set; }
     public Action<MemoryWrite>? MemoryWriteObserver { get; set; }
     public Action<IoAccess>? IoObserver { get; set; }
     public Action<AudioAccess>? AudioObserver { get; set; }
@@ -97,6 +130,16 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public byte ReadByte(uint address)
     {
         address &= 0x00FF_FFFF;
+
+        if (TryReadThirtyTwoXVectorRomByte(address, out byte vectorValue))
+        {
+            return vectorValue;
+        }
+
+        if (IsThirtyTwoXLowCartridgeRomBlocked(address))
+        {
+            return 0xFF;
+        }
 
         if (address <= 0x3F_FFFF)
         {
@@ -113,7 +156,16 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 return value;
             }
 
-            return Cartridge.ReadByte(address);
+            byte cartridgeValue = Cartridge.ReadByte(address);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 1, cartridgeValue));
+            return cartridgeValue;
+        }
+
+        if (_thirtyTwoX is not null && TryReadThirtyTwoXByte(address, out byte thirtyTwoXValue))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 1, thirtyTwoXValue));
+            return thirtyTwoXValue;
         }
 
         if (address is >= 0xA0_0000 and <= 0xA0_1FFF)
@@ -152,6 +204,13 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return _tmss[address & 0x03];
         }
 
+        if (_thirtyTwoX is not null && TryReadThirtyTwoXByte(address, out thirtyTwoXValue))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 1, thirtyTwoXValue));
+            return thirtyTwoXValue;
+        }
+
         if (_svp is not null && address is >= 0xA1_5000 and <= 0xA1_5009)
         {
             SyncSvpToCurrentMasterCycle();
@@ -168,7 +227,10 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address >= 0xE0_0000)
         {
-            return _workRam[address & 0xFFFF];
+            uint ramAddress = address & 0xFFFF;
+            byte value = _workRam[ramAddress];
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | ramAddress, 1, value));
+            return value;
         }
 
         return 0xFF;
@@ -202,6 +264,13 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (Cartridge.TryWriteByte(address, value))
         {
             AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            return;
+        }
+
+        if (_thirtyTwoX is not null && TryWriteThirtyTwoXByte(address, value))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MaybeSeedThirtyTwoXSdkCountryBlock();
             return;
         }
 
@@ -272,6 +341,13 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return;
         }
 
+        if (_thirtyTwoX is not null && TryWriteThirtyTwoXByte(address, value))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MaybeSeedThirtyTwoXSdkCountryBlock();
+            return;
+        }
+
         if (address is >= 0xC0_0000 and <= 0xC0_001F)
         {
             AddM68kWaitCycles(VdpPortM68kWaitCycles);
@@ -290,6 +366,16 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public ushort ReadWord(uint address)
     {
         address &= 0x00FF_FFFF;
+        if (TryReadThirtyTwoXVectorRomWord(address, out ushort vectorValue))
+        {
+            return vectorValue;
+        }
+
+        if (IsThirtyTwoXLowCartridgeRomBlocked(address))
+        {
+            return 0xFFFF;
+        }
+
         if (address <= 0x3F_FFFF)
         {
             if (IsJCartControllerWindow(address) || IsJCartControllerWindow(address + 1))
@@ -305,7 +391,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 return value;
             }
 
-            return Cartridge.ReadWord(address);
+            ushort cartridgeValue = Cartridge.ReadWord(address);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 2, cartridgeValue));
+            return cartridgeValue;
         }
 
         if (address is >= 0xA0_0000 and <= 0xA0_1FFE)
@@ -315,11 +403,25 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return (ushort)((_z80Ram[offset] << 8) | _z80Ram[(offset + 1) & 0x1FFF]);
         }
 
+        if (_thirtyTwoX is not null && TryReadThirtyTwoXWord(address, out ushort thirtyTwoXValue))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 2, thirtyTwoXValue));
+            return thirtyTwoXValue;
+        }
+
         if (address is >= 0xA1_4000 and <= 0xA1_4002)
         {
             AddM68kWaitCycles(IoM68kWaitCycles);
             int offset = (int)(address & 0x03);
             return (ushort)((_tmss[offset] << 8) | _tmss[(offset + 1) & 0x03]);
+        }
+
+        if (_thirtyTwoX is not null && TryReadThirtyTwoXWord(address, out thirtyTwoXValue))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 2, thirtyTwoXValue));
+            return thirtyTwoXValue;
         }
 
         if (_svp is not null && address is >= 0xA1_5000 and <= 0xA1_5009)
@@ -339,7 +441,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (address >= 0xE0_0000)
         {
             int offset = (int)(address & 0xFFFF);
-            return (ushort)((_workRam[offset] << 8) | _workRam[(offset + 1) & 0xFFFF]);
+            ushort value = (ushort)((_workRam[offset] << 8) | _workRam[(offset + 1) & 0xFFFF]);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 2, value));
+            return value;
         }
 
         return (ushort)((ReadByte(address) << 8) | ReadByte(address + 1));
@@ -348,6 +452,16 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public uint ReadLong(uint address)
     {
         address &= 0x00FF_FFFF;
+        if (TryReadThirtyTwoXVectorRomLong(address, out uint vectorValue))
+        {
+            return vectorValue;
+        }
+
+        if (IsThirtyTwoXLowCartridgeRomBlocked(address))
+        {
+            return 0xFFFF_FFFF;
+        }
+
         if (address <= 0x3F_FFFC)
         {
             if (IsJCartControllerWindow(address) || IsJCartControllerWindow(address + 3))
@@ -363,7 +477,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 return value;
             }
 
-            return Cartridge.ReadLong(address);
+            uint cartridgeValue = Cartridge.ReadLong(address);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 4, cartridgeValue));
+            return cartridgeValue;
         }
 
         if (address is >= 0xA0_0000 and <= 0xA0_1FFC)
@@ -373,10 +489,20 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return (uint)((_z80Ram[offset] << 24) | (_z80Ram[(offset + 1) & 0x1FFF] << 16) | (_z80Ram[(offset + 2) & 0x1FFF] << 8) | _z80Ram[(offset + 3) & 0x1FFF]);
         }
 
+        if (_thirtyTwoX is not null && TryReadThirtyTwoXWord(address, out ushort highThirtyTwoXValue) && TryReadThirtyTwoXWord(address + 2, out ushort lowThirtyTwoXValue))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles * 2);
+            uint value = (uint)((highThirtyTwoXValue << 16) | lowThirtyTwoXValue);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 4, value));
+            return value;
+        }
+
         if (address >= 0xE0_0000)
         {
             int offset = (int)(address & 0xFFFF);
-            return (uint)((_workRam[offset] << 24) | (_workRam[(offset + 1) & 0xFFFF] << 16) | (_workRam[(offset + 2) & 0xFFFF] << 8) | _workRam[(offset + 3) & 0xFFFF]);
+            uint value = (uint)((_workRam[offset] << 24) | (_workRam[(offset + 1) & 0xFFFF] << 16) | (_workRam[(offset + 2) & 0xFFFF] << 8) | _workRam[(offset + 3) & 0xFFFF]);
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 4, value));
+            return value;
         }
 
         return (uint)((ReadWord(address) << 16) | ReadWord(address + 2));
@@ -412,6 +538,13 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             SyncSvpToCurrentMasterCycle();
             _svp.WriteWord(address, value);
             SvpExternalObserver?.Invoke(new SvpExternalAccess(CurrentMasterCycle, CurrentM68kPc, _dmaActive, true, address, 2, value));
+            return;
+        }
+
+        if (_thirtyTwoX is not null && TryWriteThirtyTwoXWord(address, value))
+        {
+            AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            MaybeSeedThirtyTwoXSdkCountryBlock();
             return;
         }
 
@@ -565,6 +698,12 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         _svpClockRemainder = 0;
     }
 
+    public void ResetAddOnHardware()
+    {
+        ResetSvp();
+        _thirtyTwoX?.Reset();
+    }
+
     public void StepSvp(int cycles)
     {
         RunSvpCycles(cycles);
@@ -638,6 +777,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         _pendingM68kWaitCycles = 0;
         return cycles;
     }
+
+    public bool HasPendingM68kWaitCycles => _pendingM68kWaitCycles > 0;
 
     private void AddM68kWaitCycles(int cycles)
     {
@@ -760,6 +901,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         WriteControllerDevice(index);
     }
 
+    private byte GetDrivenControllerData(int index)
+    {
+        return (byte)(_ioData[index] | ~_ioControl[index]);
+    }
+
     private byte ReadControllerDevice(int index)
     {
         return index switch
@@ -785,7 +931,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             if (index == 0)
             {
-                _controllers[_ea4WayPlayLatch & 0x03].WriteData(_ioData[index], CurrentMasterCycle);
+                _controllers[_ea4WayPlayLatch & 0x03].WriteData(GetDrivenControllerData(index), CurrentMasterCycle);
             }
             else if (index == 1)
             {
@@ -793,7 +939,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 if ((data & 0x03) == 0)
                 {
                     _ea4WayPlayLatch = (byte)((data >> 4) & 0x07);
-                    _controllers[_ea4WayPlayLatch & 0x03].WriteData(_ioData[0], CurrentMasterCycle);
+                    _controllers[_ea4WayPlayLatch & 0x03].WriteData(GetDrivenControllerData(0), CurrentMasterCycle);
                 }
             }
 
@@ -811,7 +957,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return;
         }
 
-        _controllers[index].WriteData(_ioData[index], CurrentMasterCycle);
+        _controllers[index].WriteData(GetDrivenControllerData(index), CurrentMasterCycle);
     }
 
     private byte ReadEa4WayPlayPort1()
@@ -886,6 +1032,330 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         return address is >= 0x30_0000 and <= 0x31_FFFF or >= 0x39_0000 and <= 0x3A_FFFF;
     }
 
+    private bool TryReadThirtyTwoXByte(uint address, out byte value)
+    {
+        value = 0xFF;
+        if (_thirtyTwoX is null)
+        {
+            return false;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSuper32XId and <= ThirtyTwoXHardwareProfile.M68kSuper32XId + 3)
+        {
+            value = _thirtyTwoX.ReadSuper32XIdByte(address);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kFrameBufferStart and < ThirtyTwoXHardwareProfile.M68kFrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes)
+        {
+            value = _thirtyTwoX.ReadFrameBufferByte(address - ThirtyTwoXHardwareProfile.M68kFrameBufferStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kOverwriteImageStart and < ThirtyTwoXHardwareProfile.M68kOverwriteImageStart + ThirtyTwoXHardwareProfile.FrameBufferBytes)
+        {
+            value = _thirtyTwoX.ReadFrameBufferByte(address - ThirtyTwoXHardwareProfile.M68kOverwriteImageStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < 0xA0_0000)
+        {
+            AddM68kWaitCycles(_thirtyTwoX.ClaimM68kCartridgeBus(1, CurrentMasterCycle));
+            value = Cartridge.ReadByte(_thirtyTwoX.MapM68kCartridgeAddress(address));
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x80)
+        {
+            value = _thirtyTwoX.ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart));
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x80)
+        {
+            ushort offset = (ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart);
+            if (ShouldSampleThirtyTwoXRegisterBeforeSync(offset))
+            {
+                value = _thirtyTwoX.ReadSystemRegisterByte(offset);
+                SyncThirtyTwoXSystemHandshake(address, isWrite: false);
+            }
+            else
+            {
+                SyncThirtyTwoXSystemHandshake(address, isWrite: false);
+                value = _thirtyTwoX.ReadSystemRegisterByte(offset);
+            }
+
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
+        {
+            value = _thirtyTwoX.ReadPaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart));
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryReadThirtyTwoXVectorRomByte(uint address, out byte value)
+    {
+        value = 0xFF;
+        if (_thirtyTwoX is null ||
+            !_thirtyTwoX.AdapterEnabled ||
+            address >= ThirtyTwoXVectorRomBytes)
+        {
+            return false;
+        }
+
+        if (address < 4)
+        {
+            value = Cartridge.ReadByte(address);
+            return true;
+        }
+
+        if (_thirtyTwoXM68kBios is not null)
+        {
+            if (address < _thirtyTwoXM68kBios.Length)
+            {
+                value = _thirtyTwoXM68kBios[address];
+            }
+
+            return true;
+        }
+
+        if (address >= ThirtyTwoXVectorRomHelperStart)
+        {
+            value = ThirtyTwoXVectorRomHelpers[(int)(address - ThirtyTwoXVectorRomHelperStart)];
+            return true;
+        }
+
+        uint vector = address >> 2;
+        uint byteOffset = address & 0x03;
+        uint target = ThirtyTwoXVectorJumpTableStart + (vector * ThirtyTwoXVectorJumpTableStride);
+        value = byteOffset switch
+        {
+            0 => (byte)(target >> 24),
+            1 => (byte)(target >> 16),
+            2 => (byte)(target >> 8),
+            _ => (byte)target,
+        };
+        return true;
+    }
+
+    private bool IsThirtyTwoXLowCartridgeRomBlocked(uint address)
+    {
+        return _thirtyTwoX is not null &&
+            _thirtyTwoX.AdapterEnabled &&
+            !_thirtyTwoX.RomToVramDmaActive &&
+            address is >= ThirtyTwoXVectorRomBytes and <= 0x3F_FFFF;
+    }
+
+    private bool TryReadThirtyTwoXVectorRomWord(uint address, out ushort value)
+    {
+        if (TryReadThirtyTwoXVectorRomByte(address, out byte high) &&
+            TryReadThirtyTwoXVectorRomByte((address + 1) & 0x00FF_FFFF, out byte low))
+        {
+            value = (ushort)((high << 8) | low);
+            return true;
+        }
+
+        value = 0xFFFF;
+        return false;
+    }
+
+    private bool TryReadThirtyTwoXVectorRomLong(uint address, out uint value)
+    {
+        if (TryReadThirtyTwoXVectorRomWord(address, out ushort high) &&
+            TryReadThirtyTwoXVectorRomWord((address + 2) & 0x00FF_FFFF, out ushort low))
+        {
+            value = (uint)((high << 16) | low);
+            return true;
+        }
+
+        value = 0xFFFF_FFFF;
+        return false;
+    }
+
+    private bool TryReadThirtyTwoXWord(uint address, out ushort value)
+    {
+        value = 0xFFFF;
+        if (_thirtyTwoX is null)
+        {
+            return false;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSuper32XId and <= ThirtyTwoXHardwareProfile.M68kSuper32XId + 2)
+        {
+            value = (ushort)((_thirtyTwoX.ReadSuper32XIdByte(address) << 8) | _thirtyTwoX.ReadSuper32XIdByte(address + 1));
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kFrameBufferStart and < ThirtyTwoXHardwareProfile.M68kFrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+        {
+            value = _thirtyTwoX.ReadFrameBufferWord(address - ThirtyTwoXHardwareProfile.M68kFrameBufferStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kOverwriteImageStart and < ThirtyTwoXHardwareProfile.M68kOverwriteImageStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+        {
+            value = _thirtyTwoX.ReadFrameBufferWord(address - ThirtyTwoXHardwareProfile.M68kOverwriteImageStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < 0xA0_0000)
+        {
+            AddM68kWaitCycles(_thirtyTwoX.ClaimM68kCartridgeBus(2, CurrentMasterCycle));
+            value = Cartridge.ReadWord(_thirtyTwoX.MapM68kCartridgeAddress(address));
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x7F)
+        {
+            value = _thirtyTwoX.ReadVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart));
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x7F)
+        {
+            ushort offset = (ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart);
+            if (ShouldSampleThirtyTwoXRegisterBeforeSync(offset))
+            {
+                value = _thirtyTwoX.ReadSystemRegisterWord(offset);
+                SyncThirtyTwoXSystemHandshake(address, isWrite: false);
+            }
+            else
+            {
+                SyncThirtyTwoXSystemHandshake(address, isWrite: false);
+                value = _thirtyTwoX.ReadSystemRegisterWord(offset);
+            }
+
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
+        {
+            value = _thirtyTwoX.ReadPaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart));
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryWriteThirtyTwoXByte(uint address, byte value)
+    {
+        if (_thirtyTwoX is null)
+        {
+            return false;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kFrameBufferStart and < ThirtyTwoXHardwareProfile.M68kFrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes)
+        {
+            _thirtyTwoX.WriteFrameBufferByte(address - ThirtyTwoXHardwareProfile.M68kFrameBufferStart, value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kOverwriteImageStart and < ThirtyTwoXHardwareProfile.M68kOverwriteImageStart + ThirtyTwoXHardwareProfile.FrameBufferBytes)
+        {
+            _thirtyTwoX.WriteOverwriteImageByte(address - ThirtyTwoXHardwareProfile.M68kOverwriteImageStart, value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x80)
+        {
+            _thirtyTwoX.WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x80)
+        {
+            _thirtyTwoX.WriteSystemRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart), value);
+            SyncThirtyTwoXSystemHandshake(address, isWrite: true);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
+        {
+            _thirtyTwoX.WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryWriteThirtyTwoXWord(uint address, ushort value)
+    {
+        if (_thirtyTwoX is null)
+        {
+            return false;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kFrameBufferStart and < ThirtyTwoXHardwareProfile.M68kFrameBufferStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+        {
+            _thirtyTwoX.WriteFrameBufferWord(address - ThirtyTwoXHardwareProfile.M68kFrameBufferStart, value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kOverwriteImageStart and < ThirtyTwoXHardwareProfile.M68kOverwriteImageStart + ThirtyTwoXHardwareProfile.FrameBufferBytes - 1)
+        {
+            _thirtyTwoX.WriteOverwriteImageWord(address - ThirtyTwoXHardwareProfile.M68kOverwriteImageStart, value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x7F)
+        {
+            _thirtyTwoX.WriteVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x7F)
+        {
+            _thirtyTwoX.WriteSystemRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart), value);
+            SyncThirtyTwoXSystemHandshake(address, isWrite: true);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
+        {
+            _thirtyTwoX.WritePaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value);
+            _thirtyTwoX.GrantVdpAccessToSh2();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void SyncThirtyTwoXSystemHandshake(uint address, bool isWrite)
+    {
+        if (_thirtyTwoX is null || !IsThirtyTwoXSystemHandshakeAddress(address))
+        {
+            return;
+        }
+
+        _thirtyTwoX.SetCurrentMasterCycle(CurrentMasterCycle);
+        _thirtyTwoX.RunSh2Cycles(isWrite ? ThirtyTwoXCommunicationWriteSyncCycles : ThirtyTwoXCommunicationReadSyncCycles);
+    }
+
+    private static bool IsThirtyTwoXSystemHandshakeAddress(uint address)
+    {
+        const uint communicationPortStart = ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        const uint interruptControlStart = ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + ThirtyTwoXHardwareProfile.InterruptControlOffset;
+        return address is >= communicationPortStart and < communicationPortStart + 0x10 ||
+            address is >= interruptControlStart and < interruptControlStart + 2;
+    }
+
+    private static bool ShouldSampleThirtyTwoXRegisterBeforeSync(ushort offset)
+    {
+        const ushort upperMailboxStart = ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8;
+        return offset is >= upperMailboxStart and < upperMailboxStart + 8;
+    }
+
     private byte ReadJCartByte(uint address)
     {
         if ((address & 1) == 0)
@@ -931,6 +1401,30 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         }
 
         return version;
+    }
+
+    private void MaybeSeedThirtyTwoXSdkCountryBlock()
+    {
+        if (_thirtyTwoX is null ||
+            _workRam[0xD008] != (byte)'I' ||
+            _workRam[0xD009] != (byte)'N' ||
+            _workRam[0xD00A] != (byte)'I' ||
+            _workRam[0xD00B] != (byte)'T' ||
+            _workRam[0xD09A] != 0 ||
+            _workRam[0xD09B] != 0 ||
+            _workRam[0xD09C] != 0 ||
+            _workRam[0xD09D] != 0 ||
+            _workRam[0xD09E] != 0)
+        {
+            return;
+        }
+
+        bool overseas = (_versionRegister & 0x80) != 0;
+        _workRam[0xD09A] = overseas ? (byte)0x00 : (byte)0x01;
+        _workRam[0xD09B] = overseas ? (byte)0x01 : (byte)0x00;
+        _workRam[0xD09C] = 0x05;
+        _workRam[0xD09D] = 0x00;
+        _workRam[0xD09E] = 0x06;
     }
 
     private byte ReadVdpByte(uint address)
@@ -1043,6 +1537,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 }
                 previousElapsedMasterCycles = elapsedMasterCycles;
                 ushort value = ReadWord(source);
+                _thirtyTwoX?.SnoopM68kVdpDmaWord(source, value);
                 Vdp.WriteDmaWord(value);
                 ushort sourceAfterTransfer = sampleSource ? ReadWord(source) : value;
                 dmaWordObserver?.Invoke(new DmaWordTransfer(
@@ -1127,7 +1622,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             Cartridge.SaveRamEnabled,
             _z80BusGrantReadyCycle,
             _pendingM68kWaitCycles,
-            _svp?.CaptureState());
+            _svp?.CaptureState(),
+            _thirtyTwoX?.CaptureState());
     }
 
     public void RestoreState(BusState state)
@@ -1160,6 +1656,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             _svp.RestoreState(state.Svp);
         }
+
+        if (_thirtyTwoX is not null && state.ThirtyTwoX is not null)
+        {
+            _thirtyTwoX.RestoreState(state.ThirtyTwoX);
+        }
     }
 
     public sealed record BusState(
@@ -1178,9 +1679,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         bool SaveRamEnabled,
         long Z80BusGrantReadyCycle,
         int PendingM68kWaitCycles,
-        SvpDevice.SvpState? Svp);
+        SvpDevice.SvpState? Svp,
+        ThirtyTwoXDevice.ThirtyTwoXState? ThirtyTwoX);
 }
 
+public readonly record struct MemoryRead(uint Pc, uint Address, int Size, uint Value);
 public readonly record struct MemoryWrite(uint Pc, uint Address, byte Value);
 public readonly record struct IoAccess(uint Pc, bool IsWrite, uint Address, byte Value, byte Data0, byte Control0);
 public readonly record struct AudioAccess(long MasterCycle, uint Pc, AudioAccessSource Source, AudioChip Chip, AudioAccessKind Kind, int Port, byte Register, byte Value);

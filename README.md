@@ -49,6 +49,7 @@ The project is in active development. It can boot and play a growing set of reta
 - Preferences, display scaling options, default ROM folder, reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
 - Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
+- 32X cartridge detection and implementation planning; 32X execution is not supported yet
 
 ## Project Layout
 
@@ -66,7 +67,9 @@ docs/
   TEST_ROMS.md       Public diagnostic ROM source links
   COMPATIBILITY.md   Compatibility workflow and current focus areas
   INPUT_MOVIES.md    Deterministic input recording and replay workflow
+  emulator-building/ Transferable emulator engineering process and tooling guide
   AUDIO.md           Audio implementation and tuning workflow
+  32X.md             32X research notes and implementation plan
   SHOWCASE.md        Local screenshot gallery workflow
   PACKAGING.md       Desktop package creation
   RELEASE.md         Release checklist
@@ -218,6 +221,8 @@ mdSharp is being developed against a mix of public test ROMs, targeted retail-ga
 
 Compatibility varies by game. The emulator aims for correctness first, with broad compatibility and speed improving over time.
 
+Sega 32X support is in an early bring-up state. The desktop and CLI recognize `.32x` cartridges, attach a preliminary 32X shell, boot MARS user-header SH-2 programs, run both SH-2s with coarse frame scheduling, and can render early SDK framebuffer output. Retail compatibility is not playable yet; the remaining SH-2, interrupt/status, VDP, PWM, and bus-integration work is tracked in [docs/32X.md](docs/32X.md).
+
 ## ROMs, BIOS, And Reference Audio
 
 No commercial ROMs, BIOS files, or copyrighted reference music should be committed to this repository.
@@ -229,6 +234,7 @@ Recommended local-only folders/files:
 - `movies/` for local input movie captures
 - `render-output/` for generated screenshots, audio, traces, dashboards, and regression reports
 - `svp.bin` for a local Virtua Racing SVP coprocessor blob, when available
+- `32X_G_BIOS.BIN` or `32X_M68K_BIOS.BIN` for local-only 32X 68000 BIOS testing, or set `MDSHARP_32X_M68K_BIOS`
 - local `.wav`, `.flac`, `.mp3`, or `.ogg` reference audio used for diagnostics
 
 These paths are ignored by the release-oriented `.gitignore`, with only `.gitkeep` placeholders tracked for empty local folders.

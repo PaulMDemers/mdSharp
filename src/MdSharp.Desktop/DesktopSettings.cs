@@ -31,6 +31,7 @@ internal sealed class DesktopSettings
     public bool WindowMaximized { get; set; }
     public bool StartFullscreen { get; set; }
     public bool ShowDeveloperOptions { get; set; }
+    public bool Enable32X { get; set; }
     public bool Muted { get; set; }
     public int InstructionBudget { get; set; } = 300_000;
     public VideoAspectMode VideoAspectMode { get; set; } = VideoAspectMode.Native;

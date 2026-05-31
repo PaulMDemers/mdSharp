@@ -10,6 +10,7 @@ internal sealed class PreferencesForm : Form
     private readonly CheckBox _integerScaleBox = new();
     private readonly CheckBox _smoothingBox = new();
     private readonly CheckBox _mutedBox = new();
+    private readonly CheckBox _enable32XBox = new();
     private readonly bool _showDeveloperOptions;
 
     public PreferencesForm(DesktopSettings settings)
@@ -29,6 +30,7 @@ internal sealed class PreferencesForm : Form
         _integerScaleBox.Checked = settings.VideoIntegerScale;
         _smoothingBox.Checked = settings.VideoSmoothing;
         _mutedBox.Checked = settings.Muted;
+        _enable32XBox.Checked = settings.Enable32X;
 
         _aspectModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _aspectModeBox.Items.AddRange(
@@ -71,6 +73,8 @@ internal sealed class PreferencesForm : Form
     public int InstructionBudget => _budgetBox.SelectedItem is BudgetOption option ? option.Value : 300_000;
 
     public bool Muted => _mutedBox.Checked;
+
+    public bool Enable32X => _enable32XBox.Checked;
 
     public string? SaveRamDirectory => TextOrNull(_saveRamFolderBox);
 
@@ -154,6 +158,12 @@ internal sealed class PreferencesForm : Form
         _mutedBox.AutoSize = true;
         _mutedBox.Text = "Mute audio";
         root.Controls.Add(_mutedBox, 0, 8);
+
+        _enable32XBox.AutoSize = true;
+        _enable32XBox.Text = "Enable experimental 32X ROM loading";
+        _enable32XBox.Visible = _showDeveloperOptions;
+        _enable32XBox.Margin = new Padding(0, 0, 0, 12);
+        root.Controls.Add(_enable32XBox, 0, 9);
 
         FlowLayoutPanel buttons = new()
         {

@@ -25,7 +25,7 @@ flowchart LR
     Core --> Bus["Genesis bus"]
     Core --> Vdp["VDP"]
     Core --> Audio["PSG + YM2612"]
-    Core --> Cart["Cartridge hardware\nSRAM, EEPROM, SVP,\nJ-Cart, adapters"]
+    Core --> Cart["Cartridge hardware\nSRAM, EEPROM, SVP,\nJ-Cart, adapters,\n32X detection"]
 
     Bus --> Cpu68k
     Bus --> Z80
@@ -91,6 +91,7 @@ The 68000 and Z80 execute through the Genesis bus. The bus is responsible for ma
 - YM2612 address/data/status ports
 - SRAM/EEPROM access
 - SVP DRAM, host registers, cell-arranged reads, and SSP1601 execution for Virtua Racing
+- 32X cartridge detection; full 32X SH-2/VDP/PWM runtime is planned separately
 
 The bus also records observer events for diagnostic traces. Bus timing state is part of save states so restored sessions resume with the same pending Z80 grant and VDP wait-cycle behavior.
 
@@ -149,6 +150,10 @@ Cartridge save RAM and EEPROM live in the core cartridge layer. The desktop fron
 
 Save states use `SaveStateSerializer` and capture CPU, bus, cartridge, VDP, audio chip, scheduler, controller, and mixer state.
 
+## 32X Add-On Plan
+
+32X support is tracked as a separate add-on subsystem because it adds dual SH-2 CPUs, SDRAM, framebuffers, a second VDP layer, PWM audio, and a 68000/SH-2 communication register block. The first committed slice only detects 32X cartridges and documents the required runtime pieces. The implementation plan and address anchors live in [32X.md](32X.md).
+
 ## CLI Diagnostics
 
 `MdSharp.App` is intentionally broad. It contains tools for:
@@ -175,3 +180,4 @@ The CLI is not a stable public API yet. Important workflows should be documented
 - Use [SHOWCASE.md](SHOWCASE.md) for the local screenshot gallery.
 - Use [PACKAGING.md](PACKAGING.md) for desktop release package creation.
 - Use [RELEASE.md](RELEASE.md) before publishing the repository or cutting a binary build.
+- Use [emulator-building/README.md](emulator-building/README.md) for transferable process, tooling, debugging, and project hygiene notes for future emulator projects.

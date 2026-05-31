@@ -12,6 +12,7 @@ public sealed record CartridgeDiagnostics(
     bool UsesBankSwitchRegisters,
     bool HasJCart,
     bool HasSvp,
+    bool Requires32X,
     string[] UnsupportedHardware,
     string[] Warnings)
 {

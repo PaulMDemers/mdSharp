@@ -12,6 +12,7 @@ public sealed class M68kCpu
     private const int PrivilegeViolationVector = 8;
     private const int LineAEmulatorVector = 10;
     private const int LineFEmulatorVector = 11;
+    private const uint AddressMask = 0x00FF_FFFF;
 
     public M68kCpu(IMemoryBus bus)
     {
@@ -46,6 +47,11 @@ public sealed class M68kCpu
     public long Cycles { get; private set; }
     public uint USP { get; private set; }
     public bool TraceEnabled { get; set; }
+    public Action<M68kInstructionTrace>? InstructionObserver { get; set; }
+    public Action<M68kInterruptTrace>? InterruptObserver { get; set; }
+    public Action<M68kExceptionTrace>? ExceptionObserver { get; set; }
+    public Func<uint, ushort, bool>? LineFInstructionOverride { get; set; }
+    public Func<uint, ushort, bool>? TrapInstructionOverride { get; set; }
     public bool AllocationProfilingEnabled
     {
         get => _allocationProfilingEnabled;
@@ -61,6 +67,7 @@ public sealed class M68kCpu
     public IReadOnlyDictionary<int, long> ExceptionCounts => _exceptionCounts;
     public IReadOnlyList<string> ExceptionTrace => _exceptionTrace;
     public IReadOnlyCollection<string> RecentInstructionTrace => _recentInstructionTrace;
+
     private readonly Dictionary<int, long> _exceptionCounts = new();
     private readonly List<string> _exceptionTrace = new();
     private readonly Queue<string> _recentInstructionTrace = new();
@@ -83,7 +90,7 @@ public sealed class M68kCpu
         }
 
         A[7] = initialStack;
-        PC = initialPc;
+        PC = NormalizePc(initialPc);
         SR = 0x2700;
         USP = 0;
         _exceptionCounts.Clear();
@@ -102,7 +109,7 @@ public sealed class M68kCpu
     {
         Array.Copy(state.D, D, Math.Min(D.Length, state.D.Length));
         Array.Copy(state.A, A, Math.Min(A.Length, state.A.Length));
-        PC = state.PC;
+        PC = NormalizePc(state.PC);
         SR = state.SR;
         Stopped = state.Stopped;
         Cycles = state.Cycles;
@@ -172,7 +179,67 @@ public sealed class M68kCpu
         }
 
         Cycles += cycles;
+        InstructionObserver?.Invoke(new M68kInstructionTrace(opcodeAddress, opcode, PC, SR, A[7], D[0], D[1], D[2], D[3], D[4], D[5], D[6], D[7], A[0], A[1], A[2], A[3], A[4], A[5], A[6], cycles));
         return cycles;
+    }
+
+    public bool TryFastForwardMoveBytePostIncrementDbfLoop(int cycleBudget, out int cycles, out int instructionCount)
+    {
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < 18)
+        {
+            return false;
+        }
+
+        ushort move = _bus.ReadWord(PC);
+        if ((move & 0xF1F8) != 0x10C0)
+        {
+            return false;
+        }
+
+        ushort dbcc = _bus.ReadWord(PC + 2);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(PC + 4);
+        if (displacement != -4)
+        {
+            return false;
+        }
+
+        int counterRegister = dbcc & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        int maxTakenIterations = cycleBudget / 18;
+        int iterations = Math.Min(counter, maxTakenIterations);
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        int sourceRegister = move & 0x07;
+        int addressRegister = (move >> 9) & 0x07;
+        byte value = (byte)D[sourceRegister];
+        uint address = A[addressRegister];
+        for (int i = 0; i < iterations; i++)
+        {
+            _bus.WriteByte(address, value);
+            address = unchecked(address + 1);
+        }
+
+        A[addressRegister] = address;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | (ushort)(counter - iterations);
+        cycles = iterations * 18;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
     }
 
     public void ClearAllocationProfile()
@@ -220,6 +287,7 @@ public sealed class M68kCpu
         }
 
         Stopped = false;
+        uint oldPc = PC;
         ushort oldSr = SR;
         if ((SR & 0x2000) == 0)
         {
@@ -232,7 +300,8 @@ public sealed class M68kCpu
         SR = (ushort)(SR | (level << 8));
         PushLong(PC);
         PushWord(oldSr);
-        PC = _bus.ReadLong((uint)(level + 24) * 4);
+        PC = NormalizePc(_bus.ReadLong((uint)(level + 24) * 4));
+        InterruptObserver?.Invoke(new M68kInterruptTrace(level, level + 24, oldPc, PC, oldSr, SR, A[7]));
         return true;
     }
 
@@ -265,8 +334,9 @@ public sealed class M68kCpu
         SR |= 0x2000;
         PushLong(PC);
         PushWord(oldSr);
-        PC = _bus.ReadLong((uint)vector * 4);
+        PC = NormalizePc(_bus.ReadLong((uint)vector * 4));
         Stopped = false;
+        ExceptionObserver?.Invoke(new M68kExceptionTrace(vector, _currentOpcodeAddress, _currentOpcode, framePc, PC, oldSr, SR, A[7], D[0], D[1], D[2], D[3], A[0], A[1], A[2], A[3], A[4], A[5], A[6]));
     }
 
     private int Execute(ushort opcode, uint opcodeAddress)
@@ -279,6 +349,11 @@ public sealed class M68kCpu
 
         if ((opcode & 0xF000) == 0xF000)
         {
+            if (LineFInstructionOverride?.Invoke(opcodeAddress, opcode) == true)
+            {
+                return 4;
+            }
+
             EnterException(LineFEmulatorVector);
             return 34;
         }
@@ -301,7 +376,7 @@ public sealed class M68kCpu
 
         if (opcode == 0x4E75)
         {
-            PC = PopLong();
+            PC = NormalizePc(PopLong());
             return 16;
         }
 
@@ -310,14 +385,14 @@ public sealed class M68kCpu
             ushort restoredSr = PopWord();
             uint restoredPc = PopLong();
             SetStatusRegister(restoredSr);
-            PC = restoredPc;
+            PC = NormalizePc(restoredPc);
             return 20;
         }
 
         if (opcode == 0x4E77)
         {
             ushort restoredCcr = PopWord();
-            PC = PopLong();
+            PC = NormalizePc(PopLong());
             SR = (ushort)((SR & 0xFFE0) | (restoredCcr & 0x001F));
             return 20;
         }
@@ -341,6 +416,11 @@ public sealed class M68kCpu
 
         if ((opcode & 0xFFF0) == 0x4E40)
         {
+            if (TrapInstructionOverride?.Invoke(opcodeAddress, opcode) == true)
+            {
+                return 4;
+            }
+
             EnterException(32 + (opcode & 0xF));
             return 34;
         }
@@ -378,7 +458,7 @@ public sealed class M68kCpu
 
         if (opcode == 0x4EF9)
         {
-            PC = FetchLong();
+            PC = NormalizePc(FetchLong());
             return 12;
         }
 
@@ -386,7 +466,7 @@ public sealed class M68kCpu
         {
             uint target = FetchLong();
             PushLong(PC);
-            PC = target;
+            PC = NormalizePc(target);
             return 20;
         }
 
@@ -394,13 +474,13 @@ public sealed class M68kCpu
         {
             uint target = CalculateEffectiveAddress((opcode >> 3) & 0x7, opcode & 0x7);
             PushLong(PC);
-            PC = target;
+            PC = NormalizePc(target);
             return 16;
         }
 
         if ((opcode & 0xFFC0) == 0x4EC0)
         {
-            PC = CalculateEffectiveAddress((opcode >> 3) & 0x7, opcode & 0x7);
+            PC = NormalizePc(CalculateEffectiveAddress((opcode >> 3) & 0x7, opcode & 0x7));
             return 8;
         }
 
@@ -1603,7 +1683,7 @@ public sealed class M68kCpu
         D[register] = (D[register] & 0xFFFF_0000) | counter;
         if (counter != 0xFFFF)
         {
-            PC = unchecked((uint)(displacementAddress + displacement));
+            PC = NormalizePc(unchecked((uint)(displacementAddress + displacement)));
             return 10;
         }
 
@@ -1689,7 +1769,7 @@ public sealed class M68kCpu
                 PushLong(PC);
             }
 
-            PC = unchecked((uint)(displacementBase + displacement));
+            PC = NormalizePc(unchecked((uint)(displacementBase + displacement)));
         }
 
         return take ? 10 : 8;
@@ -2054,14 +2134,14 @@ public sealed class M68kCpu
     private ushort FetchWord()
     {
         ushort value = _bus.ReadWord(PC);
-        PC += 2;
+        PC = NormalizePc(PC + 2);
         return value;
     }
 
     private uint FetchLong()
     {
         uint value = _bus.ReadLong(PC);
-        PC += 4;
+        PC = NormalizePc(PC + 4);
         return value;
     }
 
@@ -2282,6 +2362,11 @@ public sealed class M68kCpu
         return unchecked((uint)(int)(short)value);
     }
 
+    private static uint NormalizePc(uint value)
+    {
+        return value & AddressMask;
+    }
+
     private readonly record struct WritableTarget(bool IsDataRegister, int Register, uint Address, OperandSize Size)
     {
         public static WritableTarget DataRegister(int register, OperandSize size)
@@ -2297,4 +2382,47 @@ public sealed class M68kCpu
 
     public readonly record struct M68kOpcodeAllocation(ushort Opcode, int Samples, long AllocatedBytes);
     public sealed record M68kState(uint[] D, uint[] A, uint PC, ushort SR, bool Stopped, long Cycles, uint USP);
+    public readonly record struct M68kInstructionTrace(
+        uint Pc,
+        ushort Opcode,
+        uint NextPc,
+        ushort Sr,
+        uint StackPointer,
+        uint D0,
+        uint D1,
+        uint D2,
+        uint D3,
+        uint D4,
+        uint D5,
+        uint D6,
+        uint D7,
+        uint A0,
+        uint A1,
+        uint A2,
+        uint A3,
+        uint A4,
+        uint A5,
+        uint A6,
+        int Cycles);
+    public readonly record struct M68kInterruptTrace(int Level, int Vector, uint ReturnPc, uint HandlerPc, ushort OldSr, ushort NewSr, uint StackPointer);
+    public readonly record struct M68kExceptionTrace(
+        int Vector,
+        uint OpcodePc,
+        ushort Opcode,
+        uint FramePc,
+        uint HandlerPc,
+        ushort OldSr,
+        ushort NewSr,
+        uint StackPointer,
+        uint D0,
+        uint D1,
+        uint D2,
+        uint D3,
+        uint A0,
+        uint A1,
+        uint A2,
+        uint A3,
+        uint A4,
+        uint A5,
+        uint A6);
 }

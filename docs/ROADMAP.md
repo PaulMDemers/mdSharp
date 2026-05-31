@@ -27,12 +27,14 @@ The frame scheduler now runs fixed active-display and HBlank CPU phases per scan
 - Improve unsupported-hardware diagnostics.
 - Build a curated public regression set using redistributable test ROMs and local-only movie metadata when possible.
 - Continue improving automated release packaging and release-gate coverage.
+- Begin Sega 32X support by building the add-on shell, SH-2 core, 32X bus/register map, VDP compositing, and PWM audio in staged passes.
 
 ## Known Gaps
 
 - Not cycle-perfect.
 - YM2612 is practical and improving, not bit-perfect.
 - Some cartridge mappers and special hardware beyond the supported SVP path are incomplete.
+- Sega 32X cartridges are detected and documented, but the SH-2/VDP/PWM add-on runtime is not implemented yet.
 - Some specialty input behavior remains incomplete, especially exact light-gun timing and calibration.
 - Compatibility data is still developer-local rather than published as a maintained matrix.
 

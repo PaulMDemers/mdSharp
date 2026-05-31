@@ -2,7 +2,9 @@ using MdSharp.Core.Audio;
 using MdSharp.Core.Bus;
 using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
+using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Cpu.Z80;
+using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Timing;
 using MdSharp.Core.Video;
 
@@ -11,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 30;
+    private const int Version = 54;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -38,6 +40,7 @@ public static class SaveStateSerializer
         writer.Write(state.AudioFilterLeft);
         writer.Write(state.AudioFilterRight);
         writer.Write(state.AudioFadeInSamplesRemaining);
+        writer.Write(state.ThirtyTwoXInstructionCarry);
     }
 
     public static void Load(MegaDrive machine, string path)
@@ -67,7 +70,8 @@ public static class SaveStateSerializer
             version >= 24 ? reader.ReadDouble() : 0.0,
             version >= 17 ? reader.ReadDouble() : 0.0,
             version >= 17 ? reader.ReadDouble() : 0.0,
-            version >= 27 ? reader.ReadInt32() : 0);
+            version >= 27 ? reader.ReadInt32() : 0,
+            version >= 40 ? reader.ReadDouble() : 0.0);
         machine.RestoreState(state);
     }
 
@@ -274,6 +278,12 @@ public static class SaveStateSerializer
         {
             WriteSvp(writer, state.Svp);
         }
+
+        writer.Write(state.ThirtyTwoX is not null);
+        if (state.ThirtyTwoX is not null)
+        {
+            WriteThirtyTwoX(writer, state.ThirtyTwoX);
+        }
     }
 
     private static GenesisBus.BusState ReadBus(BinaryReader reader, int version)
@@ -294,7 +304,359 @@ public static class SaveStateSerializer
         long z80BusGrantReadyCycle = version >= 26 ? reader.ReadInt64() : 0;
         int pendingM68kWaitCycles = version >= 26 ? reader.ReadInt32() : 0;
         SvpDevice.SvpState? svp = version >= 25 && reader.ReadBoolean() ? ReadSvp(reader) : null;
-        return new GenesisBus.BusState(workRam, z80Ram, tmss, ioData, ioControl, z80BusRequested, z80ResetAsserted, z80BankRegister, saveRam, bankRegisters, bankSwitchingEnabled, fallbackSaveRamActive, saveRamEnabled, z80BusGrantReadyCycle, pendingM68kWaitCycles, svp);
+        ThirtyTwoXDevice.ThirtyTwoXState? thirtyTwoX = version >= 31 && reader.ReadBoolean() ? ReadThirtyTwoX(reader, version) : null;
+        return new GenesisBus.BusState(workRam, z80Ram, tmss, ioData, ioControl, z80BusRequested, z80ResetAsserted, z80BankRegister, saveRam, bankRegisters, bankSwitchingEnabled, fallbackSaveRamActive, saveRamEnabled, z80BusGrantReadyCycle, pendingM68kWaitCycles, svp, thirtyTwoX);
+    }
+
+    private static void WriteThirtyTwoX(BinaryWriter writer, ThirtyTwoXDevice.ThirtyTwoXState state)
+    {
+        WriteArray(writer, state.Sdram);
+        WriteArray(writer, state.FrameBuffer0);
+        WriteArray(writer, state.FrameBuffer1);
+        WriteArray(writer, state.Palette);
+        WriteArray(writer, state.SystemRegisters);
+        WriteArray(writer, state.VdpRegisters);
+        WriteArray(writer, state.PwmLeft);
+        WriteArray(writer, state.PwmRight);
+        WriteArray(writer, state.PwmMono);
+        WriteArray(writer, state.PwmLeftHardwareFifo);
+        WriteArray(writer, state.PwmRightHardwareFifo);
+        WriteArray(writer, state.PwmMonoHardwareFifo);
+        writer.Write(state.PwmLeftLevel);
+        writer.Write(state.PwmRightLevel);
+        writer.Write(state.PwmMonoLevel);
+        writer.Write(state.MasterPwmInterruptPending);
+        writer.Write(state.SlavePwmInterruptPending);
+        writer.Write(state.PwmCycleCounter);
+        writer.Write(state.PwmTimerCounter);
+        WriteArray(writer, state.DreqFifo);
+        WriteArray(writer, state.MasterDmaRegisters);
+        WriteArray(writer, state.SlaveDmaRegisters);
+        WriteArray(writer, state.MasterPeripheralRegisters);
+        WriteArray(writer, state.SlavePeripheralRegisters);
+        WriteArray(writer, state.WatchdogCycleCounters);
+        WriteArray(writer, state.WatchdogInterruptPending);
+        WriteArray(writer, state.WatchdogWriteSelect);
+        WriteArray(writer, state.MasterCacheDataArray);
+        WriteArray(writer, state.SlaveCacheDataArray);
+        WriteArray(writer, state.MasterCacheDataValid);
+        WriteArray(writer, state.SlaveCacheDataValid);
+        WriteArray(writer, state.MasterCacheTags);
+        WriteArray(writer, state.SlaveCacheTags);
+        WriteArray(writer, state.MasterCacheLru);
+        WriteArray(writer, state.SlaveCacheLru);
+        WriteArray(writer, state.MasterDivisionRegisters);
+        WriteArray(writer, state.SlaveDivisionRegisters);
+        WriteArray(writer, state.DmaRequestSelect);
+        writer.Write(state.ActiveDisplayFrameBufferIndex);
+        writer.Write(state.AdapterEnabled);
+        writer.Write(state.Sh2ResetEnabled);
+        writer.Write(state.Sh2ResetReleased);
+        writer.Write(state.VdpAccessGrantedToSh2);
+        writer.Write(state.VBlank);
+        writer.Write(state.HBlank);
+        writer.Write(state.FrameBufferSwapPending);
+        writer.Write(state.PendingDrawFrameBufferIndex);
+        writer.Write(state.RequestedDisplayFrameBufferIndex);
+        writer.Write(state.LatchedBitmapMode);
+        writer.Write(state.LatchedScreenShiftControl);
+        writer.Write(state.LastCompositeUsedFallback);
+        writer.Write(state.LastCompositeMode);
+        writer.Write(state.MasterInterruptMask);
+        writer.Write(state.SlaveInterruptMask);
+        writer.Write(state.MasterVerticalInterruptPending);
+        writer.Write(state.SlaveVerticalInterruptPending);
+        writer.Write(state.MasterHorizontalInterruptPending);
+        writer.Write(state.SlaveHorizontalInterruptPending);
+        writer.Write(state.HorizontalInterruptPeriod);
+        writer.Write(state.HorizontalInterruptCounter);
+        writer.Write(state.MasterCommandInterruptPending);
+        writer.Write(state.SlaveCommandInterruptPending);
+        writer.Write(state.BootRomHandshakePending);
+        writer.Write(state.BootRomSignatureRead);
+        writer.Write(state.BootRomSignatureReadbackActive);
+        writer.Write(state.BootRomLaunchPending);
+        writer.Write(state.BootRomPostStartSignaturePending);
+        writer.Write(state.BootRomChecksumPublished);
+        WriteSh2(writer, state.MasterSh2);
+        WriteSh2(writer, state.SlaveSh2);
+    }
+
+    private static ThirtyTwoXDevice.ThirtyTwoXState ReadThirtyTwoX(BinaryReader reader, int version)
+    {
+        byte[] sdram = ReadByteArray(reader);
+        byte[] frameBuffer0 = ReadByteArray(reader);
+        byte[] frameBuffer1 = ReadByteArray(reader);
+        byte[] palette = ReadByteArray(reader);
+        byte[] systemRegisters = ReadByteArray(reader);
+        byte[] vdpRegisters = ReadByteArray(reader);
+        ushort[] pwmLeft = ReadUShortArray(reader);
+        ushort[] pwmRight = ReadUShortArray(reader);
+        ushort[] pwmMono = ReadUShortArray(reader);
+        ushort[] pwmLeftHardwareFifo = [];
+        ushort[] pwmRightHardwareFifo = [];
+        ushort[] pwmMonoHardwareFifo = [];
+        double pwmLeftLevel = 0.0;
+        double pwmRightLevel = 0.0;
+        double pwmMonoLevel = 0.0;
+        bool masterPwmInterruptPending = false;
+        bool slavePwmInterruptPending = false;
+        int pwmCycleCounter = 0;
+        int pwmTimerCounter = 0;
+        if (version >= 49)
+        {
+            pwmLeftHardwareFifo = ReadUShortArray(reader);
+            pwmRightHardwareFifo = ReadUShortArray(reader);
+            pwmMonoHardwareFifo = ReadUShortArray(reader);
+            pwmLeftLevel = reader.ReadDouble();
+            pwmRightLevel = reader.ReadDouble();
+            pwmMonoLevel = reader.ReadDouble();
+            masterPwmInterruptPending = reader.ReadBoolean();
+            slavePwmInterruptPending = reader.ReadBoolean();
+            pwmCycleCounter = reader.ReadInt32();
+            pwmTimerCounter = reader.ReadInt32();
+        }
+
+        ushort[] dreqFifo = version >= 39 ? ReadUShortArray(reader) : [];
+        byte[] masterDmaRegisters = version >= 42 ? ReadByteArray(reader) : [];
+        byte[] slaveDmaRegisters = version >= 42 ? ReadByteArray(reader) : [];
+        byte[] masterPeripheralRegisters = version >= 43 ? ReadByteArray(reader) : [];
+        byte[] slavePeripheralRegisters = version >= 43 ? ReadByteArray(reader) : [];
+        int[] watchdogCycleCounters = version >= 53 ? ReadIntArray(reader) : new int[2];
+        bool[] watchdogInterruptPending = version >= 53 ? ReadBoolArray(reader) : new bool[2];
+        byte[] watchdogWriteSelect = version >= 53 ? ReadByteArray(reader) : new byte[2];
+        byte[] masterCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
+        byte[] slaveCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
+        byte[] masterCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(masterCacheDataArray);
+        byte[] slaveCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(slaveCacheDataArray);
+        uint[] masterCacheTags = version >= 52 ? ReadUIntArray(reader) : BuildLegacyCacheTags();
+        uint[] slaveCacheTags = version >= 52 ? ReadUIntArray(reader) : BuildLegacyCacheTags();
+        byte[] masterCacheLru = version >= 52 ? ReadByteArray(reader) : new byte[64];
+        byte[] slaveCacheLru = version >= 52 ? ReadByteArray(reader) : new byte[64];
+        uint[] masterDivisionRegisters = version >= 50 ? ReadUIntArray(reader) : [];
+        uint[] slaveDivisionRegisters = version >= 50 ? ReadUIntArray(reader) : [];
+        byte[] dmaRequestSelect = version >= 42 ? ReadByteArray(reader) : [];
+        int activeDisplayFrameBufferIndex = reader.ReadInt32();
+        bool adapterEnabled = reader.ReadBoolean();
+        bool sh2ResetEnabled = reader.ReadBoolean();
+        bool sh2ResetReleased = reader.ReadBoolean();
+        bool vdpAccessGrantedToSh2 = reader.ReadBoolean();
+        bool vBlank = false;
+        bool hBlank = false;
+        bool frameBufferSwapPending = false;
+        int pendingDrawFrameBufferIndex = activeDisplayFrameBufferIndex ^ 1;
+        int requestedDisplayFrameBufferIndex = activeDisplayFrameBufferIndex;
+        ushort latchedBitmapMode = ReadBigEndianWord(vdpRegisters, ThirtyTwoXHardwareProfile.BitmapModeOffset);
+        ushort latchedScreenShiftControl = ReadBigEndianWord(vdpRegisters, ThirtyTwoXHardwareProfile.ScreenShiftControlOffset);
+        bool lastCompositeUsedFallback = false;
+        int lastCompositeMode = 0;
+        ushort masterInterruptMask = 0;
+        ushort slaveInterruptMask = 0;
+        bool masterVerticalInterruptPending = false;
+        bool slaveVerticalInterruptPending = false;
+        bool masterHorizontalInterruptPending = false;
+        bool slaveHorizontalInterruptPending = false;
+        byte horizontalInterruptPeriod = 0;
+        byte horizontalInterruptCounter = 0;
+        bool masterCommandInterruptPending = false;
+        bool slaveCommandInterruptPending = false;
+        bool bootRomHandshakePending = false;
+        bool bootRomSignatureRead = false;
+        bool bootRomSignatureReadbackActive = false;
+        bool bootRomLaunchPending = false;
+        bool bootRomPostStartSignaturePending = false;
+        bool bootRomChecksumPublished = false;
+        if (version >= 32)
+        {
+            vBlank = reader.ReadBoolean();
+            hBlank = reader.ReadBoolean();
+            frameBufferSwapPending = reader.ReadBoolean();
+            pendingDrawFrameBufferIndex = reader.ReadInt32();
+            requestedDisplayFrameBufferIndex = pendingDrawFrameBufferIndex ^ 1;
+            if (version >= 46)
+            {
+                requestedDisplayFrameBufferIndex = reader.ReadInt32();
+                latchedBitmapMode = reader.ReadUInt16();
+                latchedScreenShiftControl = reader.ReadUInt16();
+            }
+
+            lastCompositeUsedFallback = reader.ReadBoolean();
+            lastCompositeMode = reader.ReadInt32();
+        }
+        if (version >= 34)
+        {
+            masterInterruptMask = reader.ReadUInt16();
+            slaveInterruptMask = reader.ReadUInt16();
+            masterVerticalInterruptPending = reader.ReadBoolean();
+            slaveVerticalInterruptPending = reader.ReadBoolean();
+            masterHorizontalInterruptPending = reader.ReadBoolean();
+            slaveHorizontalInterruptPending = reader.ReadBoolean();
+            if (version >= 47)
+            {
+                horizontalInterruptPeriod = reader.ReadByte();
+                horizontalInterruptCounter = reader.ReadByte();
+            }
+
+            masterCommandInterruptPending = reader.ReadBoolean();
+            slaveCommandInterruptPending = reader.ReadBoolean();
+        }
+        if (version >= 36)
+        {
+            bootRomHandshakePending = reader.ReadBoolean();
+        }
+        if (version >= 37)
+        {
+            bootRomSignatureRead = reader.ReadBoolean();
+        }
+        if (version >= 38)
+        {
+            bootRomSignatureReadbackActive = reader.ReadBoolean();
+        }
+        if (version >= 41)
+        {
+            bootRomLaunchPending = reader.ReadBoolean();
+        }
+        if (version >= 45)
+        {
+            bootRomPostStartSignaturePending = reader.ReadBoolean();
+        }
+        if (version >= 54)
+        {
+            bootRomChecksumPublished = reader.ReadBoolean();
+        }
+
+        return new ThirtyTwoXDevice.ThirtyTwoXState(
+            sdram,
+            frameBuffer0,
+            frameBuffer1,
+            palette,
+            systemRegisters,
+            vdpRegisters,
+            pwmLeft,
+            pwmRight,
+            pwmMono,
+            pwmLeftHardwareFifo,
+            pwmRightHardwareFifo,
+            pwmMonoHardwareFifo,
+            pwmLeftLevel,
+            pwmRightLevel,
+            pwmMonoLevel,
+            masterPwmInterruptPending,
+            slavePwmInterruptPending,
+            pwmCycleCounter,
+            pwmTimerCounter,
+            dreqFifo,
+            masterDmaRegisters,
+            slaveDmaRegisters,
+            masterPeripheralRegisters,
+            slavePeripheralRegisters,
+            watchdogCycleCounters,
+            watchdogInterruptPending,
+            watchdogWriteSelect,
+            masterCacheDataArray,
+            slaveCacheDataArray,
+            masterCacheDataValid,
+            slaveCacheDataValid,
+            masterCacheTags,
+            slaveCacheTags,
+            masterCacheLru,
+            slaveCacheLru,
+            masterDivisionRegisters,
+            slaveDivisionRegisters,
+            dmaRequestSelect,
+            activeDisplayFrameBufferIndex,
+            adapterEnabled,
+            sh2ResetEnabled,
+            sh2ResetReleased,
+            vdpAccessGrantedToSh2,
+            vBlank,
+            hBlank,
+            frameBufferSwapPending,
+            pendingDrawFrameBufferIndex,
+            requestedDisplayFrameBufferIndex,
+            latchedBitmapMode,
+            latchedScreenShiftControl,
+            lastCompositeUsedFallback,
+            lastCompositeMode,
+            masterInterruptMask,
+            slaveInterruptMask,
+            masterVerticalInterruptPending,
+            slaveVerticalInterruptPending,
+            masterHorizontalInterruptPending,
+            slaveHorizontalInterruptPending,
+            horizontalInterruptPeriod,
+            horizontalInterruptCounter,
+            masterCommandInterruptPending,
+            slaveCommandInterruptPending,
+            bootRomHandshakePending,
+            bootRomSignatureRead,
+            bootRomSignatureReadbackActive,
+            bootRomLaunchPending,
+            bootRomPostStartSignaturePending,
+            bootRomChecksumPublished,
+            ReadSh2(reader, version),
+            ReadSh2(reader, version));
+    }
+
+    private static void WriteSh2(BinaryWriter writer, Sh2Cpu.Sh2State state)
+    {
+        WriteArray(writer, state.R);
+        WriteArray(writer, state.BankedR);
+        writer.Write(state.PC);
+        writer.Write(state.PR);
+        writer.Write(state.GBR);
+        writer.Write(state.VBR);
+        writer.Write(state.MACH);
+        writer.Write(state.MACL);
+        writer.Write(state.SR);
+        writer.Write(state.Cycles);
+        writer.Write(state.Halted);
+        writer.Write(state.LastOpcode);
+        writer.Write(state.LastOpcodePc);
+        writer.Write(state.UnhandledOpcodeCount);
+        writer.Write(state.DelaySlotActive);
+        writer.Write(state.PendingInterruptLevel);
+        writer.Write(state.PendingInterruptVectorNumber);
+    }
+
+    private static Sh2Cpu.Sh2State ReadSh2(BinaryReader reader, int version)
+    {
+        uint[] r = ReadUIntArray(reader);
+        uint[] bankedR = version >= 35 ? ReadUIntArray(reader) : new uint[8];
+        uint pc = reader.ReadUInt32();
+        uint pr = reader.ReadUInt32();
+        uint gbr = reader.ReadUInt32();
+        uint vbr = reader.ReadUInt32();
+        uint mach = reader.ReadUInt32();
+        uint macl = reader.ReadUInt32();
+        uint sr = reader.ReadUInt32();
+        long cycles = reader.ReadInt64();
+        bool halted = reader.ReadBoolean();
+        ushort lastOpcode = reader.ReadUInt16();
+        uint lastOpcodePc = reader.ReadUInt32();
+        int unhandledOpcodeCount = reader.ReadInt32();
+        bool delaySlotActive = reader.ReadBoolean();
+        int pendingInterruptLevel = version >= 33 ? reader.ReadInt32() : 0;
+        int pendingInterruptVectorNumber = version >= 44 ? reader.ReadInt32() : pendingInterruptLevel == 0 ? 0 : 64 + pendingInterruptLevel;
+
+        return new Sh2Cpu.Sh2State(
+            r,
+            bankedR,
+            pc,
+            pr,
+            gbr,
+            vbr,
+            mach,
+            macl,
+            sr,
+            cycles,
+            halted,
+            lastOpcode,
+            lastOpcodePc,
+            unhandledOpcodeCount,
+            delaySlotActive,
+            pendingInterruptLevel,
+            pendingInterruptVectorNumber);
     }
 
     private static void WriteSvp(BinaryWriter writer, SvpDevice.SvpState state)
@@ -630,6 +992,34 @@ public static class SaveStateSerializer
     private static int[] ReadIntArray(BinaryReader reader) => ReadArray(reader, r => r.ReadInt32());
     private static bool[] ReadBoolArray(BinaryReader reader) => ReadArray(reader, r => r.ReadBoolean());
     private static double[] ReadDoubleArray(BinaryReader reader) => ReadArray(reader, r => r.ReadDouble());
+
+    private static byte[] BuildLegacyCacheValid(byte[] data)
+    {
+        byte[] valid = new byte[data.Length];
+        for (int i = 0; i < data.Length; i++)
+        {
+            valid[i] = data[i] == 0 ? (byte)0 : (byte)1;
+        }
+
+        return valid;
+    }
+
+    private static uint[] BuildLegacyCacheTags()
+    {
+        uint[] tags = new uint[256];
+        Array.Fill(tags, 1u << 19);
+        return tags;
+    }
+
+    private static ushort ReadBigEndianWord(byte[] data, int offset)
+    {
+        if ((uint)(offset + 1) >= (uint)data.Length)
+        {
+            return 0;
+        }
+
+        return (ushort)((data[offset] << 8) | data[offset + 1]);
+    }
 
     private static T[] ReadArray<T>(BinaryReader reader, Func<BinaryReader, T> read)
     {

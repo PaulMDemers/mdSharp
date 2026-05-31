@@ -41,7 +41,7 @@ public sealed class CartridgeImage
 
     public static CartridgeImage FromFile(string path)
     {
-        return new CartridgeImage(Normalize(File.ReadAllBytes(path)), Path.GetFileNameWithoutExtension(path));
+        return new CartridgeImage(Normalize(File.ReadAllBytes(path)), Path.GetFileName(path));
     }
 
     public static CartridgeImage FromBytes(byte[] bytes)
@@ -223,13 +223,10 @@ public sealed class CartridgeImage
         string domestic = Header.DomesticName.ToUpperInvariant();
         string overseas = Header.OverseasName.ToUpperInvariant();
         string sourceName = (_sourceName ?? string.Empty).ToUpperInvariant();
-        if (console.Contains("32X", StringComparison.Ordinal) ||
-            console.Contains("MARS", StringComparison.Ordinal) ||
-            product.Contains("32X", StringComparison.Ordinal) ||
-            domestic.Contains("32X", StringComparison.Ordinal) ||
-            overseas.Contains("32X", StringComparison.Ordinal))
+        bool requires32X = LooksLike32X(console, product, domestic, overseas, sourceName);
+        if (requires32X)
         {
-            unsupported.Add("Sega 32X hardware");
+            unsupported.Add("Sega 32X add-on hardware");
         }
 
         bool hasSvp = LooksLikeSvp(product, domestic, overseas);
@@ -271,6 +268,7 @@ public sealed class CartridgeImage
             _rom.Length > 0x40_0000,
             hasJCart,
             hasSvp,
+            requires32X,
             unsupported.ToArray(),
             warnings.ToArray());
     }
@@ -494,6 +492,20 @@ public sealed class CartridgeImage
         return product.Contains("G-7001", StringComparison.Ordinal) ||
             product.Contains("MK-1229", StringComparison.Ordinal) ||
             HasTitle(domestic, overseas, "VIRTUA RACING");
+    }
+
+    private static bool LooksLike32X(string console, string product, string domestic, string overseas, string sourceName)
+    {
+        return console.Contains("32X", StringComparison.Ordinal) ||
+            console.Contains("MARS", StringComparison.Ordinal) ||
+            product.Contains("32X", StringComparison.Ordinal) ||
+            product.Contains("MARS", StringComparison.Ordinal) ||
+            domestic.Contains("32X", StringComparison.Ordinal) ||
+            domestic.Contains("MARS", StringComparison.Ordinal) ||
+            overseas.Contains("32X", StringComparison.Ordinal) ||
+            overseas.Contains("MARS", StringComparison.Ordinal) ||
+            sourceName.Contains("32X", StringComparison.Ordinal) ||
+            sourceName.EndsWith(".32X", StringComparison.Ordinal);
     }
 
     private static bool HasTitle(string domestic, string overseas, string value)

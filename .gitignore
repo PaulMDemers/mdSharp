@@ -36,6 +36,10 @@ roms/
 !roms/
 roms/*
 !roms/.gitkeep
+32x_roms/
+!32x_roms/
+32x_roms/*
+!32x_roms/.gitkeep
 TestRoms/
 !TestRoms/
 TestRoms/*
