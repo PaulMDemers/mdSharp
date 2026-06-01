@@ -800,6 +800,12 @@ public sealed class ThirtyTwoXDevice
             return false;
         }
 
+        if (IsSh2FrameBufferAccessDenied())
+        {
+            TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer ? "DENY-OW16" : "DENY-W16", frameBufferOffset, value);
+            return true;
+        }
+
         AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         if (overwriteFrameBuffer)
@@ -1759,6 +1765,12 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
         {
             AddSh2WaitCycles(cpuIndex, Sh2PaletteWaitCycles);
+            if (IsSh2PaletteAccessDenied())
+            {
+                TraceSh2MemoryAccess(cpuIndex, "DPAL8", address, 0x00FF);
+                return 0xFF;
+            }
+
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
             byte value = ReadPaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart));
             TraceSh2MemoryAccess(cpuIndex, "RPAL8", address, value);
@@ -1768,6 +1780,12 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
         {
             AddSh2WaitCycles(cpuIndex, Sh2PaletteWaitCycles);
+            if (IsSh2PaletteAccessDenied())
+            {
+                TraceSh2MemoryAccess(cpuIndex, "DPAL8", address, 0x00FF);
+                return 0xFF;
+            }
+
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
             byte value = ReadPaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart));
             TraceSh2MemoryAccess(cpuIndex, "RPAL8", address, value);
@@ -1801,6 +1819,12 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out _))
         {
             AddSh2WaitCycles(cpuIndex, Sh2FrameBufferReadWaitCycles);
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "DENY-R8", frameBufferOffset, 0xFFFF);
+                return 0xFF;
+            }
+
             AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
             return ReadFrameBufferByteCore(frameBufferOffset);
         }
@@ -2153,6 +2177,12 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
         {
             AddSh2WaitCycles(cpuIndex, Sh2PaletteWaitCycles);
+            if (IsSh2PaletteAccessDenied())
+            {
+                TraceSh2MemoryAccess(cpuIndex, "DPAL8", address, value);
+                return;
+            }
+
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
             WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart), value);
             TraceSh2MemoryAccess(cpuIndex, "WPAL8", address, value);
@@ -2162,6 +2192,12 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
         {
             AddSh2WaitCycles(cpuIndex, Sh2PaletteWaitCycles);
+            if (IsSh2PaletteAccessDenied())
+            {
+                TraceSh2MemoryAccess(cpuIndex, "DPAL8", address, value);
+                return;
+            }
+
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
             WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart), value);
             TraceSh2MemoryAccess(cpuIndex, "WPAL8", address, value);
@@ -2190,6 +2226,12 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
         {
             AddSh2WaitCycles(cpuIndex, Sh2FrameBufferWriteWaitCycles);
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer ? "DENY-OW8" : "DENY-W8", frameBufferOffset, value);
+                return;
+            }
+
             AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
             WriteFrameBufferByteCore(frameBufferOffset, value, cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer, transparentZero: overwriteFrameBuffer, enforceAccessWindow: false);
             return;
@@ -2268,6 +2310,12 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
         {
             AddSh2WaitCycles(cpuIndex, Sh2FrameBufferWriteWaitCycles);
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(source, overwriteFrameBuffer ? "DENY-OW16" : "DENY-W16", frameBufferOffset, value);
+                return;
+            }
+
             AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
             if (overwriteFrameBuffer)
             {
@@ -3306,16 +3354,27 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsExternalFrameBufferAccessDenied()
     {
-        // The 68000-side framebuffer window is not allowed to race an active
-        // bitmap swap. SH-2 accesses model the same condition as wait time
-        // instead, because games commonly keep drawing while the display
-        // buffer handoff is pending.
-        return _frameBufferSwapPending && !IsLatchedBlankMode();
+        return IsFrameBufferEngaged();
+    }
+
+    private bool IsSh2FrameBufferAccessDenied()
+    {
+        return !_vdpAccessGrantedToSh2;
+    }
+
+    private bool IsFrameBufferEngaged()
+    {
+        return !_vBlank && !_hBlank && !IsBlankMode();
     }
 
     private bool IsPaletteAccessApproved()
     {
         return _vBlank || IsBlankMode() || IsDirectColorMode();
+    }
+
+    private bool IsSh2PaletteAccessDenied()
+    {
+        return !_vdpAccessGrantedToSh2;
     }
 
     private void AddSh2PaletteBusyWaitIfNeeded(int cpuIndex)
@@ -3328,7 +3387,7 @@ public sealed class ThirtyTwoXDevice
 
     private void AddSh2FrameBufferBusyWaitIfNeeded(int cpuIndex)
     {
-        if (_frameBufferSwapPending && !IsLatchedBlankMode())
+        if (IsFrameBufferEngaged())
         {
             AddSh2WaitCycles(cpuIndex, Sh2FrameBufferBusyWaitCycles);
         }
@@ -3375,8 +3434,7 @@ public sealed class ThirtyTwoXDevice
     {
         ushort raw = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
         ushort status = (ushort)(raw & FrameBufferStatusFrameBufferSelect);
-        bool frameBufferAccessDenied = !_vBlank && !_hBlank && !IsBlankMode();
-        if (frameBufferAccessDenied)
+        if (IsFrameBufferEngaged())
         {
             status |= FrameBufferStatusFrameBufferDenied;
         }

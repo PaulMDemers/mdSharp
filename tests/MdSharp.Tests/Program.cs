@@ -793,6 +793,7 @@ void ThirtyTwoXDeviceShell()
 
     ThirtyTwoXDevice memoryDmaDevice = new(memoryDmaRom);
     memoryDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    memoryDmaDevice.RestoreState(memoryDmaDevice.CaptureState() with { VdpAccessGrantedToSh2 = true });
     memoryDmaDevice.MasterSh2.Run(64);
     AssertEqual((byte)0xAB, memoryDmaDevice.DrawFrameBuffer[0x200]);
     AssertEqual((byte)0xCD, memoryDmaDevice.DrawFrameBuffer[0x201]);
@@ -931,6 +932,7 @@ void ThirtyTwoXDeviceShell()
 
     ThirtyTwoXDevice frameBufferMirrorDevice = new();
     frameBufferMirrorDevice.Reset();
+    frameBufferMirrorDevice.RestoreState(frameBufferMirrorDevice.CaptureState() with { VdpAccessGrantedToSh2 = true });
     WriteSh2ByteForTest(frameBufferMirrorDevice, 0x0500_0040, 0x66);
     AssertEqual((byte)0x66, frameBufferMirrorDevice.DrawFrameBuffer[0x40]);
     WriteSh2ByteForTest(frameBufferMirrorDevice, 0x0500_0040, 0x00);
@@ -1156,6 +1158,30 @@ void ThirtyTwoXDeviceShell()
     AssertTrue(!latchDevice.FrameBufferSwapPending, "latched blank mode should allow a pending frame-buffer selection to complete");
     latchDevice.WriteFrameBufferWord(0, 0x55AA);
     AssertEqual((ushort)0x55AA, latchDevice.DrawFrameBuffer[0] << 8 | latchDevice.DrawFrameBuffer[1]);
+
+    ThirtyTwoXDevice sh2VdpAccessDevice = new();
+    sh2VdpAccessDevice.Reset();
+    WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart, 0x1234);
+    AssertEqual((ushort)0x0000, (ushort)((sh2VdpAccessDevice.DrawFrameBuffer[0] << 8) | sh2VdpAccessDevice.DrawFrameBuffer[1]));
+    AssertEqual((ushort)0xFFFF, ReadSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart));
+    WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart, 0x5678);
+    AssertEqual((ushort)0x0000, sh2VdpAccessDevice.ReadPaletteWord(0));
+    AssertEqual((ushort)0xFFFF, ReadSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart));
+
+    sh2VdpAccessDevice.RestoreState(sh2VdpAccessDevice.CaptureState() with { VdpAccessGrantedToSh2 = true });
+    WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart, 0x1234);
+    AssertEqual((ushort)0x1234, (ushort)((sh2VdpAccessDevice.DrawFrameBuffer[0] << 8) | sh2VdpAccessDevice.DrawFrameBuffer[1]));
+    WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart, 0x5678);
+    AssertEqual((ushort)0x5678, sh2VdpAccessDevice.ReadPaletteWord(0));
+
+    ThirtyTwoXDevice sh2FenDevice = new();
+    sh2FenDevice.Reset();
+    sh2FenDevice.RestoreState(sh2FenDevice.CaptureState() with { VdpAccessGrantedToSh2 = true });
+    sh2FenDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(sh2FenDevice);
+    WriteSh2WordForTest(sh2FenDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart, 0x9ABC);
+    AssertEqual((ushort)0x9ABC, (ushort)((sh2FenDevice.DrawFrameBuffer[0] << 8) | sh2FenDevice.DrawFrameBuffer[1]));
+    AssertEqual((ushort)0x9ABC, ReadSh2WordForTest(sh2FenDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart));
 
     ThirtyTwoXDevice hInterruptDevice = new();
     hInterruptDevice.Reset();
@@ -2757,10 +2783,10 @@ void ThirtyTwoXPackedPixelsMaskPaletteControlBits()
 {
     ThirtyTwoXDevice device = new();
     device.Reset();
-    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
     device.WritePaletteWord(0x0E, 0x001F);
     device.WriteFrameBufferWord(0, 0x0100);
     device.WriteFrameBufferByte(0x200, 0xC7);
+    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
 
     byte[] frame = new byte[ThirtyTwoXHardwareProfile.NominalWidth * ThirtyTwoXHardwareProfile.NtscVisibleLines * 3];
     device.CompositeFrameRgbInto(frame);
