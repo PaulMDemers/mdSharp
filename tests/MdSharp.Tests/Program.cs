@@ -35,7 +35,7 @@ Run("32X SH-2 DMA transfer size bits", ThirtyTwoXSh2DmaTransferSizeBits);
 Run("32X SH-2 arithmetic flags", ThirtyTwoXSh2ArithmeticFlags);
 Run("32X user header loads initial program", ThirtyTwoXUserHeaderLoadsInitialProgram);
 Run("32X adapter control and communication ports", ThirtyTwoXAdapterControlAndCommunicationPorts);
-Run("32X packed pixels mask palette control bits", ThirtyTwoXPackedPixelsMaskPaletteControlBits);
+Run("32X packed pixels use full palette index", ThirtyTwoXPackedPixelsUseFullPaletteIndex);
 Run("32X communication byte read/write edge", ThirtyTwoXCommunicationByteReadWriteEdge);
 Run("32X 68000 system handshakes sync SH-2", ThirtyTwoXM68kSystemHandshakesSyncSh2);
 Run("32X SH-2 watchdog keyed writes", ThirtyTwoXSh2WatchdogKeyedWrites);
@@ -2850,11 +2850,11 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, device.MasterSh2.PC);
 }
 
-void ThirtyTwoXPackedPixelsMaskPaletteControlBits()
+void ThirtyTwoXPackedPixelsUseFullPaletteIndex()
 {
     ThirtyTwoXDevice device = new();
     device.Reset();
-    device.WritePaletteWord(0x0E, 0x001F);
+    device.WritePaletteWord(0x18E, 0x001F);
     device.WriteFrameBufferWord(0, 0x0100);
     device.WriteFrameBufferByte(0x200, 0xC7);
     device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
@@ -2865,7 +2865,7 @@ void ThirtyTwoXPackedPixelsMaskPaletteControlBits()
     AssertEqual((byte)0xFF, frame[0]);
     AssertEqual((byte)0x00, frame[1]);
     AssertEqual((byte)0x00, frame[2]);
-    AssertTrue(device.LastCompositeWrittenPixels > 0, "packed-pixel composite should emit pixels after masking palette control bits");
+    AssertTrue(device.LastCompositeWrittenPixels > 0, "packed-pixel composite should use all eight palette index bits");
 }
 
 void ThirtyTwoXCommunicationByteReadWriteEdge()

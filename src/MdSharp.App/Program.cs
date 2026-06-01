@@ -422,7 +422,7 @@ if (args[0].Equals("--32x-sweep", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 3)
     {
-        Console.Error.WriteLine("Usage: mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>]");
+        Console.Error.WriteLine("Usage: mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>] [--adaptive-seconds <seconds>]");
         return;
     }
 
@@ -432,7 +432,8 @@ if (args[0].Equals("--32x-sweep", StringComparison.OrdinalIgnoreCase))
     bool resume = args.Any(arg => arg.Equals("--resume", StringComparison.OrdinalIgnoreCase));
     string? filter = GetOptionValue(args, "--filter");
     int? limit = TryGetPositiveOption(args, "--limit");
-    SweepThirtyTwoX(args[1], args[2], frames, instructionsPerFrame, screenshots, resume, filter, limit);
+    double adaptiveTimeLimitSeconds = TryGetPositiveDoubleOption(args, "--adaptive-seconds") ?? ThirtyTwoXSweepAdaptiveTimeLimitSeconds;
+    SweepThirtyTwoX(args[1], args[2], frames, instructionsPerFrame, screenshots, resume, filter, limit, adaptiveTimeLimitSeconds);
     return;
 }
 
@@ -4359,7 +4360,7 @@ void TraceThirtyTwoX(string romPath, string outputCsv, int frames, int instructi
     Console.WriteLine($"Wrote 32X trace to {Path.GetFullPath(outputCsv)}");
 }
 
-void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int instructionsPerFrame, bool writeScreenshots, bool resume, string? filter, int? limit)
+void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int instructionsPerFrame, bool writeScreenshots, bool resume, string? filter, int? limit, double adaptiveTimeLimitSeconds)
 {
     string fullRomFolder = Path.GetFullPath(romFolder);
     string fullOutputFolder = Path.GetFullPath(outputFolder);
@@ -4389,7 +4390,7 @@ void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int inst
         writer.WriteLine(ThirtyTwoXSweepResult.CsvHeader);
     }
 
-    Console.WriteLine($"32X sweep: {files.Length:N0} ROM(s), {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame{(resume ? $", resume skipped={completed.Count:N0}" : string.Empty)}{(limit is > 0 ? $", limit={limit.Value:N0}" : string.Empty)}");
+    Console.WriteLine($"32X sweep: {files.Length:N0} ROM(s), {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame, adaptive cap={adaptiveTimeLimitSeconds:0.###}s{(resume ? $", resume skipped={completed.Count:N0}" : string.Empty)}{(limit is > 0 ? $", limit={limit.Value:N0}" : string.Empty)}");
     int processed = 0;
     foreach (string file in files)
     {
@@ -4400,7 +4401,7 @@ void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int inst
             continue;
         }
 
-        ThirtyTwoXSweepResult result = RunThirtyTwoXSweepCase(file, fullRomFolder, screenshotFolder, frames, instructionsPerFrame, writeScreenshots);
+        ThirtyTwoXSweepResult result = RunThirtyTwoXSweepCase(file, fullRomFolder, screenshotFolder, frames, instructionsPerFrame, writeScreenshots, adaptiveTimeLimitSeconds);
         writer.WriteLine(result.ToCsv());
         Console.WriteLine($"{result.Status,-22} {result.RelativeRom}");
         processed++;
@@ -4473,7 +4474,7 @@ string? ReadFirstCsvField(string line)
     return value.ToString();
 }
 
-ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, string screenshotFolder, int frames, int instructionsPerFrame, bool writeScreenshot)
+ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, string screenshotFolder, int frames, int instructionsPerFrame, bool writeScreenshot, double adaptiveTimeLimitSeconds)
 {
     string relative = Path.GetRelativePath(romRoot, romPath);
     System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -4539,7 +4540,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         if (device is not null && status == "ok")
         {
             status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
-            if (ShouldAdaptiveResampleThirtyTwoX(status, completedFrames))
+            if (adaptiveTimeLimitSeconds > 0.0 && ShouldAdaptiveResampleThirtyTwoX(status, completedFrames))
             {
                 string initialStatus = status;
                 int initialFrames = completedFrames;
@@ -4547,7 +4548,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                 int adaptiveInstructionBudget = Math.Max(instructionsPerFrame, 50_000);
                 for (; completedFrames < adaptiveTargetFrames; completedFrames++)
                 {
-                    if (stopwatch.Elapsed.TotalSeconds >= ThirtyTwoXSweepAdaptiveTimeLimitSeconds)
+                    if (stopwatch.Elapsed.TotalSeconds >= adaptiveTimeLimitSeconds)
                     {
                         detail = $"adaptive resample time cap after {completedFrames:N0} frame(s)";
                         break;
@@ -6785,6 +6786,14 @@ int? TryGetPositiveOption(string[] values, string option)
 {
     string? value = GetOptionValue(values, option);
     return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0
+        ? parsed
+        : null;
+}
+
+double? TryGetPositiveDoubleOption(string[] values, string option)
+{
+    string? value = GetOptionValue(values, option);
+    return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) && parsed > 0.0
         ? parsed
         : null;
 }
