@@ -70,6 +70,7 @@ public sealed class ThirtyTwoXDevice
     private const ushort AdapterControlSh2ResetEnable = 0x0080;
     private const ushort AdapterControlVdpAccessSh2 = 0x8000;
     private const ushort DreqControlRomToVramDma = 0x0001;
+    private const ushort DreqControlDma = 0x0002;
     private const ushort DreqControlCpuWrite = 0x0004;
     private const ushort Sh2InterruptMaskPwm = 0x0001;
     private const ushort Sh2InterruptMaskCommand = 0x0002;
@@ -85,6 +86,7 @@ public sealed class ThirtyTwoXDevice
     private const ushort FrameBufferStatusFrameBufferDenied = 0x0002;
     private const ushort FrameBufferStatusFrameBufferSelect = 0x0001;
     private const int PwmHardwareFifoCapacity = 3;
+    private const int DreqFifoCapacity = 8;
     private const uint Sh2DmaSourceIncrement = 0x1000;
     private const uint Sh2DmaSourceDecrement = 0x2000;
     private const uint Sh2DmaDestinationIncrement = 0x4000;
@@ -158,7 +160,7 @@ public sealed class ThirtyTwoXDevice
     private readonly Queue<ushort> _pwmMonoHardwareFifo = new(capacity: PwmHardwareFifoCapacity);
     private short[] _pwmLeftRenderBuffer = [];
     private short[] _pwmRightRenderBuffer = [];
-    private readonly Queue<ushort> _dreqFifo = new(capacity: 4);
+    private readonly Queue<ushort> _dreqFifo = new(capacity: DreqFifoCapacity);
     private readonly byte[][] _sh2DmaRegisters =
     [
         new byte[Sh2DmaRegisterBytes],
@@ -1021,10 +1023,10 @@ public sealed class ThirtyTwoXDevice
             return false;
         }
 
-        if (_dreqFifo.Count >= 4)
+        if (_dreqFifo.Count >= DreqFifoCapacity)
         {
             DrainDreqFifoForSnoopedDma();
-            if (_dreqFifo.Count >= 4)
+            if (_dreqFifo.Count >= DreqFifoCapacity)
             {
                 return false;
             }
@@ -1047,7 +1049,7 @@ public sealed class ThirtyTwoXDevice
     private void DrainDreqFifoForSnoopedDma()
     {
         TryRunDreqDma();
-        if (_dreqFifo.Count >= 4)
+        if (_dreqFifo.Count >= DreqFifoCapacity)
         {
             RunSh2Cycles(DreqBackpressureSh2Cycles);
             TryRunDreqDma();
@@ -2511,7 +2513,7 @@ public sealed class ThirtyTwoXDevice
 
                 break;
             case ThirtyTwoXHardwareProfile.DreqControlOffset:
-                WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(value & (DreqControlCpuWrite | DreqControlRomToVramDma)));
+                WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(value & (DreqControlCpuWrite | DreqControlDma | DreqControlRomToVramDma)));
                 break;
             case ThirtyTwoXHardwareProfile.DreqLengthOffset:
                 WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, (ushort)(value & 0xFFFC));
@@ -3998,7 +4000,7 @@ public sealed class ThirtyTwoXDevice
     {
         ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
         ushort status = (ushort)(control & 0x3FFF);
-        if (_dreqFifo.Count >= 4)
+        if (_dreqFifo.Count >= DreqFifoCapacity)
         {
             status |= 0x8000;
         }
@@ -4014,7 +4016,13 @@ public sealed class ThirtyTwoXDevice
     private void PushDreqFifo(ushort value)
     {
         TryRunDreqDma();
-        if (_dreqFifo.Count >= 4)
+        ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
+        if ((control & (DreqControlCpuWrite | DreqControlRomToVramDma)) == 0)
+        {
+            return;
+        }
+
+        if (_dreqFifo.Count >= DreqFifoCapacity)
         {
             return;
         }
@@ -4028,7 +4036,6 @@ public sealed class ThirtyTwoXDevice
             WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, length);
             if (length == 0)
             {
-                ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
                 WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(control & ~DreqControlCpuWrite));
             }
         }
@@ -4064,7 +4071,7 @@ public sealed class ThirtyTwoXDevice
 
     private void RestoreDreqFifo(ushort[] values)
     {
-        foreach (ushort value in values.TakeLast(4))
+        foreach (ushort value in values.TakeLast(DreqFifoCapacity))
         {
             _dreqFifo.Enqueue(value);
         }
