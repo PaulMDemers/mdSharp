@@ -4621,6 +4621,8 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         thirtyTwoXState?.SlaveSh2.PC ?? 0,
         thirtyTwoXState?.MasterSh2.LastOpcode ?? 0,
         thirtyTwoXState?.SlaveSh2.LastOpcode ?? 0,
+        device?.MasterSh2.UnhandledOpcodeCount ?? 0,
+        device?.SlaveSh2.UnhandledOpcodeCount ?? 0,
         thirtyTwoXState?.MasterInterruptMask ?? 0,
         thirtyTwoXState?.SlaveInterruptMask ?? 0,
         thirtyTwoXState?.PwmLeft.Length ?? 0,
@@ -13425,6 +13427,8 @@ file sealed record ThirtyTwoXSweepResult(
     uint SlavePc,
     ushort MasterLastOpcode,
     ushort SlaveLastOpcode,
+    int MasterUnhandledOpcodes,
+    int SlaveUnhandledOpcodes,
     ushort MasterInterruptMask,
     ushort SlaveInterruptMask,
     int PwmAudioLeft,
@@ -13444,7 +13448,7 @@ file sealed record ThirtyTwoXSweepResult(
     string BmpPath,
     string Detail)
 {
-    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
+    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
 
     public string ToCsv()
     {
@@ -13485,6 +13489,8 @@ file sealed record ThirtyTwoXSweepResult(
             $"${SlavePc:X8}",
             $"${MasterLastOpcode:X4}",
             $"${SlaveLastOpcode:X4}",
+            MasterUnhandledOpcodes.ToString(CultureInfo.InvariantCulture),
+            SlaveUnhandledOpcodes.ToString(CultureInfo.InvariantCulture),
             $"${MasterInterruptMask:X4}",
             $"${SlaveInterruptMask:X4}",
             PwmAudioLeft.ToString(CultureInfo.InvariantCulture),
