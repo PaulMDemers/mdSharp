@@ -42,7 +42,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-runlength-rechain-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-sh2-fault-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [history]");
     Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
-    Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
+    Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
@@ -297,7 +297,7 @@ if (args[0].Equals("--32x-comm-trace", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 3)
     {
-        Console.Error.WriteLine("Usage: mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
+        Console.Error.WriteLine("Usage: mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
         return;
     }
 
@@ -307,7 +307,8 @@ if (args[0].Equals("--32x-comm-trace", StringComparison.OrdinalIgnoreCase))
     int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? Math.Max(1, parsedMaxLines) : 50_000;
     ushort offsetStart = args.Length > 7 ? (ushort)ParseNumber(args[7]) : ThirtyTwoXHardwareProfile.CommunicationPortOffset;
     ushort offsetEnd = args.Length > 8 ? (ushort)ParseNumber(args[8]) : (ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0F);
-    TraceThirtyTwoXCommunication(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines, offsetStart, offsetEnd);
+    bool writesOnly = args.Length > 9 && args[9].Equals("writes", StringComparison.OrdinalIgnoreCase);
+    TraceThirtyTwoXCommunication(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines, offsetStart, offsetEnd, writesOnly);
     return;
 }
 
@@ -3471,7 +3472,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
     Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
 }
 
-void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines, ushort offsetStart, ushort offsetEnd)
+void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines, ushort offsetStart, ushort offsetEnd, bool writesOnly)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
     if (!cartridge.Diagnostics.Requires32X)
@@ -3499,6 +3500,7 @@ void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, 
     {
         if (currentFrame < startFrame ||
             lines >= maxLines ||
+            writesOnly && !IsTraceWriteOperation(access.Operation) ||
             access.Offset < offsetStart ||
             access.Offset > offsetEnd)
         {
@@ -3527,7 +3529,8 @@ void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, 
 
     device.SystemRegisterAccessObserver = WriteRow;
     int endFrame = startFrame + frames;
-    Console.WriteLine($"32X communication trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, offsets=${offsetStart:X2}-${offsetEnd:X2}");
+    string modeName = writesOnly ? "writes" : "all";
+    Console.WriteLine($"32X communication trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, offsets=${offsetStart:X2}-${offsetEnd:X2}, mode={modeName}");
     for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
     {
         machine.RunFrameCycles(instructionsPerFrame);
