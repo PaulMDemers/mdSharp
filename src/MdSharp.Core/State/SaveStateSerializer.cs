@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 54;
+    private const int Version = 56;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -377,6 +377,8 @@ public static class SaveStateSerializer
         writer.Write(state.BootRomSignatureReadbackActive);
         writer.Write(state.BootRomLaunchPending);
         writer.Write(state.BootRomPostStartSignaturePending);
+        writer.Write(state.BootRomPostStartSignatureHiddenFromSh2);
+        writer.Write(state.BootRomPostStartSignatureReadMask);
         writer.Write(state.BootRomChecksumPublished);
         WriteSh2(writer, state.MasterSh2);
         WriteSh2(writer, state.SlaveSh2);
@@ -520,6 +522,16 @@ public static class SaveStateSerializer
         {
             bootRomPostStartSignaturePending = reader.ReadBoolean();
         }
+        bool bootRomPostStartSignatureHiddenFromSh2 = false;
+        if (version >= 55)
+        {
+            bootRomPostStartSignatureHiddenFromSh2 = reader.ReadBoolean();
+        }
+        byte bootRomPostStartSignatureReadMask = 0;
+        if (version >= 56)
+        {
+            bootRomPostStartSignatureReadMask = reader.ReadByte();
+        }
         if (version >= 54)
         {
             bootRomChecksumPublished = reader.ReadBoolean();
@@ -593,6 +605,8 @@ public static class SaveStateSerializer
             bootRomSignatureReadbackActive,
             bootRomLaunchPending,
             bootRomPostStartSignaturePending,
+            bootRomPostStartSignatureHiddenFromSh2,
+            bootRomPostStartSignatureReadMask,
             bootRomChecksumPublished,
             ReadSh2(reader, version),
             ReadSh2(reader, version));

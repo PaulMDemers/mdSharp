@@ -398,19 +398,25 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.PwmInterruptClearOffset), 0, cpuIndex: 0);
     ThirtyTwoXDevice.ThirtyTwoXState clearedState = interruptClearDevice.CaptureState();
     AssertTrue(!clearedState.MasterVerticalInterruptPending, "master V interrupt clear should clear master latch");
-    AssertTrue(!clearedState.SlaveVerticalInterruptPending, "V interrupt clear should clear both SH-2 latches");
+    AssertTrue(clearedState.SlaveVerticalInterruptPending, "master V interrupt clear should not clear slave latch");
     AssertTrue(!clearedState.MasterHorizontalInterruptPending, "master H interrupt clear should clear master latch");
-    AssertTrue(!clearedState.SlaveHorizontalInterruptPending, "H interrupt clear should clear both SH-2 latches");
+    AssertTrue(clearedState.SlaveHorizontalInterruptPending, "master H interrupt clear should not clear slave latch");
     AssertTrue(!clearedState.MasterPwmInterruptPending, "master PWM interrupt clear should clear master latch");
-    AssertTrue(!clearedState.SlavePwmInterruptPending, "PWM interrupt clear should clear both SH-2 latches");
+    AssertTrue(clearedState.SlavePwmInterruptPending, "master PWM interrupt clear should not clear slave latch");
     ThirtyTwoXDevice commandClearDevice = new();
     commandClearDevice.Reset();
     commandClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset, 0x0003);
     WriteSh2WordForTest(commandClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommandInterruptClearOffset), 0, cpuIndex: 0);
     ThirtyTwoXDevice.ThirtyTwoXState commandClearState = commandClearDevice.CaptureState();
     AssertTrue(!commandClearState.MasterCommandInterruptPending, "master CMD interrupt clear should clear master latch");
-    AssertTrue(!commandClearState.SlaveCommandInterruptPending, "CMD interrupt clear should clear both SH-2 latches");
-    AssertEqual((ushort)0x0000, commandClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    AssertTrue(commandClearState.SlaveCommandInterruptPending, "master CMD interrupt clear should not clear slave latch");
+    AssertEqual((ushort)0x0002, commandClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    ThirtyTwoXDevice staleCommDevice = new();
+    staleCommDevice.Reset();
+    staleCommDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x50D4);
+    WriteSh2WordForTest(staleCommDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0054, cpuIndex: 1);
+    AssertEqual((ushort)0x50D4, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
+    AssertEqual((ushort)0x0054, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
     AssertEqual(0, device.RunSh2(4));
 
     byte[] cycleRom = new byte[0x20];
@@ -2588,8 +2594,10 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
 
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "MARS user programs should run after the post-start boot signature is published");
     AssertEqual((ushort)0x4D5F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x4F4B, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "post-start boot signature should be readable without holding normal MARS user code");
     AssertEqual((ushort)0x535F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4F4B, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
     AssertEqual((ushort)0x0000, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
 
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
