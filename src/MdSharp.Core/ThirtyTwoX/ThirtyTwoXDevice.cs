@@ -1191,10 +1191,11 @@ public sealed class ThirtyTwoXDevice
         {
             SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace("M68K", (ushort)index, value));
             TraceSystemRegisterAccess("M68K", "W8", (ushort)index, value);
-        ReleaseBootRomLaunchOnHostCommand();
-        UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
-        PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
-        return;
+            ReleaseBootRomLaunchOnHostCommand();
+            UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
+            RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
+            PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
+            return;
         }
 
         _systemRegisters[index] = value;
@@ -1208,6 +1209,7 @@ public sealed class ThirtyTwoXDevice
 
         ReleaseBootRomLaunchOnHostCommand();
         UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
+        RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
         PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
     }
 
@@ -1223,6 +1225,7 @@ public sealed class ThirtyTwoXDevice
         ApplySystemRegisterSideEffects((ushort)(index & ~1), allowAdapterControl: true);
         ReleaseBootRomLaunchOnHostCommand();
         UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
+        RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
         PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
     }
 
@@ -2834,10 +2837,29 @@ public sealed class ThirtyTwoXDevice
         _bootRomHandshakePending = false;
         _bootRomSignatureRead = false;
         _bootRomSignatureReadbackActive = false;
+        _bootRomLaunchPending = _userHeader.RequiresHostLaunchCommand;
+        PublishBootRomChecksumAfterHostClear((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+    }
+
+    private void RetireObservedPostStartSignatureOnHostWrite(ushort offset)
+    {
+        if (!_bootRomPostStartSignaturePending ||
+            _bootRomPostStartSignatureReadMask != 0xFF)
+        {
+            return;
+        }
+
+        int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (relative < 0 || relative >= BootRomCommunicationSignature.Length)
+        {
+            return;
+        }
+
+        _bootRomSignatureRead = false;
+        _bootRomSignatureReadbackActive = false;
         _bootRomPostStartSignaturePending = false;
         _bootRomPostStartSignatureHiddenFromSh2 = false;
         _bootRomPostStartSignatureReadMask = 0;
-        _bootRomLaunchPending = _userHeader.RequiresHostLaunchCommand;
         if (!_bootRomLaunchPending)
         {
             ClearBootRomCommunicationSignature();

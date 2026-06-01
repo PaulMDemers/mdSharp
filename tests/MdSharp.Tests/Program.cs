@@ -2684,6 +2684,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "post-start boot signature should be readable without holding normal MARS user code");
     AssertEqual((ushort)0x535F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
     AssertEqual((ushort)0x4F4B, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    AssertEqual((ushort)0x4F4B, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    sh2ReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     AssertEqual((ushort)0x0000, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
 
     byte[] postStartClobberRom = (byte[])sh2ReadyRom.Clone();
@@ -2704,7 +2706,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     AssertEqual((ushort)0x535F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
     AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
-    AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x4D5F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    postStartClobberDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
