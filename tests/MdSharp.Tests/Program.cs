@@ -2590,6 +2590,7 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4D5F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "post-start boot signature should be readable without holding normal MARS user code");
     AssertEqual((ushort)0x535F, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x0000, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
 
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
     AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
@@ -2617,6 +2618,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
 
     AssertTrue(!launchDevice.BootRomHandshakePending, "STAR launch headers should expose the post-start boot ready signature without a handshake hold");
     AssertTrue(launchDevice.BootRomLaunchPending, "STAR launch headers should hold SH-2 user code until the 68000 sends a launch command");
+    AssertEqual((ushort)0x4D5F, launchDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x535F, launchDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
     AssertEqual((ushort)0x4D5F, launchDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     for (ushort offset = 0; offset < 8; offset += 2)
     {

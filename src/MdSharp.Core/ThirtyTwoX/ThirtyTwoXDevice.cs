@@ -521,6 +521,7 @@ public sealed class ThirtyTwoXDevice
 
     public int RunSh2(int maxInstructionsPerCpu)
     {
+        RetireNonLaunchPostStartSignatureBeforeSh2Run();
         if (Sh2HeldInReset || _bootRomHandshakePending || _bootRomLaunchPending)
         {
             return 0;
@@ -559,6 +560,7 @@ public sealed class ThirtyTwoXDevice
 
     public int RunSh2Cycles(int maxCyclesPerCpu)
     {
+        RetireNonLaunchPostStartSignatureBeforeSh2Run();
         if (Sh2HeldInReset || _bootRomHandshakePending || _bootRomLaunchPending || maxCyclesPerCpu <= 0)
         {
             return 0;
@@ -2581,7 +2583,9 @@ public sealed class ThirtyTwoXDevice
     private bool TryReadBootRomCommunicationSignatureByte(ushort offset, out byte value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        if (_bootRomHandshakePending && relative is >= 0 and < 8 && IsBootSignatureVisible(relative, 1))
+        if ((_bootRomHandshakePending || _bootRomPostStartSignaturePending) &&
+            relative is >= 0 and < 8 &&
+            IsBootSignatureVisible(relative, 1))
         {
             _bootRomSignatureRead |= relative >= 4;
             value = _systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative];
@@ -2622,7 +2626,9 @@ public sealed class ThirtyTwoXDevice
     private bool TryReadBootRomCommunicationSignatureWord(ushort offset, out ushort value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        if (_bootRomHandshakePending && relative is >= 0 and < 7 && IsBootSignatureVisible(relative, 2))
+        if ((_bootRomHandshakePending || _bootRomPostStartSignaturePending) &&
+            relative is >= 0 and < 7 &&
+            IsBootSignatureVisible(relative, 2))
         {
             _bootRomSignatureRead |= relative >= 4;
             value = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative);
@@ -2649,6 +2655,36 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
+    private void ClearBootRomCommunicationSignature()
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        for (int i = 0; i < BootRomCommunicationSignature.Length; i++)
+        {
+            if (_systemRegisters[comm + i] == BootRomCommunicationSignature[i])
+            {
+                _systemRegisters[comm + i] = 0;
+            }
+        }
+    }
+
+    private void RetireNonLaunchPostStartSignatureBeforeSh2Run()
+    {
+        if (!_bootRomPostStartSignaturePending ||
+            _bootRomLaunchPending ||
+            _bootRomHandshakePending ||
+            !_userHeader.IsValid ||
+            _userHeader.RequiresHostLaunchCommand)
+        {
+            return;
+        }
+
+        _bootRomSignatureRead = false;
+        _bootRomSignatureReadbackActive = false;
+        _bootRomPostStartSignaturePending = false;
+        ClearBootRomCommunicationSignature();
+        PublishBootRomChecksumAfterHostClear((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+    }
+
     private void ReleasePostStartBootSignatureAfterRead(int relative, int bytes)
     {
         if (!_bootRomPostStartSignaturePending ||
@@ -2662,6 +2698,11 @@ public sealed class ThirtyTwoXDevice
         _bootRomSignatureReadbackActive = false;
         _bootRomPostStartSignaturePending = false;
         _bootRomLaunchPending = _userHeader.RequiresHostLaunchCommand;
+        if (!_bootRomLaunchPending)
+        {
+            ClearBootRomCommunicationSignature();
+        }
+
         PublishBootRomChecksumAfterHostClear((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
     }
 
