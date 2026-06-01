@@ -468,7 +468,7 @@ if (args[0].Equals("--scripted-render", StringComparison.OrdinalIgnoreCase))
     if (args.Length < 4)
     {
         Console.Error.WriteLine("Usage: mdsharp --scripted-render <rom-file> <output.ppm> <script> [frames] [instructions-per-frame] [--no-svp-diagnostics] [--no-line-vram-snapshots] [--no-svp-dma-step] [--svp-mld-z] [--svp-al-broad] [--svp-al-mame] [--svp-pmac-loose] [--svp-write-rpl] [--svp-mame-timing]");
-    Console.Error.WriteLine("Scripts: none, start, repeat-start, p1-repeat-start, virtua-racing-drive, sonic1-start, sonic3-start, chaotix-title-start, streets, bloodlines");
+        Console.Error.WriteLine("Scripts: none, start, repeat-start, p1-repeat-start, virtua-racing-drive, sonic1-start, sonic3-start, chaotix-title-start, chaotix-play, streets, bloodlines");
         Environment.Exit(1);
     }
 
@@ -5413,6 +5413,7 @@ VisualCheckpointSpec[] BuildVisualCheckpointSpecs()
         new VisualCheckpointSpec("zero-wing-idle-dialog", "Zero Wing idle dialogue", ["zero wing"], 1_200, NoInput),
         new VisualCheckpointSpec("zero-wing-idle-gameplay", "Zero Wing idle gameplay sprites", ["zero wing"], 7_200, NoInput),
         new VisualCheckpointSpec("virtua-racing-gameplay", "Virtua Racing SVP gameplay", ["virtua racing"], 4_800, VirtuaRacingStartAndDrive, NoInput),
+        new VisualCheckpointSpec("chaotix-title", "Knuckles Chaotix 32X title", ["chaotix"], 900, NoInput),
         new VisualCheckpointSpec("sonic-spinball-title", "Sonic Spinball title", ["sonic spinball"], 600, NoInput),
         new VisualCheckpointSpec("gunstar-title", "Gunstar Heroes post-start title", ["gunstar heroes"], 2_400, RepeatedStartPulse),
         new VisualCheckpointSpec("vectorman-title", "Vectorman title", ["vectorman (usa)"], 1_200, NoInput),
@@ -5489,6 +5490,27 @@ GenesisButton Sonic3TitleStartPulse(int frame)
 GenesisButton ChaotixTitleStartPulse(int frame)
 {
     return frame is >= 1_800 and < 1_830 ? GenesisButton.Start : GenesisButton.None;
+}
+
+GenesisButton ChaotixStartAndPlay(int frame)
+{
+    GenesisButton buttons = GenesisButton.None;
+    if (frame is >= 300 and < 330)
+    {
+        buttons |= GenesisButton.Start;
+    }
+
+    if (frame >= 1_800)
+    {
+        buttons |= GenesisButton.Right;
+    }
+
+    if (frame is >= 2_100 and < 2_130 or >= 2_700 and < 2_730)
+    {
+        buttons |= GenesisButton.C;
+    }
+
+    return buttons;
 }
 
 GenesisButton StreetsOfRageStartAndSelect(int frame)
@@ -11892,6 +11914,7 @@ Func<int, GenesisButton> ResolveInputScript(string script)
         "sonic1-start" => Sonic1TitleStartPulse,
         "sonic3-start" => Sonic3TitleStartPulse,
         "chaotix-title-start" or "chaotix-start" => ChaotixTitleStartPulse,
+        "chaotix-play" or "chaotix-start-play" => ChaotixStartAndPlay,
         "streets" or "streets-start" => StreetsStartAndSelect,
         "bloodlines" or "bloodlines-start" => BloodlinesStartThenPlay,
         _ => throw new ArgumentException($"Unknown input script '{script}'."),
