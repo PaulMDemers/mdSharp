@@ -12851,7 +12851,7 @@ string DisassembleSh2(ushort opcode, uint pc)
         _ when (opcode >> 12) == 0x9 => $"MOV.W @({Disp((pc + 4 + (uint)(d8 * 2)) & 0xFFFF_FFFE)},PC),{R(n)}",
         _ when (opcode >> 12) == 0xA => $"BRA {Disp(PcDisp12())}",
         _ when (opcode >> 12) == 0xB => $"BSR {Disp(PcDisp12())}",
-        _ when (opcode >> 12) == 0xD => $"MOV.L @({Disp((pc + 4 + (uint)(d8 * 4)) & 0xFFFF_FFFC)},PC),{R(n)}",
+        _ when (opcode >> 12) == 0xD => $"MOV.L @({Disp(((pc + 4) & 0xFFFF_FFFCu) + (uint)(d8 * 4))},PC),{R(n)}",
         _ when (opcode >> 12) == 0xE => $"MOV {Imm(SignExtend8ForDisassembly(d8))},{R(n)}",
         _ => DisassembleSh2ByGroup(opcode, pc, n, m, d4, d8, R, Disp, PcDisp8),
     };
@@ -12936,7 +12936,7 @@ string DisassembleSh2ByGroup(ushort opcode, uint pc, int n, int m, int d4, int d
             0x4 => $"MOV.B @({d8},GBR),R0",
             0x5 => $"MOV.W @({d8 * 2},GBR),R0",
             0x6 => $"MOV.L @({d8 * 4},GBR),R0",
-            0x7 => $"MOVA @({d8 * 4},PC),R0",
+            0x7 => $"MOVA @({Disp(((pc + 4) & 0xFFFF_FFFCu) + (uint)(d8 * 4))},PC),R0",
             0x8 => $"TST #{d8},R0",
             0x9 => $"AND #{d8},R0",
             0xA => $"XOR #{d8},R0",
