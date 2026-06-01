@@ -369,6 +369,16 @@ void ThirtyTwoXDeviceShell()
     device.WriteFrameBufferByte(0, 0x5A);
     device.WriteOverwriteImageByte(0, 0x00);
     AssertEqual((byte)0x5A, device.ReadFrameBufferByte(0));
+    List<ThirtyTwoXDevice.PaletteAccessTrace> paletteEvents = [];
+    device.PaletteAccessObserver = paletteEvents.Add;
+    device.WritePaletteWord(0x1FE, 0x2468, "TEST");
+    AssertEqual((ushort)0x2468, device.ReadPaletteWord(0x1FE));
+    AssertEqual(2, paletteEvents.Count);
+    AssertEqual("TEST", paletteEvents[0].Source);
+    AssertEqual("W16", paletteEvents[0].Operation);
+    AssertEqual((ushort)0x1FE, paletteEvents[0].Offset);
+    AssertEqual((ushort)0x2468, paletteEvents[0].Value);
+    AssertEqual("R16", paletteEvents[1].Operation);
     ThirtyTwoXDevice ntscFormatDevice = new();
     ntscFormatDevice.Reset();
     ntscFormatDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);

@@ -1294,7 +1294,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
         {
-            _thirtyTwoX.WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value);
+            _thirtyTwoX.WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value, "M68K");
             _thirtyTwoX.GrantVdpAccessToSh2();
             return true;
         }
@@ -1340,7 +1340,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kColorPaletteStart and < ThirtyTwoXHardwareProfile.M68kColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) - 1)
         {
-            _thirtyTwoX.WritePaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value);
+            _thirtyTwoX.WritePaletteWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kColorPaletteStart), value, "M68K");
             _thirtyTwoX.GrantVdpAccessToSh2();
             return true;
         }

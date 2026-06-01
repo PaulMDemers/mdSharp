@@ -3430,6 +3430,21 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
             WriteRow(access.Source, access.Operation, address, access.Value);
         }
     };
+    device.PaletteAccessObserver = access =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        uint address = access.Source == "M68K"
+            ? ThirtyTwoXHardwareProfile.M68kColorPaletteStart + access.Offset
+            : ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + access.Offset;
+        if (AddressMatches(address))
+        {
+            WriteRow(access.Source, access.Operation, address, access.Value);
+        }
+    };
     device.Sh2MemoryAccessTraceFilter = AddressMatches;
     device.Sh2MemoryAccessObserver = access =>
     {
@@ -3466,6 +3481,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
     device.SystemRegisterAccessObserver = null;
     device.SystemRegisterWriteObserver = null;
     device.VdpRegisterAccessObserver = null;
+    device.PaletteAccessObserver = null;
     device.Sh2MemoryAccessObserver = null;
     device.Sh2MemoryAccessTraceFilter = null;
     device.FrameBufferAccessObserver = null;

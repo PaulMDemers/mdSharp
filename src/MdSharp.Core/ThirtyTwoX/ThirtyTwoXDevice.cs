@@ -338,6 +338,7 @@ public sealed class ThirtyTwoXDevice
     public Action<SystemRegisterAccessTrace>? SystemRegisterAccessObserver { get; set; }
     public Action<SystemRegisterAccessTrace>? VdpRegisterAccessObserver { get; set; }
     public Action<Sh2MemoryAccessTrace>? Sh2MemoryAccessObserver { get; set; }
+    public Action<PaletteAccessTrace>? PaletteAccessObserver { get; set; }
     public Action<FrameBufferAccessTrace>? FrameBufferAccessObserver { get; set; }
     public Action<Sh2Cpu.Sh2LinkedListTrace>? Sh2LinkedListObserver { get; set; }
     public Action<Sh2Cpu.Sh2RechainTrace>? Sh2RechainObserver { get; set; }
@@ -1384,24 +1385,40 @@ public sealed class ThirtyTwoXDevice
 
     public byte ReadPaletteByte(ushort offset)
     {
-        return _palette[offset & (_palette.Length - 1)];
+        byte value = _palette[offset & (_palette.Length - 1)];
+        PaletteAccessObserver?.Invoke(new PaletteAccessTrace("API", "R8", offset, value));
+        return value;
     }
 
     public ushort ReadPaletteWord(ushort offset)
     {
-        return ReadBigEndianWord(_palette, offset & (_palette.Length - 1));
+        ushort value = ReadBigEndianWord(_palette, offset & (_palette.Length - 1));
+        PaletteAccessObserver?.Invoke(new PaletteAccessTrace("API", "R16", offset, value));
+        return value;
     }
 
     public void WritePaletteByte(ushort offset, byte value)
     {
+        WritePaletteByte(offset, value, "API");
+    }
+
+    public void WritePaletteByte(ushort offset, byte value, string source)
+    {
         _palette[offset & (_palette.Length - 1)] = value;
         _paletteByteWriteCount++;
+        PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "W8", offset, value));
     }
 
     public void WritePaletteWord(ushort offset, ushort value)
     {
+        WritePaletteWord(offset, value, "API");
+    }
+
+    public void WritePaletteWord(ushort offset, ushort value, string source)
+    {
         WriteBigEndianWord(_palette, offset & (_palette.Length - 1), value);
         _paletteByteWriteCount += 2;
+        PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "W16", offset, value));
     }
 
     public byte ReadFrameBufferByte(uint offset)
@@ -2243,7 +2260,7 @@ public sealed class ThirtyTwoXDevice
             }
 
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
-            WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart), value);
+            WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart), value, cpuIndex == 0 ? "MSH2" : "SSH2");
             TraceSh2MemoryAccess(cpuIndex, "WPAL8", address, value);
             return;
         }
@@ -2258,7 +2275,7 @@ public sealed class ThirtyTwoXDevice
             }
 
             AddSh2PaletteBusyWaitIfNeeded(cpuIndex);
-            WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart), value);
+            WritePaletteByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart), value, cpuIndex == 0 ? "MSH2" : "SSH2");
             TraceSh2MemoryAccess(cpuIndex, "WPAL8", address, value);
             return;
         }
@@ -6028,6 +6045,8 @@ public sealed class ThirtyTwoXDevice
     public readonly record struct SystemRegisterAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
     public readonly record struct Sh2MemoryAccessTrace(string Source, string Operation, uint Address, ushort Value);
+
+    public readonly record struct PaletteAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
     public readonly record struct FrameBufferAccessTrace(string Source, string Operation, uint Offset, ushort Value, int BufferIndex, uint Pc, ushort Opcode);
 }
