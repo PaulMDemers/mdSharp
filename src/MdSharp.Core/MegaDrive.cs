@@ -635,7 +635,8 @@ public sealed class MegaDrive
 
     private int GetM68kVBlankInterruptLevel()
     {
-        return 6;
+        // 32X adapter mode vectors the 68000 VBlank through the cartridge jump table's level 5 entry.
+        return Bus.ThirtyTwoX is { AdapterEnabled: true } ? 5 : 6;
     }
 
     private bool HBlankInterruptEnabled()
