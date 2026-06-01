@@ -1940,6 +1940,12 @@ public sealed class ThirtyTwoXDevice
 
     internal ushort ReadSh2Word(uint address, int cpuIndex)
     {
+        if (TryReadSh2BootRomServiceWord(address, out ushort bootServiceWord))
+        {
+            TraceSh2MemoryAccess(cpuIndex, "RB16", address, bootServiceWord);
+            return bootServiceWord;
+        }
+
         if (IsSh2DivisionUnitRegisterAddress(address))
         {
             ushort value = ReadSh2DivisionUnitWord(address, cpuIndex);
@@ -2126,6 +2132,30 @@ public sealed class ThirtyTwoXDevice
         // cache setup. The complete BIOS is not executed by this emulator, but
         // exposing its ready marker keeps that handoff-compatible code moving.
         value = normalized == 0 ? (byte)0x80 : (byte)0x00;
+        return true;
+    }
+
+    private bool TryReadSh2BootRomServiceWord(uint address, out ushort value)
+    {
+        if (!AdapterEnabled || !_sh2ResetReleased)
+        {
+            value = 0;
+            return false;
+        }
+
+        uint normalized = address & 0x1FFF_FFFFu;
+        if (normalized >= Sh2BootRomMappedBytes)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = normalized switch
+        {
+            0x0000 => 0x000B, // RTS
+            0x0002 => 0x0009, // NOP
+            _ => 0x0000,
+        };
         return true;
     }
 

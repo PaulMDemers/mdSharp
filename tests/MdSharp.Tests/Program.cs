@@ -3337,10 +3337,19 @@ void ThirtyTwoXSh2BootRomReadyMarker()
         return (byte)method.Invoke(target, [address, 0])!;
     }
 
+    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Word reflection hook missing");
+        return (ushort)method.Invoke(target, [address, 0])!;
+    }
+
     AssertEqual((byte)0x80, ReadSh2ByteForTest(device, 0x0000_0000));
     AssertEqual((byte)0x80, ReadSh2ByteForTest(device, 0x2000_0000));
     AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0x0000_0001));
     AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0x0000_0FFF));
+    AssertEqual((ushort)0x000B, ReadSh2WordForTest(device, 0x0000_0000));
+    AssertEqual((ushort)0x0009, ReadSh2WordForTest(device, 0x0000_0002));
 }
 
 void CpuResetAndSimpleInstructions()
