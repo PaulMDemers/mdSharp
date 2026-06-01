@@ -44,6 +44,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
+    Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
     Console.WriteLine("  mdsharp --32x-node-dump <rom-file> [frames] [instructions-per-frame] [address] [count] [linear|next|prev]");
@@ -338,6 +339,20 @@ if (args[0].Equals("--32x-cache-inspect", StringComparison.OrdinalIgnoreCase))
     int instructionsPerFrame = args.Length > 3 && int.TryParse(args[3], out int parsedInstructions) ? parsedInstructions : 300_000;
     uint address = args.Length > 4 ? ParseNumber(args[4]) : 0;
     InspectThirtyTwoXCache(args[1], frames, instructionsPerFrame, address);
+    return;
+}
+
+if (args[0].Equals("--32x-dump-sdram", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 600_000;
+    DumpThirtyTwoXSdram(args[1], args[2], frames, instructionsPerFrame);
     return;
 }
 
@@ -3680,6 +3695,29 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
 
         Console.WriteLine(line.ToString());
     }
+}
+
+void DumpThirtyTwoXSdram(string romPath, string outputPath, int frames, int instructionsPerFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    File.WriteAllBytes(outputPath, device.Sdram.ToArray());
+    Console.WriteLine($"Dumped {device.Sdram.Length:N0} SDRAM byte(s) from {Path.GetFileName(romPath)} after {frames:N0} frame(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}");
 }
 
 void InspectThirtyTwoXCache(string romPath, int frames, int instructionsPerFrame, uint address)

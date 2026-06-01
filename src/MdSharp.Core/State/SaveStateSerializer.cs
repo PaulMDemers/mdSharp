@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 56;
+    private const int Version = 58;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -315,6 +315,8 @@ public static class SaveStateSerializer
         WriteArray(writer, state.FrameBuffer1);
         WriteArray(writer, state.Palette);
         WriteArray(writer, state.SystemRegisters);
+        WriteArray(writer, state.M68kCommunicationPendingHostBytes);
+        WriteArray(writer, state.M68kCommunicationDeferredSh2ClearBytes);
         WriteArray(writer, state.VdpRegisters);
         WriteArray(writer, state.PwmLeft);
         WriteArray(writer, state.PwmRight);
@@ -379,6 +381,7 @@ public static class SaveStateSerializer
         writer.Write(state.BootRomPostStartSignaturePending);
         writer.Write(state.BootRomPostStartSignatureHiddenFromSh2);
         writer.Write(state.BootRomPostStartSignatureReadMask);
+        writer.Write(state.BootRomPostStartHostClearProtectMask);
         writer.Write(state.BootRomChecksumPublished);
         WriteSh2(writer, state.MasterSh2);
         WriteSh2(writer, state.SlaveSh2);
@@ -391,6 +394,8 @@ public static class SaveStateSerializer
         byte[] frameBuffer1 = ReadByteArray(reader);
         byte[] palette = ReadByteArray(reader);
         byte[] systemRegisters = ReadByteArray(reader);
+        bool[] m68kCommunicationPendingHostBytes = version >= 58 ? ReadBoolArray(reader) : new bool[16];
+        bool[] m68kCommunicationDeferredSh2ClearBytes = version >= 58 ? ReadBoolArray(reader) : new bool[16];
         byte[] vdpRegisters = ReadByteArray(reader);
         ushort[] pwmLeft = ReadUShortArray(reader);
         ushort[] pwmRight = ReadUShortArray(reader);
@@ -532,6 +537,12 @@ public static class SaveStateSerializer
         {
             bootRomPostStartSignatureReadMask = reader.ReadByte();
         }
+        byte bootRomPostStartHostClearProtectMask = 0;
+        if (version >= 57)
+        {
+            bootRomPostStartHostClearProtectMask = reader.ReadByte();
+        }
+
         if (version >= 54)
         {
             bootRomChecksumPublished = reader.ReadBoolean();
@@ -543,6 +554,8 @@ public static class SaveStateSerializer
             frameBuffer1,
             palette,
             systemRegisters,
+            m68kCommunicationPendingHostBytes,
+            m68kCommunicationDeferredSh2ClearBytes,
             vdpRegisters,
             pwmLeft,
             pwmRight,
@@ -607,6 +620,7 @@ public static class SaveStateSerializer
             bootRomPostStartSignaturePending,
             bootRomPostStartSignatureHiddenFromSh2,
             bootRomPostStartSignatureReadMask,
+            bootRomPostStartHostClearProtectMask,
             bootRomChecksumPublished,
             ReadSh2(reader, version),
             ReadSh2(reader, version));

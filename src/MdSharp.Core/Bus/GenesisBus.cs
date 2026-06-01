@@ -1286,8 +1286,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x80)
         {
+            SyncThirtyTwoXSystemWriteBeforeAccess(address);
             _thirtyTwoX.WriteSystemRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart), value);
-            SyncThirtyTwoXSystemHandshake(address, isWrite: true);
+            SyncThirtyTwoXSystemWriteAfterAccess(address);
             return true;
         }
 
@@ -1331,8 +1332,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kSystemRegisterStart and < ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + 0x7F)
         {
+            SyncThirtyTwoXSystemWriteBeforeAccess(address);
             _thirtyTwoX.WriteSystemRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kSystemRegisterStart), value);
-            SyncThirtyTwoXSystemHandshake(address, isWrite: true);
+            SyncThirtyTwoXSystemWriteAfterAccess(address);
             return true;
         }
 
@@ -1357,12 +1359,43 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         _thirtyTwoX.RunSh2Cycles(isWrite ? ThirtyTwoXCommunicationWriteSyncCycles : ThirtyTwoXCommunicationReadSyncCycles);
     }
 
+    private void SyncThirtyTwoXSystemWriteBeforeAccess(uint address)
+    {
+        if (_thirtyTwoX is null || !IsThirtyTwoXCommunicationAddress(address))
+        {
+            return;
+        }
+
+        _thirtyTwoX.SetCurrentMasterCycle(CurrentMasterCycle);
+        _thirtyTwoX.RunSh2Cycles(ThirtyTwoXCommunicationWriteSyncCycles);
+    }
+
+    private void SyncThirtyTwoXSystemWriteAfterAccess(uint address)
+    {
+        if (_thirtyTwoX is null || !IsThirtyTwoXInterruptControlAddress(address))
+        {
+            return;
+        }
+
+        _thirtyTwoX.SetCurrentMasterCycle(CurrentMasterCycle);
+        _thirtyTwoX.RunSh2Cycles(ThirtyTwoXCommunicationWriteSyncCycles);
+    }
+
     private static bool IsThirtyTwoXSystemHandshakeAddress(uint address)
     {
+        return IsThirtyTwoXCommunicationAddress(address) || IsThirtyTwoXInterruptControlAddress(address);
+    }
+
+    private static bool IsThirtyTwoXCommunicationAddress(uint address)
+    {
         const uint communicationPortStart = ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        return address is >= communicationPortStart and < communicationPortStart + 0x10;
+    }
+
+    private static bool IsThirtyTwoXInterruptControlAddress(uint address)
+    {
         const uint interruptControlStart = ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + ThirtyTwoXHardwareProfile.InterruptControlOffset;
-        return address is >= communicationPortStart and < communicationPortStart + 0x10 ||
-            address is >= interruptControlStart and < interruptControlStart + 2;
+        return address is >= interruptControlStart and < interruptControlStart + 2;
     }
 
     private bool ShouldSampleThirtyTwoXRegisterBeforeSync(ushort offset)

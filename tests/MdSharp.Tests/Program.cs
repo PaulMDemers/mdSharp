@@ -2726,7 +2726,11 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4F4B, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     AssertEqual((ushort)0x535F, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
     AssertEqual((ushort)0x4F4B, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
-    postStartMailboxDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartMailboxDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
     AssertEqual((ushort)0x0080, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
@@ -2908,6 +2912,13 @@ void ThirtyTwoXCommunicationByteReadWriteEdge()
     AssertEqual((byte)0x44, oddLaneDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     oddLaneDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x00);
     AssertEqual((ushort)0x0000, oddLaneDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice commandAckDevice = new();
+    commandAckDevice.Reset();
+    WriteSh2ByteForTest(commandAckDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1), 0x01);
+
+    AssertEqual((byte)0x00, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((byte)0x01, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1));
 }
 
 void ThirtyTwoXM68kSystemHandshakesSyncSh2()
