@@ -347,6 +347,9 @@ public sealed class ThirtyTwoXDevice
     public bool BootRomHandshakePending => _bootRomHandshakePending;
     public bool BootRomSignatureRead => _bootRomSignatureRead;
     public bool BootRomLaunchPending => _bootRomLaunchPending;
+    public bool BootRomPostStartSignaturePending => _bootRomPostStartSignaturePending;
+    public bool BootRomPostStartSignatureHiddenFromSh2 => _bootRomPostStartSignatureHiddenFromSh2;
+    public byte BootRomPostStartSignatureReadMask => _bootRomPostStartSignatureReadMask;
     public bool RomToVramDmaActive => IsSh2RomBlockedByRv();
     public int M68kCartridgeBank => _m68kCartridgeBank & 0x03;
 
@@ -1135,6 +1138,17 @@ public sealed class ThirtyTwoXDevice
         ushort value = ReadSystemRegisterWordCore(offset, popDreqFifo: true, sh2View: false);
         TraceSystemRegisterAccess("M68K", "R16", offset, value);
         return value;
+    }
+
+    public bool ShouldSampleM68kSystemRegisterBeforeSync(ushort offset)
+    {
+        if (!_bootRomPostStartSignaturePending)
+        {
+            return false;
+        }
+
+        int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        return relative >= 0 && relative < BootRomCommunicationSignature.Length;
     }
 
     private ushort ReadSystemRegisterWordCore(ushort offset, bool popDreqFifo, bool sh2View)
@@ -2428,6 +2442,12 @@ public sealed class ThirtyTwoXDevice
     {
         int index = offset & (SystemRegisterBytes - 1);
         SyncOtherSh2ForCommunicationAccess((ushort)index, cpuIndex);
+        if (ShouldProtectPostStartSignatureFromSh2((ushort)index, 1))
+        {
+            TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "W8", (ushort)index, value);
+            return;
+        }
+
         if ((index & ~1) == ThirtyTwoXHardwareProfile.AdapterControlOffset)
         {
             ushort mask = cpuIndex == 0 ? _masterInterruptMask : _slaveInterruptMask;
@@ -2464,6 +2484,12 @@ public sealed class ThirtyTwoXDevice
         ushort aligned = (ushort)(index & ~1);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         SyncOtherSh2ForCommunicationAccess(aligned, cpuIndex);
+        if (ShouldProtectPostStartSignatureFromSh2(aligned, 2))
+        {
+            TraceSystemRegisterAccess(source, "W16", aligned, value);
+            return;
+        }
+
         if (aligned == ThirtyTwoXHardwareProfile.AdapterControlOffset)
         {
             WriteSh2InterruptMask(cpuIndex, value);
@@ -2737,6 +2763,11 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsBootSignatureVisible(int relative, int bytes)
     {
+        if (_bootRomPostStartSignaturePending)
+        {
+            return relative >= 0 && relative + bytes <= BootRomCommunicationSignature.Length;
+        }
+
         for (int i = 0; i < bytes; i++)
         {
             int index = relative + i;
@@ -2824,6 +2855,13 @@ public sealed class ThirtyTwoXDevice
 
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
         return relative >= 0 && relative + bytes <= BootRomCommunicationSignature.Length;
+    }
+
+    private bool ShouldProtectPostStartSignatureFromSh2(ushort offset, int bytes)
+    {
+        return _bootRomPostStartSignaturePending &&
+            _bootRomPostStartSignatureHiddenFromSh2 &&
+            IsPostStartSignatureHiddenFromSh2(offset, bytes);
     }
 
     private bool HasPendingBootRomSignatureWrite(ushort offset)

@@ -1365,10 +1365,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             address is >= interruptControlStart and < interruptControlStart + 2;
     }
 
-    private static bool ShouldSampleThirtyTwoXRegisterBeforeSync(ushort offset)
+    private bool ShouldSampleThirtyTwoXRegisterBeforeSync(ushort offset)
     {
         const ushort upperMailboxStart = ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8;
-        return offset is >= upperMailboxStart and < upperMailboxStart + 8;
+        return offset is >= upperMailboxStart and < upperMailboxStart + 8 ||
+            _thirtyTwoX?.ShouldSampleM68kSystemRegisterBeforeSync(offset) == true;
     }
 
     private byte ReadJCartByte(uint address)

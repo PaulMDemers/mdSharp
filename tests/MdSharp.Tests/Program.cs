@@ -2686,6 +2686,27 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4F4B, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
     AssertEqual((ushort)0x0000, sh2ReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
 
+    byte[] postStartClobberRom = (byte[])sh2ReadyRom.Clone();
+    WriteWord(postStartClobberRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
+    WriteWord(postStartClobberRom, 0x02, 0xE100); // MOV #0,R1
+    WriteWord(postStartClobberRom, 0x04, 0x2011); // MOV.W R1,@R0
+    WriteWord(postStartClobberRom, 0x06, 0x001B); // SLEEP
+    ThirtyTwoXDevice postStartClobberDevice = new(postStartClobberRom);
+    postStartClobberDevice.Reset();
+    postStartClobberDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartClobberDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    AssertTrue(postStartClobberDevice.RunSh2(8) > 0, "SH-2 code should run while post-start signature is pending");
+    AssertEqual((ushort)0x4D5F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x535F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
     AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
     AssertEqual((byte)0x4D, sh2ReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));

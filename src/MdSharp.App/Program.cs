@@ -1578,7 +1578,7 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
             $"compositeMode={thirtyTwoX.LastCompositeMode} fallback={thirtyTwoX.LastCompositeUsedFallback} " +
             $"vdpWrites={thirtyTwoX.VdpRegisterWriteCount} modeWrites={thirtyTwoX.BitmapModeWriteCount}/${thirtyTwoX.LastBitmapModeWrite:X4} fbWrites={thirtyTwoX.FrameBufferControlWriteCount}/${thirtyTwoX.LastFrameBufferControlWrite:X4} fbBytes={thirtyTwoX.FrameBufferByteWriteCount:N0} fbDenied={thirtyTwoX.DeniedFrameBufferAccessCount:N0} palBytes={thirtyTwoX.PaletteByteWriteCount:N0} dreqWords={thirtyTwoX.DreqDmaWordTransferCount:N0} compositePixels={thirtyTwoX.LastCompositeWrittenPixels:N0} " +
             $"irqMask=${thirtyTwoX.MasterInterruptMask:X4}/${thirtyTwoX.SlaveInterruptMask:X4} pendingIrq={thirtyTwoX.MasterSh2.PendingInterruptLevel}/{thirtyTwoX.SlaveSh2.PendingInterruptLevel} " +
-            $"bootPending={thirtyTwoX.BootRomHandshakePending} bootRead={thirtyTwoX.BootRomSignatureRead} bootLaunch={thirtyTwoX.BootRomLaunchPending} " +
+            $"bootPending={thirtyTwoX.BootRomHandshakePending} bootRead={thirtyTwoX.BootRomSignatureRead} bootLaunch={thirtyTwoX.BootRomLaunchPending} postBoot={thirtyTwoX.BootRomPostStartSignaturePending}/{thirtyTwoX.BootRomPostStartSignatureHiddenFromSh2}/${thirtyTwoX.BootRomPostStartSignatureReadMask:X2} " +
             $"fbNonzero={CountNonzeroBytes(thirtyTwoX.DisplayFrameBuffer):N0}/{CountNonzeroBytes(thirtyTwoX.DrawFrameBuffer):N0} " +
             $"palNonzero={CountNonzeroBytes(thirtyTwoX.Palette):N0} " +
             $"sh2Sched={machine.ThirtyTwoXScheduledInstructionRequests:N0} sh2Exec={machine.ThirtyTwoXExecutedInstructionSteps:N0} " +
@@ -3501,6 +3501,7 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
     Console.WriteLine($"Inspected {Path.GetFileName(romPath)} after {frames} frame(s)");
     Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8} GBR=${device.MasterSh2.GBR:X8} VBR=${device.MasterSh2.VBR:X8} PR=${device.MasterSh2.PR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8} GBR=${device.SlaveSh2.GBR:X8} VBR=${device.SlaveSh2.VBR:X8} PR=${device.SlaveSh2.PR:X8}");
     Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
+    Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
     Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
     for (int i = 0; i < words; i += 8)
     {
