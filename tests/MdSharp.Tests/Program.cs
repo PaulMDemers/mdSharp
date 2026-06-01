@@ -2710,6 +2710,25 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     postStartClobberDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
+    ThirtyTwoXDevice postStartMailboxDevice = new(sh2ReadyRom);
+    postStartMailboxDevice.Reset();
+    postStartMailboxDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartMailboxDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    WriteSh2WordForTest(
+        postStartMailboxDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
+        0x0080);
+    AssertEqual((ushort)0x4D5F, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x4F4B, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x535F, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4F4B, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    postStartMailboxDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
+    AssertEqual((ushort)0x0080, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
     AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
     AssertEqual((byte)0x4D, sh2ReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));

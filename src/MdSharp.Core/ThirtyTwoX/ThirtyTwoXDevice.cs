@@ -353,6 +353,11 @@ public sealed class ThirtyTwoXDevice
     public bool RomToVramDmaActive => IsSh2RomBlockedByRv();
     public int M68kCartridgeBank => _m68kCartridgeBank & 0x03;
 
+    public ushort DebugPeekSystemRegisterWord(ushort offset)
+    {
+        return ReadBigEndianWord(_systemRegisters, offset & (SystemRegisterBytes - 1));
+    }
+
     public void Reset()
     {
         Array.Clear(_sdram);
@@ -2712,7 +2717,9 @@ public sealed class ThirtyTwoXDevice
             IsBootSignatureVisible(relative, 1))
         {
             _bootRomSignatureRead |= relative >= 4;
-            value = _systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative];
+            value = _bootRomPostStartSignaturePending
+                ? BootRomCommunicationSignature[relative]
+                : _systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative];
             MarkPostStartBootSignatureRead(relative, 1);
             return true;
         }
@@ -2755,7 +2762,9 @@ public sealed class ThirtyTwoXDevice
             IsBootSignatureVisible(relative, 2))
         {
             _bootRomSignatureRead |= relative >= 4;
-            value = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative);
+            value = _bootRomPostStartSignaturePending
+                ? (ushort)((BootRomCommunicationSignature[relative] << 8) | BootRomCommunicationSignature[relative + 1])
+                : ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative);
             MarkPostStartBootSignatureRead(relative, 2);
             return true;
         }
@@ -2881,9 +2890,10 @@ public sealed class ThirtyTwoXDevice
 
     private bool ShouldProtectPostStartSignatureFromSh2(ushort offset, int bytes)
     {
-        return _bootRomPostStartSignaturePending &&
-            _bootRomPostStartSignatureHiddenFromSh2 &&
-            IsPostStartSignatureHiddenFromSh2(offset, bytes);
+        // The post-start signature is a 68000-side read overlay. SH-2 startup
+        // code can legally begin publishing command/mailbox values beneath it
+        // before the host has fully retired the virtual M_OK/S_OK bytes.
+        return false;
     }
 
     private bool HasPendingBootRomSignatureWrite(ushort offset)
