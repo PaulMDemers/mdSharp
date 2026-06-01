@@ -766,6 +766,13 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((nextOpcode & 0xF00F) == 0x6001 &&
+                cpu.TryFastForwardWordTstBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x2008 &&
                 cpu.TryFastForwardTstBfsDelayAddLoop(cycleBudget, out fastCycles))
             {

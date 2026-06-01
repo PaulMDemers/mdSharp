@@ -23,6 +23,7 @@ Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopF
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
@@ -1790,6 +1791,29 @@ void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardWordCmpEqBtPollLoop(300, out _), "non-matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0200;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8BFC); // BF loop
+    bus.WriteWord(0x2000_4020, 0x0001);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = 0x2000_4020;
+    AssertTrue(cpu.TryFastForwardWordTstBfPollLoop(300, out int cycles), "MOV.W/TST/BF nonzero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0x2000_4020u, cpu.R[1]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteWord(0x2000_4020, 0x0000);
+    AssertTrue(!cpu.TryFastForwardWordTstBfPollLoop(300, out _), "zero poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2TstBfsDelayAddLoopFastForward()

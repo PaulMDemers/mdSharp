@@ -1854,6 +1854,68 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardWordTstBfPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((loadOpcode & 0xF00F) != 0x6001 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int testLeft = (testOpcode >> 8) & 0x0F;
+        int testRight = (testOpcode >> 4) & 0x0F;
+        if (loadDestination != 0 ||
+            testLeft != 0 ||
+            testRight != 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 8 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        if (!peekBus.TryPeekWord(R[loadSource], out ushort wordValue) ||
+            wordValue == 0)
+        {
+            return false;
+        }
+
+        R[0] = (uint)(short)wordValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardTstBfsDelayAddLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
