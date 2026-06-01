@@ -4600,6 +4600,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         ? 0.0
         : completedFrames / stopwatch.Elapsed.TotalSeconds;
     ThirtyTwoXDevice.ThirtyTwoXState? thirtyTwoXState = device?.CaptureState();
+    string exceptions = machine is null ? string.Empty : FormatExceptions(machine.MainCpu);
 
     return new ThirtyTwoXSweepResult(
         relative,
@@ -4608,7 +4609,9 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         stopwatch.ElapsedMilliseconds,
         fps,
         machine?.MainCpu.PC ?? 0,
-        machine is null ? string.Empty : FormatExceptions(machine.MainCpu),
+        exceptions,
+        CountFaultExceptionEvents(exceptions),
+        CountTrapOrInterruptEvents(exceptions),
         machine?.Vdp.LastRenderMode ?? string.Empty,
         nonBackground,
         maxNonBackground,
@@ -4695,6 +4698,7 @@ static uint ReadBigEndianLongSpan(ReadOnlySpan<byte> data, int offset)
 string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int nonBackground, int maxNonBackground)
 {
     string exceptions = FormatExceptions(machine.MainCpu);
+    string exceptionSuffix = ThirtyTwoXExceptionStatusSuffix(exceptions);
     int displayFbNonzero = CountNonzeroBytes(device.DisplayFrameBuffer);
     int drawFbNonzero = CountNonzeroBytes(device.DrawFrameBuffer);
     int displayFbPayloadNonzero = CountFramebufferPayloadNonzero(device.DisplayFrameBuffer);
@@ -4714,7 +4718,7 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
     if (device.LastCompositeMode != 0 && device.LastCompositeWrittenPixels > 0 && nonBackground > 0)
     {
         string visible = device.LastCompositeUsedFallback ? "visible-32x-fallback" : "visible-32x";
-        return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+        return WithThirtyTwoXExceptionSuffix(visible, exceptionSuffix);
     }
 
     if (nonBackground > 0)
@@ -4724,20 +4728,20 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
             if (displayFbPayloadNonzero + drawFbPayloadNonzero == 0)
             {
                 string lineTableOnlyVisible = paletteNonzero == 0 ? "md-visible-framebuffer-line-table-only-no-palette" : "md-visible-framebuffer-line-table-only";
-                return exceptions == "none" ? lineTableOnlyVisible : $"{lineTableOnlyVisible}-m68k-exception";
+                return WithThirtyTwoXExceptionSuffix(lineTableOnlyVisible, exceptionSuffix);
             }
 
             string visible = paletteNonzero == 0 ? "md-visible-framebuffer-no-palette" : "md-visible-framebuffer-dark";
-            return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+            return WithThirtyTwoXExceptionSuffix(visible, exceptionSuffix);
         }
 
         if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
         {
             string visible = "md-visible-32x-vdp-idle";
-            return exceptions == "none" ? visible : $"{visible}-m68k-exception";
+            return WithThirtyTwoXExceptionSuffix(visible, exceptionSuffix);
         }
 
-        return exceptions == "none" ? "md-only" : "md-only-m68k-exception";
+        return WithThirtyTwoXExceptionSuffix("md-only", exceptionSuffix);
     }
 
     if (displayFbNonzero + drawFbNonzero > 0)
@@ -4750,9 +4754,9 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
         return paletteNonzero == 0 ? "framebuffer-no-palette" : "framebuffer-dark";
     }
 
-    if (exceptions != "none")
+    if (exceptionSuffix.Length != 0)
     {
-        return "m68k-exception";
+        return exceptionSuffix[1..];
     }
 
     if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
@@ -4768,6 +4772,21 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
     return "stalled";
 }
 
+string ThirtyTwoXExceptionStatusSuffix(string exceptions)
+{
+    if (!HasCpuExceptions(exceptions))
+    {
+        return string.Empty;
+    }
+
+    return HasFaultExceptions(exceptions) ? "-m68k-fault" : "-m68k-trap";
+}
+
+static string WithThirtyTwoXExceptionSuffix(string status, string exceptionSuffix)
+{
+    return exceptionSuffix.Length == 0 ? status : status + exceptionSuffix;
+}
+
 bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
 {
     if (completedFrames >= 300)
@@ -4775,18 +4794,20 @@ bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
         return false;
     }
 
-    return status is
+    string baseStatus = status
+        .Replace("-m68k-fault", string.Empty, StringComparison.Ordinal)
+        .Replace("-m68k-trap", string.Empty, StringComparison.Ordinal)
+        .Replace("-m68k-exception", string.Empty, StringComparison.Ordinal);
+
+    return baseStatus is
         "vdp-dark" or
         "framebuffer-dark" or
         "framebuffer-no-palette" or
         "framebuffer-line-table-only" or
         "framebuffer-line-table-only-no-palette" or
         "md-visible-32x-vdp-idle" or
-        "md-visible-32x-vdp-idle-m68k-exception" or
         "md-visible-framebuffer-line-table-only" or
         "md-visible-framebuffer-line-table-only-no-palette" or
-        "md-visible-framebuffer-line-table-only-m68k-exception" or
-        "md-visible-framebuffer-line-table-only-no-palette-m68k-exception" or
         "stalled";
 }
 
@@ -6615,7 +6636,7 @@ bool HasTrapOrInterruptActivity(string exceptions)
 
 bool IsFaultVector(int vector)
 {
-    return vector is < 24 or > 47;
+    return vector is 2 or 3 or >= 5 and <= 9 or > 47;
 }
 
 int CountFaultExceptionEvents(string exceptions)
@@ -13415,6 +13436,8 @@ file sealed record ThirtyTwoXSweepResult(
     double Fps,
     uint Pc,
     string Exceptions,
+    int M68kFaultEvents,
+    int M68kTrapEvents,
     string RenderMode,
     int NonBackgroundPixels,
     int MaxNonBackgroundPixels,
@@ -13464,7 +13487,7 @@ file sealed record ThirtyTwoXSweepResult(
     string BmpPath,
     string Detail)
 {
-    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
+    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,m68kFaults,m68kTraps,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
 
     public string ToCsv()
     {
@@ -13477,6 +13500,8 @@ file sealed record ThirtyTwoXSweepResult(
             Fps.ToString("0.###", CultureInfo.InvariantCulture),
             $"${Pc:X8}",
             $"\"{Escape(Exceptions)}\"",
+            M68kFaultEvents.ToString(CultureInfo.InvariantCulture),
+            M68kTrapEvents.ToString(CultureInfo.InvariantCulture),
             RenderMode,
             NonBackgroundPixels.ToString(CultureInfo.InvariantCulture),
             MaxNonBackgroundPixels.ToString(CultureInfo.InvariantCulture),
