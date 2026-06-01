@@ -1071,17 +1071,17 @@ public sealed class ThirtyTwoXDevice
             return laneValue;
         }
 
-        byte value = ReadSystemRegisterByteCore(offset);
+        byte value = ReadSystemRegisterByteCore(offset, sh2View: false);
         TraceSystemRegisterAccess("M68K", "R8", offset, value);
         return value;
     }
 
-    private byte ReadSystemRegisterByteCore(ushort offset)
+    private byte ReadSystemRegisterByteCore(ushort offset, bool sh2View)
     {
         ushort aligned = (ushort)(offset & ~1);
         if (aligned == ThirtyTwoXHardwareProfile.DreqControlOffset)
         {
-            ushort word = BuildDreqControlStatus();
+            ushort word = BuildDreqControlStatus(sh2View);
             return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
         }
 
@@ -1119,17 +1119,17 @@ public sealed class ThirtyTwoXDevice
             return staleValue;
         }
 
-        ushort value = ReadSystemRegisterWordCore(offset, popDreqFifo: true);
+        ushort value = ReadSystemRegisterWordCore(offset, popDreqFifo: true, sh2View: false);
         TraceSystemRegisterAccess("M68K", "R16", offset, value);
         return value;
     }
 
-    private ushort ReadSystemRegisterWordCore(ushort offset, bool popDreqFifo)
+    private ushort ReadSystemRegisterWordCore(ushort offset, bool popDreqFifo, bool sh2View)
     {
         ushort aligned = (ushort)(offset & ~1);
         if (aligned == ThirtyTwoXHardwareProfile.DreqControlOffset)
         {
-            return BuildDreqControlStatus();
+            return BuildDreqControlStatus(sh2View);
         }
 
         if (aligned == ThirtyTwoXHardwareProfile.DreqFifoOffset)
@@ -2333,7 +2333,7 @@ public sealed class ThirtyTwoXDevice
             return 0;
         }
 
-        byte registerValue = ReadSystemRegisterByteCore(offset);
+        byte registerValue = ReadSystemRegisterByteCore(offset, sh2View: true);
         TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R8", offset, registerValue);
         SyncOtherSh2ForCommunicationAccess(offset, cpuIndex);
         return registerValue;
@@ -2353,7 +2353,7 @@ public sealed class ThirtyTwoXDevice
             return 0;
         }
 
-        return ReadSystemRegisterByteCore(offset);
+        return ReadSystemRegisterByteCore(offset, sh2View: true);
     }
 
     private ushort ReadSh2SystemRegisterWord(ushort offset, int cpuIndex)
@@ -2363,7 +2363,7 @@ public sealed class ThirtyTwoXDevice
             ? BuildSh2InterruptMask(cpuIndex)
             : IsPostStartSignatureHiddenFromSh2(aligned, 2)
                 ? (ushort)0
-            : ReadSystemRegisterWordCore(aligned, popDreqFifo: true);
+            : ReadSystemRegisterWordCore(aligned, popDreqFifo: true, sh2View: true);
         TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R16", aligned, value);
         SyncOtherSh2ForCommunicationAccess(aligned, cpuIndex);
         return value;
@@ -2483,7 +2483,7 @@ public sealed class ThirtyTwoXDevice
     {
         ushort value = offset == ThirtyTwoXHardwareProfile.DreqFifoOffset || IsPwmPulseWidthOffset(offset)
             ? ReadBigEndianWord(_systemRegisters, offset)
-            : ReadSystemRegisterWordCore(offset, popDreqFifo: false);
+            : ReadSystemRegisterWordCore(offset, popDreqFifo: false, sh2View: false);
         switch (offset)
         {
             case ThirtyTwoXHardwareProfile.AdapterControlOffset:
@@ -3996,16 +3996,16 @@ public sealed class ThirtyTwoXDevice
         return (short)Math.Clamp(left + right, short.MinValue, short.MaxValue);
     }
 
-    private ushort BuildDreqControlStatus()
+    private ushort BuildDreqControlStatus(bool sh2View)
     {
         ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
-        ushort status = (ushort)(control & 0x3FFF);
+        ushort status = (ushort)(control & (DreqControlRomToVramDma | DreqControlDma | DreqControlCpuWrite));
         if (_dreqFifo.Count >= DreqFifoCapacity)
         {
-            status |= 0x8000;
+            status |= sh2View ? (ushort)0x8000 : (ushort)0x0080;
         }
 
-        if (_dreqFifo.Count == 0)
+        if (sh2View && _dreqFifo.Count == 0)
         {
             status |= 0x4000;
         }

@@ -329,6 +329,13 @@ void ThirtyTwoXDeviceShell()
         return (byte)method.Invoke(target, [address, 0])!;
     }
 
+    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Word helper was not found");
+        return (ushort)method.Invoke(target, [address, 0])!;
+    }
+
     static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
@@ -501,9 +508,11 @@ void ThirtyTwoXDeviceShell()
     AssertEqual(3, monoPwmDevice.CapturePwm().Mono.Length);
     AssertEqual((ushort)0x0333, (ushort)(monoPwmDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmMonoPulseWidthOffset) & 0x0FFF));
 
-    AssertEqual((ushort)0x4000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0006);
-    AssertEqual((ushort)0x4006, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0006, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4006, ReadSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset, 0x0007);
     AssertEqual((ushort)0x0004, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset));
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x1357);
@@ -517,7 +526,8 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x2468, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
     AssertEqual((ushort)0xAAAA, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
     AssertEqual((ushort)0xBBBB, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
-    AssertEqual((ushort)0x4002, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0002, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4002, ReadSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     ThirtyTwoXDevice fullDreqDevice = new();
     fullDreqDevice.Reset();
@@ -529,13 +539,15 @@ void ThirtyTwoXDeviceShell()
     }
 
     fullDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x22FF);
-    AssertEqual((ushort)0x8000, fullDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0080, fullDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x8000, ReadSh2WordForTest(fullDreqDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
     for (ushort i = 0; i < 8; i++)
     {
         AssertEqual((ushort)(0x1100 + i), fullDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
     }
 
-    AssertEqual((ushort)0x4000, fullDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, fullDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(fullDreqDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     ThirtyTwoXDevice dreqSnoopDevice = new();
     dreqSnoopDevice.Reset();
@@ -554,7 +566,8 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x2222, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
     AssertEqual((ushort)0x3333, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
     AssertEqual((ushort)0x4444, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
-    AssertEqual((ushort)0x4000, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, dreqSnoopDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(dreqSnoopDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     byte[] dreqWordReadRom = new byte[0x40];
     WriteWord(dreqWordReadRom, 0x00, 0xD003); // MOV.L @(literal,PC),R0
@@ -571,7 +584,8 @@ void ThirtyTwoXDeviceShell()
     dreqWordReadDevice.MasterSh2.Run(8);
     AssertEqual(0x1357u, dreqWordReadDevice.MasterSh2.R[1]);
     AssertEqual(0x2468u, dreqWordReadDevice.MasterSh2.R[2]);
-    AssertEqual((ushort)0x4004, dreqWordReadDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0004, dreqWordReadDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4004, ReadSh2WordForTest(dreqWordReadDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     byte[] dreqWordWriteRom = new byte[0x40];
     WriteWord(dreqWordWriteRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
@@ -587,7 +601,8 @@ void ThirtyTwoXDeviceShell()
     dreqWordWriteDevice.MasterSh2.Run(8);
     AssertEqual(1, dreqWordWriteDevice.DreqFifoWriteCount);
     AssertEqual((ushort)0x55AA, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
-    AssertEqual((ushort)0x4004, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0004, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4004, ReadSh2WordForTest(dreqWordWriteDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     byte[] lowCartridgeAliasRom = new byte[0x80];
     WriteWord(lowCartridgeAliasRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
@@ -679,7 +694,8 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((byte)0x20, dreqDmaDevice.Sdram[0x101]);
     AssertEqual((byte)0x70, dreqDmaDevice.Sdram[0x106]);
     AssertEqual((byte)0x80, dreqDmaDevice.Sdram[0x107]);
-    AssertEqual((ushort)0x4000, dreqDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, dreqDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(dreqDmaDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     ThirtyTwoXDevice gatedDreqDmaDevice = new(dreqDmaRom);
     gatedDreqDmaDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
@@ -711,7 +727,8 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((byte)0x34, dreqSnoopDmaDevice.Sdram[0x101]);
     AssertEqual((byte)0xDE, dreqSnoopDmaDevice.Sdram[0x106]);
     AssertEqual((byte)0xF0, dreqSnoopDmaDevice.Sdram[0x107]);
-    AssertEqual((ushort)0x4000, dreqSnoopDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x0000, dreqSnoopDmaDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(dreqSnoopDmaDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
     ThirtyTwoXDevice dreqBackpressureDevice = new();
     dreqBackpressureDevice.Reset();
@@ -3482,7 +3499,7 @@ void VdpDmaMemoryCopyWritesVramAndCram()
     AssertEqual((ushort)0x2222, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
     AssertEqual((ushort)0x3333, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
     AssertEqual((ushort)0x4444, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqFifoOffset)));
-    AssertEqual((ushort)0x4000, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
+    AssertEqual((ushort)0x0000, x32Machine.Bus.ReadWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 }
 
 void VdpLongDmaTimingScalesWithTransferLength()
