@@ -43,6 +43,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-sh2-fault-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [history]");
     Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
+    Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
@@ -309,6 +310,22 @@ if (args[0].Equals("--32x-comm-trace", StringComparison.OrdinalIgnoreCase))
     ushort offsetEnd = args.Length > 8 ? (ushort)ParseNumber(args[8]) : (ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0F);
     bool writesOnly = args.Length > 9 && args[9].Equals("writes", StringComparison.OrdinalIgnoreCase);
     TraceThirtyTwoXCommunication(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines, offsetStart, offsetEnd, writesOnly);
+    return;
+}
+
+if (args[0].Equals("--32x-diagnostic-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? parsedStartFrame : 0;
+    int maxEvents = args.Length > 6 && int.TryParse(args[6], out int parsedMaxEvents) ? parsedMaxEvents : 10_000;
+    TraceThirtyTwoXDiagnostic(args[1], args[2], frames, instructionsPerFrame, startFrame, maxEvents);
     return;
 }
 
@@ -3567,6 +3584,210 @@ static bool IsTraceWriteOperation(string operation)
         operation.StartsWith("DENY-OW", StringComparison.Ordinal);
 }
 
+void TraceThirtyTwoXDiagnostic(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxEvents)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,event,source,operation,address,offset,value,detail,m68kPc,m68kSr,m68kExceptions,masterPc,masterSr,masterLastPc,masterLastOpcode,masterPendingIrq,masterUnhandled,slavePc,slaveSr,slaveLastPc,slaveLastOpcode,slavePendingIrq,slaveUnhandled,adapter,intCtrl,bankSet,dreq,dreqSourceHi,dreqSourceLo,dreqDestHi,dreqDestLo,dreqLen,dreqFifo,comm20,comm22,comm24,comm26,comm28,comm2A,comm2C,comm2E,bitmap,fbctl,draw,display,swapPending,vblank,hblank,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayPayload,drawPayload,paletteNonzero,bank");
+
+    int currentFrame = 0;
+    int sequence = 0;
+    int emittedEvents = 0;
+    int frameBufferEventsThisFrame = 0;
+
+    void WriteSnapshot(string eventKind, string source, string operation, uint address, ushort offset, ushort value, string detail)
+    {
+        if (currentFrame < startFrame || emittedEvents >= maxEvents)
+        {
+            return;
+        }
+
+        Action<ThirtyTwoXDevice.SystemRegisterAccessTrace>? systemObserver = device.SystemRegisterAccessObserver;
+        Action<ThirtyTwoXDevice.SystemRegisterAccessTrace>? vdpObserver = device.VdpRegisterAccessObserver;
+        device.SystemRegisterAccessObserver = null;
+        device.VdpRegisterAccessObserver = null;
+        try
+        {
+            ushort adapter = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset);
+            ushort intCtrl = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset);
+            ushort bankSet = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.BankSetOffset);
+            ushort dreq = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset);
+            ushort dreqSourceHi = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset);
+            ushort dreqSourceLo = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqSourceAddressOffset + 2);
+            ushort dreqDestHi = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqDestinationAddressOffset);
+            ushort dreqDestLo = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqDestinationAddressOffset + 2);
+            ushort dreqLen = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqLengthOffset);
+            ushort comm20 = device.DebugPeekSystemRegisterWord(0x20);
+            ushort comm22 = device.DebugPeekSystemRegisterWord(0x22);
+            ushort comm24 = device.DebugPeekSystemRegisterWord(0x24);
+            ushort comm26 = device.DebugPeekSystemRegisterWord(0x26);
+            ushort comm28 = device.DebugPeekSystemRegisterWord(0x28);
+            ushort comm2A = device.DebugPeekSystemRegisterWord(0x2A);
+            ushort comm2C = device.DebugPeekSystemRegisterWord(0x2C);
+            ushort comm2E = device.DebugPeekSystemRegisterWord(0x2E);
+            ushort bitmap = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset);
+            ushort fbctl = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+
+            writer.WriteLine(string.Join(
+                ',',
+                currentFrame.ToString(CultureInfo.InvariantCulture),
+                (++sequence).ToString(CultureInfo.InvariantCulture),
+                eventKind,
+                source,
+                operation,
+                address == 0 ? string.Empty : $"${address:X8}",
+                $"${offset:X4}",
+                $"${value:X4}",
+                $"\"{EscapeCsv(detail)}\"",
+                $"${machine.MainCpu.PC:X8}",
+                $"${machine.MainCpu.SR:X4}",
+                $"\"{EscapeCsv(FormatExceptions(machine.MainCpu))}\"",
+                $"${device.MasterSh2.PC:X8}",
+                $"${device.MasterSh2.SR:X8}",
+                $"${device.MasterSh2.LastOpcodePc:X8}",
+                $"${device.MasterSh2.LastOpcode:X4}",
+                device.MasterSh2.PendingInterruptLevel.ToString(CultureInfo.InvariantCulture),
+                device.MasterSh2.UnhandledOpcodeCount.ToString(CultureInfo.InvariantCulture),
+                $"${device.SlaveSh2.PC:X8}",
+                $"${device.SlaveSh2.SR:X8}",
+                $"${device.SlaveSh2.LastOpcodePc:X8}",
+                $"${device.SlaveSh2.LastOpcode:X4}",
+                device.SlaveSh2.PendingInterruptLevel.ToString(CultureInfo.InvariantCulture),
+                device.SlaveSh2.UnhandledOpcodeCount.ToString(CultureInfo.InvariantCulture),
+                $"${adapter:X4}",
+                $"${intCtrl:X4}",
+                $"${bankSet:X4}",
+                $"${dreq:X4}",
+                $"${dreqSourceHi:X4}",
+                $"${dreqSourceLo:X4}",
+                $"${dreqDestHi:X4}",
+                $"${dreqDestLo:X4}",
+                $"${dreqLen:X4}",
+                device.DreqFifoCount.ToString(CultureInfo.InvariantCulture),
+                $"${comm20:X4}",
+                $"${comm22:X4}",
+                $"${comm24:X4}",
+                $"${comm26:X4}",
+                $"${comm28:X4}",
+                $"${comm2A:X4}",
+                $"${comm2C:X4}",
+                $"${comm2E:X4}",
+                $"${bitmap:X4}",
+                $"${fbctl:X4}",
+                device.DrawFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+                device.DisplayFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+                device.FrameBufferSwapPending ? "true" : "false",
+                device.VBlank ? "true" : "false",
+                device.HBlank ? "true" : "false",
+                device.BitmapModeWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.FrameBufferControlWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.VdpRegisterWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.FrameBufferByteWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.PaletteByteWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.DreqFifoWriteCount.ToString(CultureInfo.InvariantCulture),
+                device.DreqDmaWordTransferCount.ToString(CultureInfo.InvariantCulture),
+                CountFramebufferPayloadNonzero(device.DisplayFrameBuffer).ToString(CultureInfo.InvariantCulture),
+                CountFramebufferPayloadNonzero(device.DrawFrameBuffer).ToString(CultureInfo.InvariantCulture),
+                CountNonzeroBytes(device.Palette).ToString(CultureInfo.InvariantCulture),
+                device.M68kCartridgeBank.ToString(CultureInfo.InvariantCulture)));
+            emittedEvents++;
+        }
+        finally
+        {
+            device.SystemRegisterAccessObserver = systemObserver;
+            device.VdpRegisterAccessObserver = vdpObserver;
+        }
+    }
+
+    device.SystemRegisterAccessObserver = access =>
+    {
+        uint address = access.Source == "M68K"
+            ? ThirtyTwoXHardwareProfile.M68kSystemRegister(access.Offset)
+            : ThirtyTwoXHardwareProfile.Sh2SystemRegister(access.Offset);
+        WriteSnapshot("sys", access.Source, access.Operation, address, access.Offset, access.Value, string.Empty);
+    };
+    device.VdpRegisterAccessObserver = access =>
+    {
+        if (IsTraceWriteOperation(access.Operation))
+        {
+            WriteSnapshot("vdp", access.Source, access.Operation, ThirtyTwoXHardwareProfile.Sh2VdpRegister(access.Offset), access.Offset, access.Value, string.Empty);
+        }
+    };
+    device.PaletteAccessObserver = access =>
+    {
+        if (!IsTraceWriteOperation(access.Operation))
+        {
+            return;
+        }
+
+        uint address = access.Source == "M68K"
+            ? ThirtyTwoXHardwareProfile.M68kColorPaletteStart + access.Offset
+            : ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + access.Offset;
+        WriteSnapshot("palette", access.Source, access.Operation, address, access.Offset, access.Value, string.Empty);
+    };
+    device.FrameBufferAccessObserver = access =>
+    {
+        if (frameBufferEventsThisFrame >= 16)
+        {
+            return;
+        }
+
+        bool isLineTable = access.Offset < 0x200;
+        if (!isLineTable && access.Value == 0)
+        {
+            return;
+        }
+
+        frameBufferEventsThisFrame++;
+        uint baseAddress = access.Operation.StartsWith("OW", StringComparison.Ordinal)
+            ? ThirtyTwoXHardwareProfile.Sh2OverwriteImageStart
+            : ThirtyTwoXHardwareProfile.Sh2FrameBufferStart;
+        WriteSnapshot("fb", access.Source, access.Operation, baseAddress + access.Offset, (ushort)(access.Offset & 0xFFFF), access.Value, $"fb{access.BufferIndex} pc=${access.Pc:X8} op=${access.Opcode:X4}");
+    };
+
+    Console.WriteLine($"32X diagnostic trace: {Path.GetFileName(romPath)}, {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame, startFrame={startFrame:N0}, max {maxEvents:N0} event(s)");
+    for (currentFrame = 0; currentFrame < frames && emittedEvents < maxEvents; currentFrame++)
+    {
+        frameBufferEventsThisFrame = 0;
+        string status = "ok";
+        string detail = string.Empty;
+        try
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            status = ex.GetType().Name;
+            detail = ex.Message;
+        }
+
+        _ = machine.RenderFrameRgb();
+        WriteSnapshot("frame", string.Empty, string.Empty, 0, 0, 0, status == "ok" ? string.Empty : $"{status}: {detail}");
+        if (status != "ok")
+        {
+            break;
+        }
+    }
+
+    device.SystemRegisterAccessObserver = null;
+    device.VdpRegisterAccessObserver = null;
+    device.PaletteAccessObserver = null;
+    device.FrameBufferAccessObserver = null;
+    Console.WriteLine($"Wrote {emittedEvents:N0} 32X diagnostic trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
 void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int instructionsPerFrame, int history)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
@@ -4789,7 +5010,7 @@ static string WithThirtyTwoXExceptionSuffix(string status, string exceptionSuffi
 
 bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
 {
-    if (completedFrames >= 300)
+    if (completedFrames >= 900)
     {
         return false;
     }
