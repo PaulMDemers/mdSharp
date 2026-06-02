@@ -43,6 +43,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-runlength-rechain-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-sh2-fault-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [history]");
     Console.WriteLine("  mdsharp --32x-bus-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-bus-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact]");
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-comm-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
@@ -313,6 +314,35 @@ if (args[0].Equals("--32x-bus-trace", StringComparison.OrdinalIgnoreCase))
     bool nonzeroOnly = traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase);
     int startFrame = args.Length > 9 && int.TryParse(args[9], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
     TraceThirtyTwoXBus(args[1], args[2], frames, instructionsPerFrame, addressStart, addressEnd, maxLines, writesOnly, exactAddressMatch, startFrame, changesOnly, nonzeroOnly);
+    return;
+}
+
+if (args[0].Equals("--32x-bus-trace-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-bus-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [all|writes|exact|all-exact|writes-exact|changes-exact|nonzero-exact]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint? addressStart = args.Length > 6 ? ParseNumber(args[6]) : null;
+    uint? addressEnd = args.Length > 7 ? ParseNumber(args[7]) : addressStart;
+    int maxLines = args.Length > 8 && int.TryParse(args[8], out int parsedMaxLines) ? parsedMaxLines : 250_000;
+    string traceMode = args.Length > 9 ? args[9] : "all";
+    bool writesOnly = traceMode.Equals("writes", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("writes-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("changes-exact", StringComparison.OrdinalIgnoreCase);
+    bool exactAddressMatch = traceMode.Equals("exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("all-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("writes-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase) ||
+        traceMode.Equals("changes-exact", StringComparison.OrdinalIgnoreCase);
+    bool changesOnly = traceMode.Equals("changes-exact", StringComparison.OrdinalIgnoreCase);
+    bool nonzeroOnly = traceMode.Equals("nonzero-exact", StringComparison.OrdinalIgnoreCase);
+    TraceThirtyTwoXBus(args[1], args[3], frames, instructionsPerFrame, addressStart, addressEnd, maxLines, writesOnly, exactAddressMatch, startFrame: 0, changesOnly, nonzeroOnly, statePath: args[2]);
     return;
 }
 
@@ -3458,7 +3488,7 @@ static uint GetAfterRegister(Sh2Cpu.Sh2InstructionTrace trace, int register)
     };
 }
 
-void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instructionsPerFrame, uint? addressStart, uint? addressEnd, int maxLines, bool writesOnly, bool exactAddressMatch, int startFrame, bool changesOnly = false, bool nonzeroOnly = false)
+void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instructionsPerFrame, uint? addressStart, uint? addressEnd, int maxLines, bool writesOnly, bool exactAddressMatch, int startFrame, bool changesOnly = false, bool nonzeroOnly = false, string? statePath = null)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
     if (!cartridge.Diagnostics.Requires32X)
@@ -3469,6 +3499,11 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
 
     MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
     machine.Reset();
+    if (!string.IsNullOrWhiteSpace(statePath))
+    {
+        SaveStateSerializer.Load(machine, statePath);
+    }
+
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
     uint start = addressStart ?? 0;
@@ -3598,7 +3633,10 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
 
     string modeName = changesOnly ? "changes-exact" : nonzeroOnly ? "nonzero-exact" : exactAddressMatch ? (writesOnly ? "writes-exact" : "exact") : (writesOnly ? "writes" : "all");
     int endFrame = startFrame + frames;
-    Console.WriteLine($"32X bus trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, address=${start:X8}-${end:X8}, mode={modeName}");
+    string origin = string.IsNullOrWhiteSpace(statePath)
+        ? $"startFrame={startFrame:N0}"
+        : $"state={Path.GetFileName(statePath)}";
+    Console.WriteLine($"32X bus trace: {Path.GetFileName(romPath)}, frames={frames:N0}, {origin}, budget={instructionsPerFrame:N0}, address=${start:X8}-${end:X8}, mode={modeName}");
     for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
     {
         if (currentFrame == startFrame)
