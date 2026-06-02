@@ -2743,6 +2743,21 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
 
     AssertEqual((ushort)0x0080, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
+    ThirtyTwoXDevice postStartSh2MailboxDevice = new(sh2ReadyRom);
+    postStartSh2MailboxDevice.Reset();
+    postStartSh2MailboxDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartSh2MailboxDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    WriteSh2WordForTest(
+        postStartSh2MailboxDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
+        0xBEEF);
+    AssertEqual((ushort)0x4F4B, postStartSh2MailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0xBEEF, ReadSh2WordForTest(postStartSh2MailboxDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2)));
+
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
     AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
     AssertEqual((byte)0x4D, sh2ReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));

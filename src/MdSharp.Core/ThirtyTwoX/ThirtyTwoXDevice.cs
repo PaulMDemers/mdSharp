@@ -1130,7 +1130,8 @@ public sealed class ThirtyTwoXDevice
             return checksumValue;
         }
 
-        if (TryReadBootRomCommunicationSignatureByte(offset, out byte bootValue))
+        if ((!sh2View || _bootRomHandshakePending) &&
+            TryReadBootRomCommunicationSignatureByte(offset, out byte bootValue))
         {
             return bootValue;
         }
@@ -1186,7 +1187,8 @@ public sealed class ThirtyTwoXDevice
             return checksumValue;
         }
 
-        if (TryReadBootRomCommunicationSignatureWord(offset, out ushort bootValue))
+        if ((!sh2View || _bootRomHandshakePending) &&
+            TryReadBootRomCommunicationSignatureWord(offset, out ushort bootValue))
         {
             return bootValue;
         }
@@ -3008,7 +3010,21 @@ public sealed class ThirtyTwoXDevice
         }
 
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        return relative >= 0 && relative + bytes <= BootRomCommunicationSignature.Length;
+        if (relative < 0 || relative + bytes > BootRomCommunicationSignature.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < bytes; i++)
+        {
+            int index = relative + i;
+            if (_systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + index] != BootRomCommunicationSignature[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool ShouldProtectPostStartSignatureFromSh2(ushort offset, int bytes)
