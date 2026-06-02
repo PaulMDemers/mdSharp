@@ -26,6 +26,8 @@ Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPo
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
+Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFastForward);
+Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
@@ -1956,6 +1958,89 @@ void ThirtyTwoXSh2TwoStageWordPollRingFastForward()
 
     bus.WriteWord(PollAddress, 0x0001);
     AssertTrue(!cpu.TryFastForwardTwoStageWordZeroPollRing(2000, out _), "nonzero poll word should not fast-forward");
+}
+
+void ThirtyTwoXSh2SdramFlagTaskletFastForward()
+{
+    const uint Pc = 0x0600_45E4;
+    const uint FlagAddress = 0x0600_74BC;
+    const uint ValueAddress = 0x0600_74C8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(Pc + 0, 0xD132); // MOV.L literal,R1
+    bus.WriteInstructionWord(Pc + 2, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(Pc + 4, 0xC801); // TST #1,R0
+    bus.WriteInstructionWord(Pc + 6, 0x8950); // BT return
+    bus.WriteInstructionWord(Pc + 8, 0xDE2F); // MOV.L literal,R14
+    bus.WriteInstructionWord(Pc + 10, 0x61E2); // MOV.L @R14,R1
+    bus.WriteInstructionWord(Pc + 12, 0xD22D); // MOV.L literal,R2
+    bus.WriteInstructionWord(Pc + 14, 0x3210); // CMP/EQ R1,R2
+    bus.WriteInstructionWord(Pc + 16, 0x894B); // BT return
+    bus.WriteInstructionWord(0x0600_468E, 0x000B); // RTS
+    bus.WriteInstructionWord(0x0600_4690, 0x4F26); // LDS.L @R15+,PR
+    bus.WriteLong(0x0600_46B0, FlagAddress);
+    bus.WriteLong(0x0600_46AC, ValueAddress);
+    bus.WriteLong(0x0600_46A8, 0x0000_0080);
+    bus.WriteWord(FlagAddress, 0x0001);
+    bus.WriteLong(ValueAddress, 0x0000_0080);
+    bus.WriteLong(0x0603_EFFC, 0x1234_5678);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(Pc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_01B6u);
+    cpu.R[15] = 0x0603_EFFC;
+    AssertTrue(cpu.TryFastForwardSdramFlagTaskletReturn(32, out int cycles), "SDRAM flag tasklet should fast-forward when the guarded value matches");
+    AssertEqual(10, cycles);
+    AssertEqual(0x0600_01B6u, cpu.PC);
+    AssertEqual(0x1234_5678u, cpu.PR);
+    AssertEqual(0x0603_F000u, cpu.R[15]);
+    AssertEqual(FlagAddress, cpu.R[1]);
+    AssertEqual(ValueAddress, cpu.R[14]);
+    AssertEqual(0x0000_0080u, cpu.R[2]);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(Pc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_01B6u);
+    cpu.R[15] = 0x0603_EFFC;
+    bus.WriteLong(ValueAddress, 0x0000_0081);
+    AssertTrue(!cpu.TryFastForwardSdramFlagTaskletReturn(32, out _), "nonmatching guarded value should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2GbrBytePairTaskletFastForward()
+{
+    const uint Pc = 0x0600_4B64;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(Pc + 0, 0xC42D); // MOV.B @(45,GBR),R0
+    bus.WriteInstructionWord(Pc + 2, 0x6103); // MOV R0,R1
+    bus.WriteInstructionWord(Pc + 4, 0xC42C); // MOV.B @(44,GBR),R0
+    bus.WriteInstructionWord(Pc + 6, 0x3100); // CMP/EQ R0,R1
+    bus.WriteInstructionWord(Pc + 8, 0x8944); // BT return
+    bus.WriteInstructionWord(0x0600_4BF8, 0x000B); // RTS
+    bus.WriteInstructionWord(0x0600_4BFA, 0x4F26); // LDS.L @R15+,PR
+    bus.WriteByte(0x2000_402C, 0x3C);
+    bus.WriteByte(0x2000_402D, 0x3C);
+    bus.WriteLong(0x0603_DFFC, 0x0600_0658);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(Pc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), 0x2000_4000u);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_0668u);
+    cpu.R[15] = 0x0603_DFFC;
+    AssertTrue(cpu.TryFastForwardGbrBytePairEqualTaskletReturn(32, out int cycles), "GBR byte-pair tasklet should fast-forward when bytes match");
+    AssertEqual(7, cycles);
+    AssertEqual(0x0600_0668u, cpu.PC);
+    AssertEqual(0x0600_0658u, cpu.PR);
+    AssertEqual(0x0603_E000u, cpu.R[15]);
+    AssertEqual(0x3Cu, cpu.R[0]);
+    AssertEqual(0x3Cu, cpu.R[1]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(Pc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), 0x2000_4000u);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_0668u);
+    cpu.R[15] = 0x0603_DFFC;
+    bus.WriteByte(0x2000_402D, 0x3D);
+    AssertTrue(!cpu.TryFastForwardGbrBytePairEqualTaskletReturn(32, out _), "mismatched communication bytes should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2MovWordSwapCopyLoopFastForward()

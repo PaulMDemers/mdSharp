@@ -708,6 +708,20 @@ public sealed class ThirtyTwoXDevice
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);
                 return fastCycles;
             }
+
+            if ((nextOpcode & 0xF000) == 0xD000 &&
+                cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((nextOpcode & 0xFF00) == 0xC400 &&
+                cpu.TryFastForwardGbrBytePairEqualTaskletReturn(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
         }
 
         if (EnableSh2ListFastPaths &&

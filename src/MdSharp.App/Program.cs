@@ -36,6 +36,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
     Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
     Console.WriteLine("  mdsharp --32x-irq-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-fill-loop-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame]");
     Console.WriteLine("  mdsharp --32x-runlength-list-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
@@ -186,6 +187,24 @@ if (args[0].Equals("--32x-live-sh2-trace", StringComparison.OrdinalIgnoreCase))
     int maxLines = args.Length > 8 && int.TryParse(args[8], out int parsedMaxLines) ? parsedMaxLines : 250_000;
     int startFrame = args.Length > 9 && int.TryParse(args[9], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
     TraceThirtyTwoXLiveSh2(args[1], args[2], frames, instructionsPerFrame, cpu, pcStart, pcEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-live-sh2-trace-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 300_000;
+    string cpu = args.Length > 6 ? args[6] : "both";
+    uint? pcStart = args.Length > 7 ? ParseNumber(args[7]) : null;
+    uint? pcEnd = args.Length > 8 ? ParseNumber(args[8]) : pcStart;
+    int maxLines = args.Length > 9 && int.TryParse(args[9], out int parsedMaxLines) ? parsedMaxLines : 250_000;
+    TraceThirtyTwoXLiveSh2(args[1], args[3], frames, instructionsPerFrame, cpu, pcStart, pcEnd, maxLines, startFrame: 0, statePath: args[2]);
     return;
 }
 
@@ -2551,7 +2570,7 @@ void TraceThirtyTwoXSh2(string romPath, int instructionLimit, string cpuName, ui
     }
 }
 
-void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int instructionsPerFrame, string cpuFilter, uint? pcStart, uint? pcEnd, int maxLines, int startFrame)
+void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int instructionsPerFrame, string cpuFilter, uint? pcStart, uint? pcEnd, int maxLines, int startFrame, string? statePath = null)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
     if (!cartridge.Diagnostics.Requires32X)
@@ -2562,6 +2581,11 @@ void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int in
 
     MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
     machine.Reset();
+    if (!string.IsNullOrWhiteSpace(statePath))
+    {
+        SaveStateSerializer.Load(machine, statePath);
+    }
+
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
 
@@ -2705,7 +2729,10 @@ void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int in
     device.SlaveSh2.InterruptObserver = WriteInterrupt;
 
     int endFrame = startFrame + frames;
-    Console.WriteLine($"32X live SH-2 trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, cpu={cpuFilter}, pc=${start:X8}-${end:X8}");
+    string origin = string.IsNullOrWhiteSpace(statePath)
+        ? $"startFrame={startFrame:N0}"
+        : $"state={Path.GetFileName(statePath)}";
+    Console.WriteLine($"32X live SH-2 trace: {Path.GetFileName(romPath)}, frames={frames:N0}, {origin}, budget={instructionsPerFrame:N0}, cpu={cpuFilter}, pc=${start:X8}-${end:X8}");
     for (currentFrame = 0; currentFrame < endFrame && !limitReached; currentFrame++)
     {
         try
