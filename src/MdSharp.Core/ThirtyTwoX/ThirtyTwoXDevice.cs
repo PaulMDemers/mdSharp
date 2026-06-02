@@ -5,7 +5,11 @@ namespace MdSharp.Core.ThirtyTwoX;
 
 public sealed class ThirtyTwoXDevice
 {
+    private static readonly bool EnableSh2FastPaths =
+        Environment.GetEnvironmentVariable("MDSHARP_DISABLE_SH2_FASTPATHS") != "1";
+
     private static readonly bool EnableSh2ListFastPaths =
+        EnableSh2FastPaths &&
         Environment.GetEnvironmentVariable("MDSHARP_ENABLE_SH2_LIST_FASTPATHS") == "1";
 
     private const int SystemRegisterBytes = 0x100;
@@ -657,7 +661,8 @@ public sealed class ThirtyTwoXDevice
         Sh2Cpu cpu = cpuIndex == 0 ? MasterSh2 : SlaveSh2;
         int fastCycles;
         ushort nextOpcode = 0;
-        bool canProbeFastPath = !cpu.Halted &&
+        bool canProbeFastPath = EnableSh2FastPaths &&
+            !cpu.Halted &&
             !cpu.HasAcceptablePendingInterrupt &&
             !cpu.DelaySlotActive &&
             cpu.InstructionObserver is null &&
@@ -2531,10 +2536,11 @@ public sealed class ThirtyTwoXDevice
     private void WriteSh2SystemRegisterByte(ushort offset, byte value, int cpuIndex)
     {
         int index = offset & (SystemRegisterBytes - 1);
+        string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         SyncOtherSh2ForCommunicationAccess((ushort)index, cpuIndex);
         if (ShouldProtectPostStartSignatureFromSh2((ushort)index, 1))
         {
-            TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "W8", (ushort)index, value);
+            TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
             return;
         }
 
@@ -2545,6 +2551,8 @@ public sealed class ThirtyTwoXDevice
                 ? (ushort)((mask & 0x00FF) | (value << 8))
                 : (ushort)((mask & 0xFF00) | value);
             WriteSh2InterruptMask(cpuIndex, mask);
+            SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)index, value));
+            TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
             RequestPendingInterrupts();
             return;
         }
@@ -2554,6 +2562,8 @@ public sealed class ThirtyTwoXDevice
             ThirtyTwoXHardwareProfile.CommandInterruptClearOffset or
             ThirtyTwoXHardwareProfile.PwmInterruptClearOffset)
         {
+            SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)index, value));
+            TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
             ClearSh2Interrupt((ushort)(index & ~1), cpuIndex);
             return;
         }
@@ -2566,8 +2576,8 @@ public sealed class ThirtyTwoXDevice
         }
 
         MarkM68kCommunicationStaleByte((ushort)index, previousValue, value);
-        SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(cpuIndex == 0 ? "MSH2" : "SSH2", (ushort)index, value));
-        TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "W8", (ushort)index, value);
+        SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)index, value));
+        TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
         CancelBootRomReadbackOnSh2DataWrite((ushort)(index & ~1), value);
         ApplySystemRegisterSideEffects((ushort)(index & ~1), allowAdapterControl: false);
         TryRunDreqDma();
