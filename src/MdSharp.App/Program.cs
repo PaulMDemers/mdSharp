@@ -45,6 +45,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
+    Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
@@ -53,6 +54,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>] [--case-seconds <seconds>]");
     Console.WriteLine("  mdsharp --render <rom-file> <output.ppm> [frames] [instructions-per-frame] [--trace-cpu] [--trace-vdp]");
+    Console.WriteLine("  mdsharp --render-state <rom-file> <state.mdss> <output.ppm> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --render-sequence <rom-file> <output-folder> <start-frame> <end-frame> [step] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --sprite-trace <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --scripted-sprite-trace <rom-file> <script> [frames] [instructions-per-frame]");
@@ -345,6 +347,22 @@ if (args[0].Equals("--32x-inspect", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--32x-inspect-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 0;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    uint address = args.Length > 5 ? ParseNumber(args[5]) : ThirtyTwoXHardwareProfile.Sh2SdramStart;
+    int words = args.Length > 6 && int.TryParse(args[6], out int parsedWords) ? parsedWords : 32;
+    InspectThirtyTwoXState(args[1], args[2], frames, instructionsPerFrame, address, words);
+    return;
+}
+
 if (args[0].Equals("--32x-cache-inspect", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 2)
@@ -468,6 +486,20 @@ if (args[0].Equals("--render", StringComparison.OrdinalIgnoreCase))
     bool traceVdp = args.Any(arg => arg.Equals("--trace-vdp", StringComparison.OrdinalIgnoreCase));
     bool traceCpu = traceVdp || args.Any(arg => arg.Equals("--trace-cpu", StringComparison.OrdinalIgnoreCase));
     RenderRom(args[1], args[2], frames, instructionsPerFrame, traceCpu, traceVdp);
+    return;
+}
+
+if (args[0].Equals("--render-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --render-state <rom-file> <state.mdss> <output.ppm> [frames] [instructions-per-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 0;
+    int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 300_000;
+    RenderState(args[1], args[2], args[3], frames, instructionsPerFrame);
     return;
 }
 
@@ -1687,6 +1719,48 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
             Console.WriteLine($"mode={dma.Mode} op={dma.Operation} code=${dma.Code:X2} source=${dma.SourceAddress:X6} dest=${dma.DestinationAddress:X4} words={dma.LengthWords}");
         }
     }
+}
+
+void RenderState(string romPath, string statePath, string outputPath, int frames, int instructionsPerFrame)
+{
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    SaveStateSerializer.Load(machine, statePath);
+
+    int completedFrames = 0;
+    try
+    {
+        for (; completedFrames < frames; completedFrames++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    catch (M68kException ex)
+    {
+        Console.WriteLine($"Execution stopped while rendering state: {ex.Message}");
+    }
+
+    byte[] framebuffer = machine.RenderFrameRgb();
+    int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
+    WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
+    WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
+    Console.WriteLine($"Rendered {completedFrames} frame(s) from state {Path.GetFileName(statePath)} to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine($"Rendered BMP to {Path.GetFullPath(Path.ChangeExtension(outputPath, ".bmp"))}");
+    Console.WriteLine($"Rendered frame mode={machine.Vdp.LastRenderMode} nonBackgroundPixels={nonBackgroundPixels:N0}");
+    if (machine.Bus.ThirtyTwoX is ThirtyTwoXDevice thirtyTwoX)
+    {
+        Console.WriteLine(
+            $"32X mode={thirtyTwoX.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} " +
+            $"fbctl=${thirtyTwoX.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} " +
+            $"draw={thirtyTwoX.DrawFrameBufferIndex} display={thirtyTwoX.DisplayFrameBufferIndex} " +
+            $"compositeMode={thirtyTwoX.LastCompositeMode} compositePixels={thirtyTwoX.LastCompositeWrittenPixels:N0} " +
+            $"fbNonzero={CountNonzeroBytes(thirtyTwoX.DisplayFrameBuffer):N0}/{CountNonzeroBytes(thirtyTwoX.DrawFrameBuffer):N0} " +
+            $"palNonzero={CountNonzeroBytes(thirtyTwoX.Palette):N0} " +
+            $"master=${thirtyTwoX.MasterSh2.PC:X8} slave=${thirtyTwoX.SlaveSh2.PC:X8}");
+    }
+
+    Console.WriteLine(FormatState(machine));
+    Console.WriteLine(FormatVdpState(machine.Vdp));
 }
 
 void RenderSequence(string romPath, string outputFolder, int startFrame, int endFrame, int step, int instructionsPerFrame)
@@ -3907,6 +3981,48 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
 
     ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
     Console.WriteLine($"Inspected {Path.GetFileName(romPath)} after {frames} frame(s)");
+    Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8} GBR=${device.MasterSh2.GBR:X8} VBR=${device.MasterSh2.VBR:X8} PR=${device.MasterSh2.PR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8} GBR=${device.SlaveSh2.GBR:X8} VBR=${device.SlaveSh2.VBR:X8} PR=${device.SlaveSh2.PR:X8}");
+    Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
+    Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
+    Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
+    for (int i = 0; i < words; i += 8)
+    {
+        uint lineAddress = address + (uint)(i * 2);
+        StringBuilder line = new();
+        line.Append('$');
+        line.Append(lineAddress.ToString("X8", CultureInfo.InvariantCulture));
+        line.Append(':');
+        for (int j = 0; j < 8 && i + j < words; j++)
+        {
+            uint wordAddress = lineAddress + (uint)(j * 2);
+            line.Append(' ');
+            line.Append(ReadThirtyTwoXDebugWord(device, cartridge, wordAddress).ToString("X4", CultureInfo.InvariantCulture));
+        }
+
+        Console.WriteLine(line.ToString());
+    }
+}
+
+void InspectThirtyTwoXState(string romPath, string statePath, int frames, int instructionsPerFrame, uint address, int words)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    SaveStateSerializer.Load(machine, statePath);
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    for (int frame = 0; frame < frames; frame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
+    Console.WriteLine($"Inspected {Path.GetFileName(romPath)} from {Path.GetFileName(statePath)} plus {frames} frame(s)");
     Console.WriteLine($"M68K PC=${machine.MainCpu.PC:X8}; master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8} GBR=${device.MasterSh2.GBR:X8} VBR=${device.MasterSh2.VBR:X8} PR=${device.MasterSh2.PR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8} GBR=${device.SlaveSh2.GBR:X8} VBR=${device.SlaveSh2.VBR:X8} PR=${device.SlaveSh2.PR:X8}");
     Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
     Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
