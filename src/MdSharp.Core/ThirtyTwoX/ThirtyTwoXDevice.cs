@@ -3456,7 +3456,7 @@ public sealed class ThirtyTwoXDevice
                     sourceIndex += 2;
                     int runLength = (span >> 8) + 1;
                     int paletteIndex = span & 0x00FF;
-                    if (ReadBigEndianWord(_palette, paletteIndex * 2) != 0)
+                    if (paletteIndex != 0 && ReadBigEndianWord(_palette, paletteIndex * 2) != 0)
                     {
                         return true;
                     }
@@ -3484,7 +3484,8 @@ public sealed class ThirtyTwoXDevice
                     break;
                 }
 
-                if (ReadBigEndianWord(_palette, source[sourceIndex] * 2) != 0)
+                byte paletteIndex = source[sourceIndex];
+                if (paletteIndex != 0 && ReadBigEndianWord(_palette, paletteIndex * 2) != 0)
                 {
                     return true;
                 }
@@ -3506,6 +3507,11 @@ public sealed class ThirtyTwoXDevice
             }
 
             int paletteIndex = source[sourceIndex];
+            if (paletteIndex == 0)
+            {
+                continue;
+            }
+
             ushort color = ReadBigEndianWord(_palette, paletteIndex * 2);
             if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
             {
@@ -3548,7 +3554,7 @@ public sealed class ThirtyTwoXDevice
             int end = Math.Min(OutputWidth, x + runLength);
             while (x < end)
             {
-                if (x >= 0)
+                if (x >= 0 && paletteIndex != 0)
                 {
                     if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
                     {
