@@ -3605,7 +3605,8 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsExternalFrameBufferAccessDenied()
     {
-        return IsFrameBufferEngaged();
+        // The host writes the draw buffer; FEN reports display-buffer engagement, not a host draw-buffer lockout.
+        return false;
     }
 
     private bool IsSh2FrameBufferAccessDenied()

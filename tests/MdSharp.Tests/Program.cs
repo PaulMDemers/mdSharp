@@ -1161,7 +1161,7 @@ void ThirtyTwoXDeviceShell()
     AssertTrue((latchDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0001) != 0, "FS readback should preserve the requested frame buffer while the active display buffer is still pending");
     AssertTrue((latchDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should remain set during active display after a deferred frame-buffer selection");
     latchDevice.WriteFrameBufferWord(0, 0x55AA);
-    AssertEqual((ushort)0xFFFF, latchDevice.ReadFrameBufferWord(0));
+    AssertEqual((ushort)0x55AA, latchDevice.ReadFrameBufferWord(0));
     latchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0000);
     latchDevice.SetHBlank(true);
     latchDevice.SetHBlank(false);
