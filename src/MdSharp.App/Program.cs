@@ -3420,89 +3420,76 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
             machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
     }
 
-    device.SystemRegisterAccessObserver = access =>
+    void ArmBusObservers()
     {
-        if (currentFrame < startFrame)
+        device.SystemRegisterAccessObserver = access =>
         {
-            return;
-        }
+            uint address = access.Source == "M68K"
+                ? ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + access.Offset
+                : ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + access.Offset;
+            if (AddressMatches(address))
+            {
+                WriteRow(access.Source, access.Operation, address, access.Value);
+            }
+        };
+        device.VdpRegisterAccessObserver = access =>
+        {
+            uint address = ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + access.Offset;
+            if (AddressMatches(address))
+            {
+                WriteRow(access.Source, access.Operation, address, access.Value);
+            }
+        };
+        device.PaletteAccessObserver = access =>
+        {
+            uint address = access.Source == "M68K"
+                ? ThirtyTwoXHardwareProfile.M68kColorPaletteStart + access.Offset
+                : ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + access.Offset;
+            if (AddressMatches(address))
+            {
+                WriteRow(access.Source, access.Operation, address, access.Value);
+            }
+        };
+        device.Sh2MemoryAccessTraceFilter = AddressMatches;
+        device.Sh2MemoryAccessObserver = access => WriteRow(access.Source, access.Operation, access.Address, access.Value);
+        device.FrameBufferAccessObserver = access =>
+        {
+            uint baseAddress = access.Operation.Contains("OW", StringComparison.Ordinal)
+                ? ThirtyTwoXHardwareProfile.Sh2OverwriteImageStart
+                : ThirtyTwoXHardwareProfile.Sh2FrameBufferStart;
+            uint address = baseAddress + access.Offset;
+            if (AddressMatches(address))
+            {
+                WriteRow(access.Source, access.Operation, address, access.Value);
+            }
+        };
+    }
 
-        uint address = access.Source == "M68K"
-            ? ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + access.Offset
-            : ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + access.Offset;
-        if (AddressMatches(address))
-        {
-            WriteRow(access.Source, access.Operation, address, access.Value);
-        }
-    };
-    device.VdpRegisterAccessObserver = access =>
+    void DisableBusObservers()
     {
-        if (currentFrame < startFrame)
-        {
-            return;
-        }
-
-        uint address = ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + access.Offset;
-        if (AddressMatches(address))
-        {
-            WriteRow(access.Source, access.Operation, address, access.Value);
-        }
-    };
-    device.PaletteAccessObserver = access =>
-    {
-        if (currentFrame < startFrame)
-        {
-            return;
-        }
-
-        uint address = access.Source == "M68K"
-            ? ThirtyTwoXHardwareProfile.M68kColorPaletteStart + access.Offset
-            : ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + access.Offset;
-        if (AddressMatches(address))
-        {
-            WriteRow(access.Source, access.Operation, address, access.Value);
-        }
-    };
-    device.Sh2MemoryAccessTraceFilter = AddressMatches;
-    device.Sh2MemoryAccessObserver = access =>
-    {
-        if (currentFrame >= startFrame)
-        {
-            WriteRow(access.Source, access.Operation, access.Address, access.Value);
-        }
-    };
-    device.FrameBufferAccessObserver = access =>
-    {
-        if (currentFrame < startFrame)
-        {
-            return;
-        }
-
-        uint baseAddress = access.Operation.Contains("OW", StringComparison.Ordinal)
-            ? ThirtyTwoXHardwareProfile.Sh2OverwriteImageStart
-            : ThirtyTwoXHardwareProfile.Sh2FrameBufferStart;
-        uint address = baseAddress + access.Offset;
-        if (AddressMatches(address))
-        {
-            WriteRow(access.Source, access.Operation, address, access.Value);
-        }
-    };
+        device.SystemRegisterAccessObserver = null;
+        device.SystemRegisterWriteObserver = null;
+        device.VdpRegisterAccessObserver = null;
+        device.PaletteAccessObserver = null;
+        device.Sh2MemoryAccessObserver = null;
+        device.Sh2MemoryAccessTraceFilter = null;
+        device.FrameBufferAccessObserver = null;
+    }
 
     string modeName = changesOnly ? "changes-exact" : nonzeroOnly ? "nonzero-exact" : exactAddressMatch ? (writesOnly ? "writes-exact" : "exact") : (writesOnly ? "writes" : "all");
     int endFrame = startFrame + frames;
     Console.WriteLine($"32X bus trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, address=${start:X8}-${end:X8}, mode={modeName}");
     for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
     {
+        if (currentFrame == startFrame)
+        {
+            ArmBusObservers();
+        }
+
         machine.RunFrameCycles(instructionsPerFrame);
     }
 
-    device.SystemRegisterAccessObserver = null;
-    device.SystemRegisterWriteObserver = null;
-    device.VdpRegisterAccessObserver = null;
-    device.PaletteAccessObserver = null;
-    device.Sh2MemoryAccessObserver = null;
-    device.Sh2MemoryAccessTraceFilter = null;
-    device.FrameBufferAccessObserver = null;
+    DisableBusObservers();
     Console.WriteLine($"Wrote {lines:N0} 32X bus trace row(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
 }
@@ -3533,8 +3520,7 @@ void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, 
 
     void WriteRow(ThirtyTwoXDevice.SystemRegisterAccessTrace access)
     {
-        if (currentFrame < startFrame ||
-            lines >= maxLines ||
+        if (lines >= maxLines ||
             writesOnly && !IsTraceWriteOperation(access.Operation) ||
             access.Offset < offsetStart ||
             access.Offset > offsetEnd)
@@ -3562,12 +3548,16 @@ void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, 
             machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
     }
 
-    device.SystemRegisterAccessObserver = WriteRow;
     int endFrame = startFrame + frames;
     string modeName = writesOnly ? "writes" : "all";
     Console.WriteLine($"32X communication trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, offsets=${offsetStart:X2}-${offsetEnd:X2}, mode={modeName}");
     for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
     {
+        if (currentFrame == startFrame)
+        {
+            device.SystemRegisterAccessObserver = WriteRow;
+        }
+
         machine.RunFrameCycles(instructionsPerFrame);
     }
 
@@ -10601,9 +10591,9 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
     int lines = 0;
     using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
     writer.WriteLine("frame,sequence,pc,opcode,ext0,ext1,nextPc,sr,sp,d0,d1,d2,d3,d4,d5,d6,d7,a0,a1,a2,a3,a4,a5,a6,cycles,masterCycle,scanline,lineCycle,c400,c41d,sys20,sys22,masterPc,slavePc");
-    machine.MainCpu.InstructionObserver = trace =>
+    Action<M68kCpu.M68kInstructionTrace> writeTrace = trace =>
     {
-        if (currentFrame < startFrame || lines >= maxLines || trace.Pc < pcStart || trace.Pc > pcEnd)
+        if (lines >= maxLines || trace.Pc < pcStart || trace.Pc > pcEnd)
         {
             return;
         }
@@ -10658,6 +10648,11 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
         int endFrame = startFrame + frames;
         for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
         {
+            if (currentFrame == startFrame)
+            {
+                machine.MainCpu.InstructionObserver = writeTrace;
+            }
+
             machine.RunFrameCycles(instructionsPerFrame);
         }
     }

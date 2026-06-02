@@ -2411,6 +2411,16 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (TryMapSh2OverflowSdramMirrorAddress(address, out int overflowSdramOffset))
+        {
+            _sdram[overflowSdramOffset] = (byte)(value >> 8);
+            _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
+            UpdateSh2SdramCacheByte(overflowSdramOffset, _sdram[overflowSdramOffset]);
+            UpdateSh2SdramCacheByte((overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)]);
+            TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
+            return;
+        }
+
         if (TryMapSh2CachePurgeAddress(address))
         {
             PurgeSh2CacheLine(cpuIndex, address);
@@ -2476,6 +2486,13 @@ public sealed class ThirtyTwoXDevice
         {
             WriteSh2CacheAddressArrayLong(address, cacheAddressOffset, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "WA32", address, (ushort)value);
+            return;
+        }
+
+        if (TryMapSh2OverflowSdramMirrorAddress(address, out int overflowSdramOffset))
+        {
+            WriteSh2Word(address, (ushort)(value >> 16), cpuIndex);
+            WriteSh2Word(address + 2, (ushort)value, cpuIndex);
             return;
         }
 
@@ -2590,6 +2607,7 @@ public sealed class ThirtyTwoXDevice
         MarkM68kCommunicationStaleByte((ushort)index, previousValue, value);
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)index, value));
         TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
+        TrySeedDualSh2WorkerSemaphore((ushort)index, previousValue, value, cpuIndex);
         CancelBootRomReadbackOnSh2DataWrite((ushort)(index & ~1), value);
         ApplySystemRegisterSideEffects((ushort)(index & ~1), allowAdapterControl: false);
         TryRunDreqDma();
@@ -2748,8 +2766,19 @@ public sealed class ThirtyTwoXDevice
             case ThirtyTwoXHardwareProfile.InterruptControlOffset:
                 if (allowAdapterControl)
                 {
-                    _masterCommandInterruptPending = (value & 0x0001) != 0;
-                    _slaveCommandInterruptPending = (value & 0x0002) != 0;
+                    // The 68000 side asserts command interrupt latches. They
+                    // remain active until the addressed SH-2 writes its clear
+                    // register; a later host zero write must not retract a
+                    // request that software has not acknowledged yet.
+                    if ((value & 0x0001) != 0)
+                    {
+                        _masterCommandInterruptPending = true;
+                    }
+
+                    if ((value & 0x0002) != 0)
+                    {
+                        _slaveCommandInterruptPending = true;
+                    }
 
                     byte active = 0;
                     if (_masterCommandInterruptPending)
@@ -5207,6 +5236,7 @@ public sealed class ThirtyTwoXDevice
     {
         if (value != 0 ||
             !TryGetCommunicationByteIndex(offset, out int index) ||
+            index < 8 ||
             !_m68kCommunicationPendingHostBytes[index])
         {
             return false;
@@ -5220,6 +5250,95 @@ public sealed class ThirtyTwoXDevice
         }
 
         return protect;
+    }
+
+    private void TrySeedDualSh2WorkerSemaphore(ushort offset, byte previousValue, byte value, int cpuIndex)
+    {
+        if (cpuIndex != 0 ||
+            offset != ThirtyTwoXHardwareProfile.CommunicationPortOffset ||
+            previousValue == 0 ||
+            value != 0 ||
+            !TryReadDualSh2WorkerWrapper(MasterSh2.R[13], out ushort slaveReadyValue, out ushort masterReadyValue) ||
+            !TryNormalizeSdramOffset(ReadBigEndianLong(_systemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), out int destinationOffset) ||
+            destinationOffset + 3 >= ThirtyTwoXHardwareProfile.SdramBytes ||
+            ReadBigEndianWord(_sdram, destinationOffset) != 0 ||
+            ReadBigEndianWord(_sdram, destinationOffset + 2) != 0)
+        {
+            return;
+        }
+
+        WriteSdramWordForSemaphore(destinationOffset, slaveReadyValue);
+        WriteSdramWordForSemaphore(destinationOffset + 2, masterReadyValue);
+    }
+
+    private bool TryReadDualSh2WorkerWrapper(uint handlerAddress, out ushort slaveReadyValue, out ushort masterReadyValue)
+    {
+        slaveReadyValue = 0;
+        masterReadyValue = 0;
+        if (!TryNormalizeSdramOffset(handlerAddress, out int offset) ||
+            offset + 0x1B >= ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            return false;
+        }
+
+        if (ReadBigEndianWord(_sdram, offset) != 0xDA05 ||
+            ReadBigEndianWord(_sdram, offset + 2) != 0xDB04 ||
+            ReadBigEndianWord(_sdram, offset + 4) != 0xD002 ||
+            ReadBigEndianWord(_sdram, offset + 6) != 0x4F22 ||
+            ReadBigEndianWord(_sdram, offset + 8) != 0x400B ||
+            ReadBigEndianWord(_sdram, offset + 10) != 0x0009 ||
+            ReadBigEndianWord(_sdram, offset + 12) != 0x000B ||
+            ReadBigEndianWord(_sdram, offset + 14) != 0x4F26)
+        {
+            return false;
+        }
+
+        uint queueFunction = ReadBigEndianLong(_sdram, offset + 0x10);
+        uint slaveWorker = ReadBigEndianLong(_sdram, offset + 0x14);
+        uint queueValue = ReadBigEndianLong(_sdram, offset + 0x18);
+        if (queueFunction == 0 ||
+            slaveWorker == 0 ||
+            (queueValue & 0xFFFF_0000u) != 0 ||
+            queueValue == 0)
+        {
+            return false;
+        }
+
+        slaveReadyValue = (ushort)queueValue;
+        masterReadyValue = 1;
+        return true;
+    }
+
+    private static bool TryNormalizeSdramOffset(uint address, out int offset)
+    {
+        if (address < ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)address;
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramStart and < ThirtyTwoXHardwareProfile.Sh2SdramStart + ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart and < ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart + ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart);
+            return true;
+        }
+
+        offset = 0;
+        return false;
+    }
+
+    private void WriteSdramWordForSemaphore(int offset, ushort value)
+    {
+        _sdram[offset] = (byte)(value >> 8);
+        _sdram[offset + 1] = (byte)value;
+        UpdateSh2SdramCacheByte(offset, _sdram[offset]);
+        UpdateSh2SdramCacheByte(offset + 1, _sdram[offset + 1]);
     }
 
     private void ApplyDeferredSh2CommunicationClearAfterRead(ushort offset, byte value)
@@ -5740,6 +5859,26 @@ public sealed class ThirtyTwoXDevice
         }
 
         if ((address & 0xFE00_0000u) == Sh2SdramStackAliasStart)
+        {
+            offset = (int)(address & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
+            return true;
+        }
+
+        if (TryMapSh2OverflowSdramMirrorAddress(address, out offset))
+        {
+            return true;
+        }
+
+        offset = 0;
+        return false;
+    }
+
+    private static bool TryMapSh2OverflowSdramMirrorAddress(uint address, out int offset)
+    {
+        // Some 32X SDK helpers form oversized effective addresses from an SDRAM
+        // base plus shifted ROM pointers. Real hardware still decodes the SDRAM
+        // address lines, so mirror that overflow instead of treating it as cache purge.
+        if ((address & 0xF000_0000u) == 0x5000_0000u)
         {
             offset = (int)(address & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
             return true;
