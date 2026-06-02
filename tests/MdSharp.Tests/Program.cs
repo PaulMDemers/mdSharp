@@ -2825,6 +2825,61 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     checksumDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
     AssertEqual((ushort)0xBEEF, checksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
 
+    byte[] staleChecksumRom = new byte[0x200];
+    WriteWord(staleChecksumRom, 0x18E, 0xD746);
+    ThirtyTwoXDevice staleChecksumDevice = new(staleChecksumRom);
+    staleChecksumDevice.Reset();
+    staleChecksumDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    WriteSh2WordForTest(
+        staleChecksumDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8),
+        0x534C,
+        cpuIndex: 1);
+    AssertEqual((ushort)0xD746, staleChecksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+
+    ThirtyTwoXDevice staleChecksumByteDevice = new(staleChecksumRom);
+    staleChecksumByteDevice.Reset();
+    staleChecksumByteDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    WriteSh2WordForTest(
+        staleChecksumByteDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8),
+        0x534C,
+        cpuIndex: 1);
+    AssertEqual((byte)0xD7, staleChecksumByteDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+    AssertEqual((byte)0x46, staleChecksumByteDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 9));
+
+    ThirtyTwoXDevice publishedChecksumDevice = new(staleChecksumRom);
+    publishedChecksumDevice.Reset();
+    publishedChecksumDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    WriteSh2WordForTest(
+        publishedChecksumDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8),
+        0x534C,
+        cpuIndex: 1);
+    WriteSh2WordForTest(
+        publishedChecksumDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8),
+        0x0000,
+        cpuIndex: 0);
+    WriteSh2WordForTest(
+        publishedChecksumDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12),
+        0x000A,
+        cpuIndex: 0);
+    WriteSh2ByteForTest(
+        publishedChecksumDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        0x21);
+    ThirtyTwoXDevice.ThirtyTwoXState publishedChecksumState = publishedChecksumDevice.CaptureState();
+    publishedChecksumDevice.RestoreState(publishedChecksumState with
+    {
+        BootRomHandshakePending = false,
+        BootRomSignatureReadbackActive = false,
+        BootRomPostStartSignaturePending = true,
+        BootRomChecksumPublished = true,
+    });
+    AssertEqual((ushort)0xD746, publishedChecksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+
     byte[] maskRom = new byte[0x100];
     WriteWord(maskRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
     WriteWord(maskRom, 0x02, 0xE10F); // MOV #$0F,R1

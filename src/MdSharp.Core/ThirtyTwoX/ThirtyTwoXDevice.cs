@@ -1092,6 +1092,12 @@ public sealed class ThirtyTwoXDevice
     public byte ReadSystemRegisterByte(ushort offset)
     {
         PublishBootRomChecksumAfterHostClear((ushort)(offset & ~1));
+        if (TryReadBootRomChecksumByte(offset, includePostStart: true, out byte checksumValue))
+        {
+            TraceSystemRegisterAccess("M68K", "R8", offset, checksumValue);
+            return checksumValue;
+        }
+
         if (TryReadM68kCommunicationStaleByte(offset, out byte staleValue))
         {
             TraceSystemRegisterAccess("M68K", "R8", offset, staleValue);
@@ -1130,7 +1136,7 @@ public sealed class ThirtyTwoXDevice
             return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
         }
 
-        if (TryReadBootRomChecksumByte(offset, out byte checksumValue))
+        if (TryReadBootRomChecksumByte(offset, includePostStart: false, out byte checksumValue))
         {
             return checksumValue;
         }
@@ -1147,6 +1153,12 @@ public sealed class ThirtyTwoXDevice
     public ushort ReadSystemRegisterWord(ushort offset)
     {
         PublishBootRomChecksumAfterHostClear((ushort)(offset & ~1));
+        if (TryReadBootRomChecksumWord(offset, includePostStart: true, out ushort checksumValue))
+        {
+            TraceSystemRegisterAccess("M68K", "R16", offset, checksumValue);
+            return checksumValue;
+        }
+
         if (TryReadM68kCommunicationStaleWord(offset, out ushort staleValue))
         {
             TraceSystemRegisterAccess("M68K", "R16", offset, staleValue);
@@ -1187,7 +1199,7 @@ public sealed class ThirtyTwoXDevice
             return ReadPwmPulseStatus(aligned);
         }
 
-        if (TryReadBootRomChecksumWord(offset, out ushort checksumValue))
+        if (TryReadBootRomChecksumWord(offset, includePostStart: false, out ushort checksumValue))
         {
             return checksumValue;
         }
@@ -2839,10 +2851,14 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
-    private bool TryReadBootRomChecksumByte(ushort offset, out byte value)
+    private bool TryReadBootRomChecksumByte(ushort offset, bool includePostStart, out byte value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        if ((_bootRomHandshakePending || _bootRomSignatureReadbackActive) && HasCartridgeHeaderChecksum() && relative is 8 or 9)
+        if ((_bootRomHandshakePending ||
+                _bootRomSignatureReadbackActive ||
+                (includePostStart && _bootRomPostStartSignaturePending)) &&
+            HasCartridgeHeaderChecksum() &&
+            relative is 8 or 9)
         {
             value = _cartridgeRom.Span[0x18E + (relative - 8)];
             return true;
@@ -2852,10 +2868,14 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
-    private bool TryReadBootRomChecksumWord(ushort offset, out ushort value)
+    private bool TryReadBootRomChecksumWord(ushort offset, bool includePostStart, out ushort value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        if ((_bootRomHandshakePending || _bootRomSignatureReadbackActive) && HasCartridgeHeaderChecksum() && relative == 8)
+        if ((_bootRomHandshakePending ||
+                _bootRomSignatureReadbackActive ||
+                (includePostStart && _bootRomPostStartSignaturePending)) &&
+            HasCartridgeHeaderChecksum() &&
+            relative == 8)
         {
             value = (ushort)((_cartridgeRom.Span[0x18E] << 8) | _cartridgeRom.Span[0x18F]);
             return true;
@@ -3120,8 +3140,7 @@ public sealed class ThirtyTwoXDevice
     private void PublishBootRomChecksumAfterHostClear(ushort offset)
     {
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        if (_bootRomChecksumPublished ||
-            _bootRomHandshakePending ||
+        if (_bootRomHandshakePending ||
             _bootRomPostStartSignaturePending ||
             !HasCartridgeHeaderChecksum() ||
             offset < comm + 8 ||
@@ -3130,16 +3149,17 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        for (int i = 8; i < 16; i++)
+        if (_systemRegisters[comm + 8] != 0 ||
+            _systemRegisters[comm + 9] != 0)
         {
-            if (_systemRegisters[comm + i] != 0)
-            {
-                return;
-            }
+            return;
         }
 
         ushort checksum = (ushort)((_cartridgeRom.Span[0x18E] << 8) | _cartridgeRom.Span[0x18F]);
         WriteBigEndianWord(_systemRegisters, comm + 8, checksum);
+        _m68kCommunicationStaleWordValid[4] = false;
+        _m68kCommunicationStaleValid[8] = false;
+        _m68kCommunicationStaleValid[9] = false;
         _bootRomChecksumPublished = true;
     }
 
