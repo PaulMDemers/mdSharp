@@ -226,6 +226,7 @@ public sealed class ThirtyTwoXDevice
     private bool _vdpAccessGrantedToSh2;
     private bool _vBlank;
     private bool _hBlank;
+    private int _currentScanline;
     private bool _frameBufferSwapPending;
     private int _pendingDrawFrameBufferIndex;
     private int _activeDisplayFrameBufferIndex;
@@ -465,6 +466,7 @@ public sealed class ThirtyTwoXDevice
     {
         _vBlank = false;
         _hBlank = false;
+        _currentScanline = 0;
         if (CanSwitchFrameBufferNow())
         {
             CompletePendingFrameBufferSwap();
@@ -474,6 +476,7 @@ public sealed class ThirtyTwoXDevice
     public void StepScanline(int scanline, bool pal)
     {
         int visibleLines = pal ? ThirtyTwoXHardwareProfile.PalVisibleLines : ThirtyTwoXHardwareProfile.NtscVisibleLines;
+        _currentScanline = Math.Clamp(scanline, 0, pal ? 311 : 261);
         bool nowVBlank = scanline >= visibleLines;
         if (nowVBlank && !_vBlank)
         {
@@ -1138,6 +1141,12 @@ public sealed class ThirtyTwoXDevice
             return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
         }
 
+        if (sh2View && aligned == ThirtyTwoXHardwareProfile.HCountOffset)
+        {
+            ushort word = BuildHorizontalCountStatus();
+            return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
+        }
+
         if (aligned == ThirtyTwoXHardwareProfile.DreqFifoOffset)
         {
             ushort word = PeekDreqFifo();
@@ -1201,6 +1210,11 @@ public sealed class ThirtyTwoXDevice
         if (aligned == ThirtyTwoXHardwareProfile.DreqControlOffset)
         {
             return BuildDreqControlStatus(sh2View);
+        }
+
+        if (sh2View && aligned == ThirtyTwoXHardwareProfile.HCountOffset)
+        {
+            return BuildHorizontalCountStatus();
         }
 
         if (aligned == ThirtyTwoXHardwareProfile.DreqFifoOffset)
@@ -1678,6 +1692,7 @@ public sealed class ThirtyTwoXDevice
             _vdpAccessGrantedToSh2,
             _vBlank,
             _hBlank,
+            _currentScanline,
             _frameBufferSwapPending,
             _pendingDrawFrameBufferIndex,
             _requestedDisplayFrameBufferIndex,
@@ -1785,6 +1800,7 @@ public sealed class ThirtyTwoXDevice
         _vdpAccessGrantedToSh2 = state.VdpAccessGrantedToSh2;
         _vBlank = state.VBlank;
         _hBlank = state.HBlank;
+        _currentScanline = state.CurrentScanline;
         _frameBufferSwapPending = state.FrameBufferSwapPending;
         _pendingDrawFrameBufferIndex = state.PendingDrawFrameBufferIndex & 0x01;
         _requestedDisplayFrameBufferIndex = state.RequestedDisplayFrameBufferIndex & 0x01;
@@ -3756,6 +3772,14 @@ public sealed class ThirtyTwoXDevice
         }
 
         return status;
+    }
+
+    private ushort BuildHorizontalCountStatus()
+    {
+        // The SH-2 HCount register exposes the current Mega Drive/32X scanline
+        // counter in the low byte; the high byte is unused on retail polling
+        // paths and reads as zero.
+        return (ushort)(_currentScanline & 0x00FF);
     }
 
     private ushort BuildSh2InterruptMask(int cpuIndex)
@@ -6128,6 +6152,7 @@ public sealed class ThirtyTwoXDevice
         bool VdpAccessGrantedToSh2,
         bool VBlank,
         bool HBlank,
+        int CurrentScanline,
         bool FrameBufferSwapPending,
         int PendingDrawFrameBufferIndex,
         int RequestedDisplayFrameBufferIndex,

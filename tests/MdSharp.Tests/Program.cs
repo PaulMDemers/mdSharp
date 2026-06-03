@@ -403,6 +403,14 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x2002, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
     statusDevice.StepScanline(224, pal: false);
     AssertEqual((ushort)0xA000, statusDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    statusDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.BankSetOffset, 0x0002);
+    statusDevice.StepScanline(37, pal: false);
+    AssertEqual((ushort)0x0002, statusDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.BankSetOffset));
+    AssertEqual((ushort)0x0025, ReadSh2WordForTest(statusDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.HCountOffset)));
+    AssertEqual((byte)0x25, ReadSh2ByteForTest(statusDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.HCountOffset) + 1));
+    ThirtyTwoXDevice restoredHCountDevice = new();
+    restoredHCountDevice.RestoreState(statusDevice.CaptureState());
+    AssertEqual((ushort)0x0025, ReadSh2WordForTest(restoredHCountDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.HCountOffset)));
     ThirtyTwoXDevice interruptClearDevice = new();
     interruptClearDevice.Reset();
     interruptClearDevice.RestoreState(interruptClearDevice.CaptureState() with

@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 58;
+    private const int Version = 59;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -357,6 +357,7 @@ public static class SaveStateSerializer
         writer.Write(state.VdpAccessGrantedToSh2);
         writer.Write(state.VBlank);
         writer.Write(state.HBlank);
+        writer.Write(state.CurrentScanline);
         writer.Write(state.FrameBufferSwapPending);
         writer.Write(state.PendingDrawFrameBufferIndex);
         writer.Write(state.RequestedDisplayFrameBufferIndex);
@@ -450,6 +451,7 @@ public static class SaveStateSerializer
         bool vdpAccessGrantedToSh2 = reader.ReadBoolean();
         bool vBlank = false;
         bool hBlank = false;
+        int currentScanline = 0;
         bool frameBufferSwapPending = false;
         int pendingDrawFrameBufferIndex = activeDisplayFrameBufferIndex ^ 1;
         int requestedDisplayFrameBufferIndex = activeDisplayFrameBufferIndex;
@@ -477,6 +479,11 @@ public static class SaveStateSerializer
         {
             vBlank = reader.ReadBoolean();
             hBlank = reader.ReadBoolean();
+            if (version >= 59)
+            {
+                currentScanline = reader.ReadInt32();
+            }
+
             frameBufferSwapPending = reader.ReadBoolean();
             pendingDrawFrameBufferIndex = reader.ReadInt32();
             requestedDisplayFrameBufferIndex = pendingDrawFrameBufferIndex ^ 1;
@@ -596,6 +603,7 @@ public static class SaveStateSerializer
             vdpAccessGrantedToSh2,
             vBlank,
             hBlank,
+            currentScanline,
             frameBufferSwapPending,
             pendingDrawFrameBufferIndex,
             requestedDisplayFrameBufferIndex,
