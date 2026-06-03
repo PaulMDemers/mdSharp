@@ -1567,22 +1567,22 @@ public sealed class ThirtyTwoXDevice
 
     public void CompositeFrameRgbInto(Span<byte> framebuffer)
     {
-        CompositeFrameInto(framebuffer, blueFirst: false, mdPriorityPixels: default);
+        CompositeFrameInto(framebuffer, blueFirst: false, mdOpaquePixels: default);
     }
 
-    public void CompositeFrameRgbInto(Span<byte> framebuffer, ReadOnlySpan<bool> mdPriorityPixels)
+    public void CompositeFrameRgbInto(Span<byte> framebuffer, ReadOnlySpan<bool> mdOpaquePixels)
     {
-        CompositeFrameInto(framebuffer, blueFirst: false, mdPriorityPixels);
+        CompositeFrameInto(framebuffer, blueFirst: false, mdOpaquePixels);
     }
 
     public void CompositeFrameBgrInto(Span<byte> framebuffer)
     {
-        CompositeFrameInto(framebuffer, blueFirst: true, mdPriorityPixels: default);
+        CompositeFrameInto(framebuffer, blueFirst: true, mdOpaquePixels: default);
     }
 
-    public void CompositeFrameBgrInto(Span<byte> framebuffer, ReadOnlySpan<bool> mdPriorityPixels)
+    public void CompositeFrameBgrInto(Span<byte> framebuffer, ReadOnlySpan<bool> mdOpaquePixels)
     {
-        CompositeFrameInto(framebuffer, blueFirst: true, mdPriorityPixels);
+        CompositeFrameInto(framebuffer, blueFirst: true, mdOpaquePixels);
     }
 
     public PwmSnapshot CapturePwm()
@@ -3352,7 +3352,7 @@ public sealed class ThirtyTwoXDevice
         }
     }
 
-    private void CompositeFrameInto(Span<byte> framebuffer, bool blueFirst, ReadOnlySpan<bool> mdPriorityPixels)
+    private void CompositeFrameInto(Span<byte> framebuffer, bool blueFirst, ReadOnlySpan<bool> mdOpaquePixels)
     {
         if (framebuffer.Length < OutputWidth * OutputHeight * 3)
         {
@@ -3385,7 +3385,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         _lastCompositeMode = mode;
-        CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdPriorityPixels);
+        CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
         if ((_lastCompositeWrittenPixels == 0 || !HasNonZeroPalettePixels(source, mode)) &&
             !source.SequenceEqual(DrawFrameBuffer) &&
             !IsAllZero(DrawFrameBuffer) &&
@@ -3393,11 +3393,11 @@ public sealed class ThirtyTwoXDevice
         {
             source = DrawFrameBuffer;
             _lastCompositeUsedFallback = true;
-            CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdPriorityPixels);
+            CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
         }
     }
 
-    private void CompositeSourceFrame(Span<byte> framebuffer, ReadOnlySpan<byte> source, int mode, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdPriorityPixels)
+    private void CompositeSourceFrame(Span<byte> framebuffer, ReadOnlySpan<byte> source, int mode, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
     {
         for (int y = 0; y < OutputHeight; y++)
         {
@@ -3409,15 +3409,15 @@ public sealed class ThirtyTwoXDevice
 
             if (mode == 1)
             {
-                CompositePackedPixelLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdPriorityPixels);
+                CompositePackedPixelLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
             }
             else if (mode == 2)
             {
-                CompositeDirectColorLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdPriorityPixels);
+                CompositeDirectColorLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
             }
             else if (mode == 3)
             {
-                CompositeRunLengthLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdPriorityPixels);
+                CompositeRunLengthLine(framebuffer, source, y, lineAddress, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
             }
         }
     }
@@ -3509,7 +3509,7 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
-    private void CompositePackedPixelLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdPriorityPixels)
+    private void CompositePackedPixelLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
     {
         int sourcePixelOffset = shiftLeft ? 1 : 0;
         for (int x = 0; x < OutputWidth; x++)
@@ -3527,14 +3527,14 @@ public sealed class ThirtyTwoXDevice
             }
 
             ushort color = ReadBigEndianWord(_palette, paletteIndex * 2);
-            if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
+            if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdOpaquePixels))
             {
                 _lastCompositeWrittenPixels++;
             }
         }
     }
 
-    private void CompositeDirectColorLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdPriorityPixels)
+    private void CompositeDirectColorLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
     {
         int sourcePixelOffset = shiftLeft ? 1 : 0;
         for (int x = 0; x < OutputWidth; x++)
@@ -3546,14 +3546,14 @@ public sealed class ThirtyTwoXDevice
             }
 
             ushort color = ReadBigEndianWord(source, sourceIndex);
-            if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
+            if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdOpaquePixels))
             {
                 _lastCompositeWrittenPixels++;
             }
         }
     }
 
-    private void CompositeRunLengthLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdPriorityPixels)
+    private void CompositeRunLengthLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
     {
         int x = shiftLeft ? -1 : 0;
         int sourceIndex = lineAddress;
@@ -3570,7 +3570,7 @@ public sealed class ThirtyTwoXDevice
             {
                 if (x >= 0 && paletteIndex != 0)
                 {
-                    if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdPriorityPixels))
+                    if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdOpaquePixels))
                     {
                         _lastCompositeWrittenPixels++;
                     }
@@ -3581,12 +3581,12 @@ public sealed class ThirtyTwoXDevice
         }
     }
 
-    private static bool WriteRgb555IfVisible(Span<byte> framebuffer, int y, int x, ushort color, bool blueFirst, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdPriorityPixels)
+    private static bool WriteRgb555IfVisible(Span<byte> framebuffer, int y, int x, ushort color, bool blueFirst, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
     {
         int pixelIndex = (y * OutputWidth) + x;
         bool through = (color & 0x8000) != 0;
         bool inFrontOfMd = thirtyTwoXPriority != through;
-        if (!inFrontOfMd && mdPriorityPixels.Length > pixelIndex && mdPriorityPixels[pixelIndex])
+        if (!inFrontOfMd && mdOpaquePixels.Length > pixelIndex && mdOpaquePixels[pixelIndex])
         {
             return false;
         }

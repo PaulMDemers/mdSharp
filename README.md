@@ -221,7 +221,7 @@ mdSharp is being developed against a mix of public test ROMs, targeted retail-ga
 
 Compatibility varies by game. The emulator aims for correctness first, with broad compatibility and speed improving over time.
 
-Sega 32X support is in an early bring-up state. The desktop and CLI recognize `.32x` cartridges, attach a preliminary 32X shell, boot MARS user-header SH-2 programs, run both SH-2s with coarse frame scheduling, and can render early SDK framebuffer output. Retail compatibility is not playable yet; the remaining SH-2, interrupt/status, VDP, PWM, and bus-integration work is tracked in [docs/32X.md](docs/32X.md).
+Sega 32X support is in active bring-up. The desktop and CLI recognize `.32x` cartridges, attach the 32X shell, boot MARS user-header SH-2 programs, run both SH-2s with coarse frame scheduling, render packed/direct/RLE 32X VDP output over the Mega Drive frame, and reach visible or playable states in several retail titles. Compatibility is still preliminary; the remaining SH-2, interrupt/status, VDP, PWM, and bus-integration work is tracked in [docs/32X.md](docs/32X.md).
 
 ## ROMs, BIOS, And Reference Audio
 

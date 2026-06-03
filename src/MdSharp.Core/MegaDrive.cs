@@ -541,13 +541,13 @@ public sealed class MegaDrive
     public void RenderFrameRgbInto(byte[] framebuffer)
     {
         Vdp.RenderFrameRgbInto(framebuffer);
-        Bus.ThirtyTwoX?.CompositeFrameRgbInto(framebuffer, Vdp.LastFramePriorityPixels);
+        Bus.ThirtyTwoX?.CompositeFrameRgbInto(framebuffer, Vdp.LastFrameOpaquePixels);
     }
 
     public void RenderFrameBgrInto(byte[] framebuffer)
     {
         Vdp.RenderFrameBgrInto(framebuffer);
-        Bus.ThirtyTwoX?.CompositeFrameBgrInto(framebuffer, Vdp.LastFramePriorityPixels);
+        Bus.ThirtyTwoX?.CompositeFrameBgrInto(framebuffer, Vdp.LastFrameOpaquePixels);
     }
 
     private int ConsumeFrameAudioSampleCount(int sampleRate)

@@ -1853,9 +1853,18 @@ void RenderState(string romPath, string statePath, string outputPath, int frames
     int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
     WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
     WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
+    string layerBase = Path.Combine(
+        Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".",
+        Path.GetFileNameWithoutExtension(outputPath));
+    WriteBmp($"{layerBase}.planeA.bmp", Vdp.ScreenWidth, Vdp.ScreenHeight, machine.Vdp.RenderDebugLayerRgb(VdpDebugLayer.PlaneA));
+    WriteBmp($"{layerBase}.planeB.bmp", Vdp.ScreenWidth, Vdp.ScreenHeight, machine.Vdp.RenderDebugLayerRgb(VdpDebugLayer.PlaneB));
+    WriteBmp($"{layerBase}.sprites.bmp", Vdp.ScreenWidth, Vdp.ScreenHeight, machine.Vdp.RenderDebugLayerRgb(VdpDebugLayer.Sprites));
+    WritePrioritySummaryCsv($"{layerBase}.priority.csv", machine.Vdp.LastFramePriorityPixels);
     string inputSuffix = input is null ? string.Empty : $" with script {inputName}";
     Console.WriteLine($"Rendered {completedFrames} frame(s) from state {Path.GetFileName(statePath)}{inputSuffix} to {Path.GetFullPath(outputPath)}");
     Console.WriteLine($"Rendered BMP to {Path.GetFullPath(Path.ChangeExtension(outputPath, ".bmp"))}");
+    Console.WriteLine($"Rendered debug layers to {Path.GetFullPath(layerBase)}.planeA.bmp/.planeB.bmp/.sprites.bmp");
+    Console.WriteLine($"Rendered priority summary to {Path.GetFullPath(layerBase)}.priority.csv");
     Console.WriteLine($"Rendered frame mode={machine.Vdp.LastRenderMode} nonBackgroundPixels={nonBackgroundPixels:N0}");
     if (machine.Bus.ThirtyTwoX is ThirtyTwoXDevice thirtyTwoX)
     {
@@ -13625,6 +13634,36 @@ void WriteBmp(string path, int width, int height, byte[] rgb)
         }
 
         writer.Write(padding[..paddingLength]);
+    }
+}
+
+void WritePrioritySummaryCsv(string path, ReadOnlySpan<bool> priorityPixels)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".");
+    using StreamWriter writer = new(path, false, Encoding.UTF8);
+    writer.WriteLine("line,priorityPixels,firstX,lastX");
+    for (int y = 0; y < Vdp.ScreenHeight; y++)
+    {
+        int count = 0;
+        int firstX = -1;
+        int lastX = -1;
+        int lineBase = y * Vdp.ScreenWidth;
+        for (int x = 0; x < Vdp.ScreenWidth; x++)
+        {
+            int index = lineBase + x;
+            if ((uint)index >= (uint)priorityPixels.Length || !priorityPixels[index])
+            {
+                continue;
+            }
+
+            count++;
+            firstX = firstX < 0 ? x : firstX;
+            lastX = x;
+        }
+
+        writer.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{y},{count},{firstX},{lastX}"));
     }
 }
 
