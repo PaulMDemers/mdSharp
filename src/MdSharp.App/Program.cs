@@ -58,6 +58,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-sweep <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>] [--limit <count>] [--case-seconds <seconds>]");
     Console.WriteLine("  mdsharp --render <rom-file> <output.ppm> [frames] [instructions-per-frame] [--trace-cpu] [--trace-vdp]");
     Console.WriteLine("  mdsharp --render-state <rom-file> <state.mdss> <output.ppm> [frames] [instructions-per-frame]");
+    Console.WriteLine("  mdsharp --scripted-render-state <rom-file> <state.mdss> <output.ppm> <script> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --render-sequence <rom-file> <output-folder> <start-frame> <end-frame> [step] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --sprite-trace <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --scripted-sprite-trace <rom-file> <script> [frames] [instructions-per-frame]");
@@ -65,6 +66,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --movie-render <rom-file> <movie.mdmovie> <output.ppm> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --movie-info <movie.mdmovie>");
     Console.WriteLine("  mdsharp --savestate <rom-file> <state.mdss> [frames] [instructions-per-frame]");
+    Console.WriteLine("  mdsharp --savestate-state <rom-file> <input-state.mdss> <output-state.mdss> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --loadstate <rom-file> <state.mdss> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --regress <rom-folder> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --compat <rom-folder> <output-folder> [frames] [instructions-per-frame] [--screenshots] [--resume] [--filter <text>]");
@@ -571,6 +573,22 @@ if (args[0].Equals("--render-state", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--scripted-render-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 5)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --scripted-render-state <rom-file> <state.mdss> <output.ppm> <script> [frames] [instructions-per-frame]");
+        Console.Error.WriteLine("Scripts: none, start, repeat-start, p1-repeat-start, virtua-racing-drive, sonic1-start, sonic3-start, chaotix-title-start, chaotix-play, streets, bloodlines");
+        Environment.Exit(1);
+    }
+
+    Func<int, ControllerInput> input = ResolveControllerInputScript(args[4]);
+    int frames = args.Length > 5 && int.TryParse(args[5], out int parsedFrames) ? parsedFrames : 60;
+    int instructionsPerFrame = args.Length > 6 && int.TryParse(args[6], out int parsedInstructions) ? parsedInstructions : 300_000;
+    RenderState(args[1], args[2], args[3], frames, instructionsPerFrame, input, args[4]);
+    return;
+}
+
 if (args[0].Equals("--render-sequence", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 5)
@@ -679,6 +697,20 @@ if (args[0].Equals("--savestate", StringComparison.OrdinalIgnoreCase))
     int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 1;
     int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 200_000;
     SaveState(args[1], args[2], frames, instructionsPerFrame);
+    return;
+}
+
+if (args[0].Equals("--savestate-state", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --savestate-state <rom-file> <input-state.mdss> <output-state.mdss> [frames] [instructions-per-frame]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 1;
+    int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 200_000;
+    SaveStateFromState(args[1], args[2], args[3], frames, instructionsPerFrame);
     return;
 }
 
@@ -1789,7 +1821,7 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
     }
 }
 
-void RenderState(string romPath, string statePath, string outputPath, int frames, int instructionsPerFrame)
+void RenderState(string romPath, string statePath, string outputPath, int frames, int instructionsPerFrame, Func<int, ControllerInput>? input = null, string inputName = "none")
 {
     MegaDrive machine = CreateMachine(romPath);
     machine.Reset();
@@ -1800,6 +1832,13 @@ void RenderState(string romPath, string statePath, string outputPath, int frames
     {
         for (; completedFrames < frames; completedFrames++)
         {
+            if (input is not null)
+            {
+                ControllerInput pressed = input(completedFrames);
+                machine.Bus.Controller1.Pressed = pressed.Player1;
+                machine.Bus.Controller2.Pressed = pressed.Player2;
+            }
+
             machine.RunFrameCycles(instructionsPerFrame);
         }
     }
@@ -1808,11 +1847,14 @@ void RenderState(string romPath, string statePath, string outputPath, int frames
         Console.WriteLine($"Execution stopped while rendering state: {ex.Message}");
     }
 
+    machine.Bus.Controller1.Pressed = GenesisButton.None;
+    machine.Bus.Controller2.Pressed = GenesisButton.None;
     byte[] framebuffer = machine.RenderFrameRgb();
     int nonBackgroundPixels = CountNonBackgroundPixels(machine.Vdp, framebuffer);
     WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
     WriteBmp(Path.ChangeExtension(outputPath, ".bmp"), Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
-    Console.WriteLine($"Rendered {completedFrames} frame(s) from state {Path.GetFileName(statePath)} to {Path.GetFullPath(outputPath)}");
+    string inputSuffix = input is null ? string.Empty : $" with script {inputName}";
+    Console.WriteLine($"Rendered {completedFrames} frame(s) from state {Path.GetFileName(statePath)}{inputSuffix} to {Path.GetFullPath(outputPath)}");
     Console.WriteLine($"Rendered BMP to {Path.GetFullPath(Path.ChangeExtension(outputPath, ".bmp"))}");
     Console.WriteLine($"Rendered frame mode={machine.Vdp.LastRenderMode} nonBackgroundPixels={nonBackgroundPixels:N0}");
     if (machine.Bus.ThirtyTwoX is ThirtyTwoXDevice thirtyTwoX)
@@ -2459,6 +2501,22 @@ void SaveState(string romPath, string statePath, int frames, int instructionsPer
     SaveStateSerializer.Save(machine, statePath);
     Console.WriteLine($"Saved state after {frames} frame(s) to {Path.GetFullPath(statePath)}");
     Console.WriteLine(FormatState(machine));
+}
+
+void SaveStateFromState(string romPath, string inputStatePath, string outputStatePath, int frames, int instructionsPerFrame)
+{
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    SaveStateSerializer.Load(machine, inputStatePath);
+    for (int i = 0; i < frames; i++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    SaveStateSerializer.Save(machine, outputStatePath);
+    Console.WriteLine($"Loaded {Path.GetFullPath(inputStatePath)} and saved state after {frames} additional frame(s) to {Path.GetFullPath(outputStatePath)}");
+    Console.WriteLine(FormatState(machine));
+    Console.WriteLine(FormatVdpState(machine.Vdp));
 }
 
 void LoadStateAndRun(string romPath, string statePath, int frames, int instructionsPerFrame)
