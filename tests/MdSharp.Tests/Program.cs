@@ -839,8 +839,14 @@ void ThirtyTwoXDeviceShell()
     WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF88, 5);
     WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FF8C, 0x0000_0001);
     WriteSh2LongForTest(dreqBackpressureDevice, 0xFFFF_FFB0, 0x0000_0001);
+    AssertEqual(0, dreqBackpressureDevice.DreqFifoCount);
+    AssertEqual((ushort)0x0001, ReadSh2WordForTest(dreqBackpressureDevice, 0xFFFF_FF8A));
+    AssertEqual((ushort)0x0001, ReadSh2WordForTest(dreqBackpressureDevice, 0xFFFF_FF8E));
+    AssertEqual((ushort)0x4001, ReadSh2WordForTest(dreqBackpressureDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
     AssertTrue(dreqBackpressureDevice.SnoopM68kVdpDmaWord(0x0000_0308, 0x1005), "DREQ backpressure should drain a full FIFO before accepting the next VDP DMA word");
     AssertEqual(0, dreqBackpressureDevice.DreqFifoCount);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(dreqBackpressureDevice, 0xFFFF_FF8A));
+    AssertEqual((ushort)0x0002, ReadSh2WordForTest(dreqBackpressureDevice, 0xFFFF_FF8E));
     AssertEqual((byte)0x10, dreqBackpressureDevice.Sdram[0x180]);
     AssertEqual((byte)0x01, dreqBackpressureDevice.Sdram[0x181]);
     AssertEqual((byte)0x10, dreqBackpressureDevice.Sdram[0x188]);
