@@ -2274,7 +2274,7 @@ void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
     cpu.Reset(LoopPc);
     cpu.R[15] = 0x0603_F000;
     AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out int cycles), "SDRAM flag tasklet dispatcher should fast-forward while the tasklet reports idle");
-    AssertEqual(2048, cycles);
+    AssertEqual(4096, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0603_F000u, cpu.R[15]);
     AssertEqual(0x0000_0080u, cpu.R[1]);
@@ -2286,6 +2286,13 @@ void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
     cpu.R[14] = PointerAddress;
     cpu.R[15] = 0x0603_F000;
     AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out _), "dispatcher should fast-forward from the load slot after the literal address is in R14");
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0603_F000u, cpu.R[15]);
+
+    cpu.Reset(LoopPc + 2);
+    cpu.R[14] = ValueAddress;
+    cpu.R[15] = 0x0603_F000;
+    AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out _), "dispatcher should repair load-slot entries left with tasklet scratch state");
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0603_F000u, cpu.R[15]);
 

@@ -2702,7 +2702,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardSdramFlagTaskletDispatcherLoop(int maxCycles, out int cycles)
     {
-        const int MaxBurstCycles = 2048;
+        const int MaxBurstCycles = 65536;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -2718,8 +2718,7 @@ public sealed class Sh2Cpu
         if (!TryReadSdramFlagTaskletDispatcher(peekBus, loopPc, out ushort branchOpcode, out uint pointerAddress, out uint taskletPc))
         {
             if (PC < 2 ||
-                !TryReadSdramFlagTaskletDispatcher(peekBus, PC - 2, out branchOpcode, out pointerAddress, out taskletPc) ||
-                R[14] != pointerAddress)
+                !TryReadSdramFlagTaskletDispatcher(peekBus, PC - 2, out branchOpcode, out pointerAddress, out taskletPc))
             {
                 return false;
             }
