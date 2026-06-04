@@ -855,6 +855,25 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (((nextOpcode & 0xFF00) == 0x8900 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    ((nextOpcode & 0xFF00) >= 0x8500 && (nextOpcode & 0xFF00) <= 0x85F0)) &&
+                cpu.TryFastForwardWordDisplacementTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x6002 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardLongTstBtPaddedPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x6001 &&
                 cpu.TryFastForwardWordTstBfPollLoop(cycleBudget, out fastCycles))
             {
@@ -866,6 +885,15 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     (nextOpcode & 0xFF00) == 0x8B00) &&
                 cpu.TryFastForwardByteTstBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) ||
+                    (nextOpcode & 0xFF00) == 0xC800 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardByteDisplacementTstImmediateBtPollLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);
                 return fastCycles;
