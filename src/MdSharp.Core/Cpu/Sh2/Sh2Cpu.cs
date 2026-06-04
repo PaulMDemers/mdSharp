@@ -2166,6 +2166,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardMovLiteralLongTstBtPollLoop(int maxCycles, out int cycles)
     {
+        const int MaxBurstCycles = 4096;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -2227,7 +2228,7 @@ public sealed class Sh2Cpu
         R[0] = 0;
         SetT(true);
         PC = loopPc;
-        cycles = maxCycles;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 6;
@@ -2625,6 +2626,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardLongTstBtPaddedPollLoop(int maxCycles, out int cycles)
     {
+        const int MaxBurstCycles = 4096;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -2684,7 +2686,7 @@ public sealed class Sh2Cpu
         R[0] = 0;
         SetT(true);
         PC = loopPc;
-        cycles = maxCycles;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 6;
