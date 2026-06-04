@@ -843,10 +843,7 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) ||
-                nextOpcode == 0x2008 ||
-                (nextOpcode & 0xF0FF) == 0x4010 ||
-                (nextOpcode & 0xFF00) == 0x8B00)
+            if (IsLikelyByteDisplacementZeroWaitDtBfLoop(cpuIndex, cpu.PC, nextOpcode))
             {
                 ByteDisplacementZeroWaitFastPathAttempts++;
                 if (cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(cycleBudget, out fastCycles))
@@ -1104,6 +1101,51 @@ public sealed class ThirtyTwoXDevice
             pushPrAtLoopStart == 0x4F22 &&
             TryPeekSh2Word(pc + 2, cpuIndex, out ushort branchDelayOpcode) &&
             branchDelayOpcode == 0x0009;
+    }
+
+    private bool IsLikelyByteDisplacementZeroWaitDtBfLoop(int cpuIndex, uint pc, ushort opcode)
+    {
+        if (IsByteDisplacementLoad(opcode))
+        {
+            return IsLikelyByteDisplacementZeroWaitDtBfLoopStart(cpuIndex, pc);
+        }
+
+        if (opcode == 0x2008)
+        {
+            return pc >= 2 && IsLikelyByteDisplacementZeroWaitDtBfLoopStart(cpuIndex, pc - 2);
+        }
+
+        if ((opcode & 0xF0FF) == 0x4010)
+        {
+            return pc >= 6 && IsLikelyByteDisplacementZeroWaitDtBfLoopStart(cpuIndex, pc - 6);
+        }
+
+        if ((opcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        return (pc >= 4 && IsLikelyByteDisplacementZeroWaitDtBfLoopStart(cpuIndex, pc - 4)) ||
+            (pc >= 8 && IsLikelyByteDisplacementZeroWaitDtBfLoopStart(cpuIndex, pc - 8));
+    }
+
+    private bool IsLikelyByteDisplacementZeroWaitDtBfLoopStart(int cpuIndex, uint loopPc)
+    {
+        return TryPeekSh2Word(loopPc, cpuIndex, out ushort loadOpcode) &&
+            IsByteDisplacementLoad(loadOpcode) &&
+            TryPeekSh2Word(loopPc + 2, cpuIndex, out ushort testOpcode) &&
+            testOpcode == 0x2008 &&
+            TryPeekSh2Word(loopPc + 4, cpuIndex, out ushort exitBranchOpcode) &&
+            (exitBranchOpcode & 0xFF00) == 0x8B00 &&
+            TryPeekSh2Word(loopPc + 6, cpuIndex, out ushort dtOpcode) &&
+            (dtOpcode & 0xF0FF) == 0x4010 &&
+            TryPeekSh2Word(loopPc + 8, cpuIndex, out ushort loopBranchOpcode) &&
+            (loopBranchOpcode & 0xFF00) == 0x8B00;
+    }
+
+    private static bool IsByteDisplacementLoad(ushort opcode)
+    {
+        return (opcode & 0xFF00) >= 0x8400 && (opcode & 0xFF00) <= 0x84F0;
     }
 
     private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
