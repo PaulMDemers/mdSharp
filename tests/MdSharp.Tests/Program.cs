@@ -36,6 +36,7 @@ Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskl
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
+Run("32X SH-2 long difference poll fast-forward", ThirtyTwoXSh2LongDifferencePollFastForward);
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
@@ -2546,6 +2547,56 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
             ?? throw new InvalidOperationException("StepSh2Cpu helper was not found");
         return (int)method.Invoke(target, [cpuIndex, cycleBudget])!;
     }
+}
+
+void ThirtyTwoXSh2LongDifferencePollFastForward()
+{
+    const uint LoopPc = 0x0600_0646;
+    const uint CompletionAddress = 0x0600_318C;
+    const uint SourceAddress = 0x0600_145C;
+    SyntheticSh2Bus bus = new();
+    ushort[] loop =
+    [
+        0xD235, 0x6122, 0xD233, 0x6022, 0x3018, 0x8801, 0x8BF8
+    ];
+
+    for (int i = 0; i < loop.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), loop[i]);
+    }
+
+    bus.WriteLong(0x0600_071C, CompletionAddress);
+    bus.WriteLong(0x0600_0718, SourceAddress);
+    bus.WriteLong(CompletionAddress, 0);
+    bus.WriteLong(SourceAddress, 0x1B);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(
+        cpu.TryFastForwardLongDifferenceEqualsOnePollLoop(32, bus.TryWriteLong, out int cycles),
+        "long difference poll loop should publish the completion mirror");
+    AssertEqual(8, cycles);
+    AssertEqual(LoopPc + 0x0E, cpu.PC);
+    AssertEqual(0x1Au, bus.ReadLong(CompletionAddress));
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0x1Au, cpu.R[1]);
+    AssertEqual(SourceAddress, cpu.R[2]);
+
+    SyntheticSh2Bus matchingBus = new();
+    for (int i = 0; i < loop.Length; i++)
+    {
+        matchingBus.WriteInstructionWord(LoopPc + (uint)(i * 2), loop[i]);
+    }
+
+    matchingBus.WriteLong(0x0600_071C, CompletionAddress);
+    matchingBus.WriteLong(0x0600_0718, SourceAddress);
+    matchingBus.WriteLong(CompletionAddress, 0x1A);
+    matchingBus.WriteLong(SourceAddress, 0x1B);
+    Sh2Cpu matchingCpu = new(matchingBus, "test");
+    matchingCpu.Reset(LoopPc);
+    AssertTrue(
+        !matchingCpu.TryFastForwardLongDifferenceEqualsOnePollLoop(32, matchingBus.TryWriteLong, out _),
+        "long difference poll loop should leave an already satisfied loop to the interpreter");
 }
 
 void ThirtyTwoXSh2FrameBufferWordFillLoopFastForward()

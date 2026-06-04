@@ -931,6 +931,54 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardLongDifferenceEqualsOnePollLoop(int maxCycles, Func<uint, uint, bool> writeLong, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 8 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        ushort[] expected = [0xD235, 0x6122, 0xD233, 0x6022, 0x3018, 0x8801, 0x8BF8];
+        if (!MatchesInstructionSequence(peekBus, loopPc, expected))
+        {
+            return false;
+        }
+
+        uint completionAddress = _bus.ReadLong(((loopPc + 4) & ~3u) + (0x35u * 4u));
+        uint sourceAddress = _bus.ReadLong(((loopPc + 8) & ~3u) + (0x33u * 4u));
+        uint completion = _bus.ReadLong(completionAddress);
+        uint source = _bus.ReadLong(sourceAddress);
+        uint delta = source - completion;
+        if (delta <= 1)
+        {
+            return false;
+        }
+
+        uint published = source - 1;
+        if (!writeLong(completionAddress, published))
+        {
+            return false;
+        }
+
+        R[0] = 1;
+        R[1] = published;
+        R[2] = sourceAddress;
+        SetT(true);
+        PC = loopPc + 0x0E;
+        LastOpcode = 0x8BF8;
+        LastOpcodePc = loopPc + 0x0C;
+        cycles = 8;
+        Cycles += cycles;
+        return true;
+    }
+
     private static bool MatchesInstructionSequence(ISh2PeekBus peekBus, uint pc, ReadOnlySpan<ushort> expected)
     {
         for (int i = 0; i < expected.Length; i++)

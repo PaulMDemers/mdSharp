@@ -341,6 +341,8 @@ public sealed class ThirtyTwoXDevice
     public int EmptyDescriptorSpanFastPathHits { get; private set; }
     public int EmptyDescriptorSpanTailFastPathAttempts { get; private set; }
     public int EmptyDescriptorSpanTailFastPathHits { get; private set; }
+    public int LongDifferencePollFastPathAttempts { get; private set; }
+    public int LongDifferencePollFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -772,6 +774,24 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
+            if (cpuIndex == 0 &&
+                nextOpcode == 0xD235 &&
+                IsSlaveInInterruptDispatcherIdle() &&
+                TryPeekSh2Word(cpu.PC + 12, cpuIndex, out ushort pollBranchOpcode) &&
+                pollBranchOpcode == 0x8BF8)
+            {
+                LongDifferencePollFastPathAttempts++;
+                if (cpu.TryFastForwardLongDifferenceEqualsOnePollLoop(
+                        cycleBudget,
+                        _sh2LongWriters[cpuIndex],
+                        out fastCycles))
+                {
+                    LongDifferencePollFastPathHits++;
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+            }
+
             if ((nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
@@ -971,6 +991,12 @@ public sealed class ThirtyTwoXDevice
 
         AdvanceSh2Watchdog(cpuIndex, (int)Math.Min(delta, int.MaxValue));
         return cycles;
+    }
+
+    private bool IsSlaveInInterruptDispatcherIdle()
+    {
+        uint pc = SlaveSh2.PC;
+        return pc is >= 0x0600_22F8 and <= 0x0600_2342;
     }
 
     private bool TryWriteSh2FrameBufferWordFast(int cpuIndex, uint address, ushort value)
