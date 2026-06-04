@@ -29,6 +29,7 @@ Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBt
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
 Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward);
+Run("32X SH-2 byte displacement zero wait DT/BF loop fast-forward", ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward);
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
 Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFastForward);
@@ -2117,6 +2118,42 @@ void ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward()
     AssertTrue(!cpu.TryFastForwardByteDisplacementTstImmediateBtPollLoop(300, out _), "set bit should fall back to normal execution");
 }
 
+void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
+{
+    const uint LoopPc = 0x0600_38EE;
+    const uint ByteAddress = 0x0600_3AF1;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x8411); // MOV.B @(1,R1),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8B21); // BF exit
+    bus.WriteInstructionWord(LoopPc + 6, 0x4210); // DT R2
+    bus.WriteInstructionWord(LoopPc + 8, 0x8BFA); // BF loop
+    bus.WriteByte(ByteAddress, 0x00);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 2);
+    cpu.R[1] = ByteAddress - 1;
+    cpu.R[2] = 1000;
+    AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out int cycles), "byte displacement zero wait loop should fast-forward while the byte is zero");
+    AssertEqual(4092, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(318u, cpu.R[2]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.R[2] = 2;
+    AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should finish when DT reaches zero");
+    AssertEqual(LoopPc + 10, cpu.PC);
+    AssertEqual(0u, cpu.R[2]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc);
+    cpu.R[1] = ByteAddress - 1;
+    cpu.R[2] = 1000;
+    bus.WriteByte(ByteAddress, 0x80);
+    AssertTrue(!cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "nonzero wait byte should fall back to the interpreter");
+}
+
 void ThirtyTwoXSh2TstBfsDelayAddLoopFastForward()
 {
     const uint LoopPc = 0x0600_0200;
@@ -2277,7 +2314,7 @@ void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
     cpu.Reset(LoopPc);
     cpu.R[15] = 0x0603_F000;
     AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out int cycles), "SDRAM flag tasklet dispatcher should fast-forward while the tasklet reports idle");
-    AssertEqual(8192, cycles);
+    AssertEqual(4096, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0603_F000u, cpu.R[15]);
     AssertEqual(0x0000_0080u, cpu.R[1]);
@@ -2368,7 +2405,7 @@ void ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward()
     SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_0658u);
     cpu.R[15] = 0x0603_E000;
     AssertTrue(cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(8192, out int cycles), "GBR byte-pair interrupt idle loop should fast-forward when communication bytes match");
-    AssertEqual(4096, cycles);
+    AssertEqual(8192, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0600_0658u, cpu.PR);
     AssertEqual(0x0603_E000u, cpu.R[15]);

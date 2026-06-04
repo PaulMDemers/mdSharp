@@ -352,6 +352,8 @@ public sealed class ThirtyTwoXDevice
     public int GbrByteZeroComm20PollFastPathHits { get; private set; }
     public int LiteralByteDisplacementTstRegisterPollFastPathAttempts { get; private set; }
     public int LiteralByteDisplacementTstRegisterPollFastPathHits { get; private set; }
+    public int ByteDisplacementZeroWaitFastPathAttempts { get; private set; }
+    public int ByteDisplacementZeroWaitFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -839,6 +841,20 @@ public sealed class ThirtyTwoXDevice
                 TryFastForwardLiteralByteDisplacementTstRegisterPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
+            }
+
+            if (((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) ||
+                nextOpcode == 0x2008 ||
+                (nextOpcode & 0xF0FF) == 0x4010 ||
+                (nextOpcode & 0xFF00) == 0x8B00)
+            {
+                ByteDisplacementZeroWaitFastPathAttempts++;
+                if (cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(cycleBudget, out fastCycles))
+                {
+                    ByteDisplacementZeroWaitFastPathHits++;
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
             }
 
             if ((nextOpcode & 0xF000) == 0xD000 &&
