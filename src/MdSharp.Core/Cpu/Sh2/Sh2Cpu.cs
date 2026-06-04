@@ -2700,6 +2700,44 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardSdramFlagTaskletDispatcherLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 2048;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadSdramFlagTaskletDispatcher(peekBus, loopPc, out ushort branchOpcode, out uint taskletPc))
+        {
+            return false;
+        }
+
+        if (!TryReadReadySdramFlagTasklet(peekBus, taskletPc, out ushort flagWord, out uint secondAddress, out uint currentValue, out uint compareValue))
+        {
+            return false;
+        }
+
+        R[0] = SignExtend16(flagWord);
+        R[1] = currentValue;
+        R[2] = compareValue;
+        R[14] = secondAddress;
+        SetT(true);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 10;
+        return true;
+    }
+
     public bool TryFastForwardGbrBytePairEqualTaskletReturn(int maxCycles, out int cycles)
     {
         const int TaskletCycles = 7;
@@ -2760,6 +2798,96 @@ public sealed class Sh2Cpu
         LastOpcode = 0x000B;
         LastOpcodePc = rtsPc;
         return true;
+    }
+
+    private static bool TryReadSdramFlagTaskletDispatcher(
+        ISh2PeekBus peekBus,
+        uint loopPc,
+        out ushort branchOpcode,
+        out uint taskletPc)
+    {
+        branchOpcode = 0;
+        taskletPc = 0;
+        if (!peekBus.TryPeekWord(loopPc, out ushort literalOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort pushPrOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort jsrOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort jsrDelayOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 10, out branchOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 12, out ushort branchDelayOpcode))
+        {
+            return false;
+        }
+
+        if ((literalOpcode & 0xF000) != 0xD000 ||
+            loadOpcode != 0x60E2 ||
+            pushPrOpcode != 0x4F22 ||
+            jsrOpcode != 0x400B ||
+            jsrDelayOpcode != 0x0009 ||
+            (branchOpcode & 0xF000) != 0xA000 ||
+            branchDelayOpcode != 0x0009 ||
+            BranchWordTarget(loopPc + 10, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        uint pointerAddress = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        return TryPeekLong(peekBus, pointerAddress, out taskletPc);
+    }
+
+    private static bool TryReadReadySdramFlagTasklet(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort flagWord,
+        out uint secondAddress,
+        out uint currentValue,
+        out uint compareValue)
+    {
+        flagWord = 0;
+        secondAddress = 0;
+        currentValue = 0;
+        compareValue = 0;
+        if (!peekBus.TryPeekWord(pc, out ushort firstLiteralOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out ushort firstLoadOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out ushort firstBranchOpcode) ||
+            !peekBus.TryPeekWord(pc + 8, out ushort secondLiteralOpcode) ||
+            !peekBus.TryPeekWord(pc + 10, out ushort secondLoadOpcode) ||
+            !peekBus.TryPeekWord(pc + 12, out ushort compareLiteralOpcode) ||
+            !peekBus.TryPeekWord(pc + 14, out ushort compareOpcode) ||
+            !peekBus.TryPeekWord(pc + 16, out ushort secondBranchOpcode))
+        {
+            return false;
+        }
+
+        if ((firstLiteralOpcode & 0xF000) != 0xD000 ||
+            firstLoadOpcode != 0x6011 ||
+            (testOpcode & 0xFF00) != 0xC800 ||
+            (firstBranchOpcode & 0xFF00) != 0x8900 ||
+            (secondLiteralOpcode & 0xF000) != 0xD000 ||
+            secondLoadOpcode != 0x61E2 ||
+            (compareLiteralOpcode & 0xF000) != 0xD000 ||
+            compareOpcode != 0x3210 ||
+            (secondBranchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        uint firstAddress = ReadPcRelativeLongLiteral(peekBus, pc, firstLiteralOpcode);
+        if (!peekBus.TryPeekWord(firstAddress, out flagWord))
+        {
+            return false;
+        }
+
+        byte mask = (byte)testOpcode;
+        if (((byte)flagWord & mask) == 0)
+        {
+            return false;
+        }
+
+        secondAddress = ReadPcRelativeLongLiteral(peekBus, pc + 8, secondLiteralOpcode);
+        compareValue = ReadPcRelativeLongLiteral(peekBus, pc + 12, compareLiteralOpcode);
+        return TryPeekLong(peekBus, secondAddress, out currentValue) && currentValue == compareValue;
     }
 
     public bool TryFastForwardWordCmpEqBtPollLoop(int maxCycles, out int cycles)
@@ -4968,6 +5096,11 @@ public sealed class Sh2Cpu
     private static uint BranchByteTarget(uint branchPc, ushort branchOpcode)
     {
         return branchPc + 4 + (uint)(((sbyte)branchOpcode) * 2);
+    }
+
+    private static uint BranchWordTarget(uint branchPc, ushort branchOpcode)
+    {
+        return branchPc + 4 + (uint)(((short)(branchOpcode << 4) >> 4) * 2);
     }
 
     private void SetSr(uint value)

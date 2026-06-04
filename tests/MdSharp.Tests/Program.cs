@@ -32,6 +32,7 @@ Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", Thirty
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
 Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFastForward);
+Run("32X SH-2 SDRAM flag tasklet dispatcher loop fast-forward", ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward);
 Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
@@ -2237,6 +2238,54 @@ void ThirtyTwoXSh2SdramFlagTaskletFastForward()
     AssertTrue(!cpu.TryFastForwardSdramFlagTaskletReturn(32, out _), "nonmatching guarded value should fall back to the interpreter");
 }
 
+void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
+{
+    const uint LoopPc = 0x0600_01AA;
+    const uint TaskletPc = 0x0600_45E4;
+    const uint PointerAddress = 0x0600_52A8;
+    const uint FlagAddress = 0x0600_74BC;
+    const uint ValueAddress = 0x0600_74C8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xDE03); // MOV.L literal,R14
+    bus.WriteInstructionWord(LoopPc + 2, 0x60E2); // MOV.L @R14,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x4F22); // STS.L PR,@-R15
+    bus.WriteInstructionWord(LoopPc + 6, 0x400B); // JSR @R0
+    bus.WriteInstructionWord(LoopPc + 8, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 10, 0xAFF9); // BRA loop
+    bus.WriteInstructionWord(LoopPc + 12, 0x0009); // NOP
+    bus.WriteLong(0x0600_01B8, PointerAddress);
+    bus.WriteLong(PointerAddress, TaskletPc);
+    bus.WriteInstructionWord(TaskletPc + 0, 0xD132); // MOV.L literal,R1
+    bus.WriteInstructionWord(TaskletPc + 2, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(TaskletPc + 4, 0xC801); // TST #1,R0
+    bus.WriteInstructionWord(TaskletPc + 6, 0x8950); // BT return
+    bus.WriteInstructionWord(TaskletPc + 8, 0xDE2F); // MOV.L literal,R14
+    bus.WriteInstructionWord(TaskletPc + 10, 0x61E2); // MOV.L @R14,R1
+    bus.WriteInstructionWord(TaskletPc + 12, 0xD22D); // MOV.L literal,R2
+    bus.WriteInstructionWord(TaskletPc + 14, 0x3210); // CMP/EQ R1,R2
+    bus.WriteInstructionWord(TaskletPc + 16, 0x894B); // BT return
+    bus.WriteLong(0x0600_46B0, FlagAddress);
+    bus.WriteLong(0x0600_46AC, ValueAddress);
+    bus.WriteLong(0x0600_46A8, 0x0000_0080);
+    bus.WriteWord(FlagAddress, 0x0001);
+    bus.WriteLong(ValueAddress, 0x0000_0080);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[15] = 0x0603_F000;
+    AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out int cycles), "SDRAM flag tasklet dispatcher should fast-forward while the tasklet reports idle");
+    AssertEqual(2048, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0603_F000u, cpu.R[15]);
+    AssertEqual(0x0000_0080u, cpu.R[1]);
+    AssertEqual(0x0000_0080u, cpu.R[2]);
+    AssertEqual(ValueAddress, cpu.R[14]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteLong(ValueAddress, 0x0000_0081);
+    AssertTrue(!cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out _), "dispatcher should fall back when the guarded tasklet value changes");
+}
+
 void ThirtyTwoXSh2GbrBytePairTaskletFastForward()
 {
     const uint Pc = 0x0600_4B64;
@@ -2459,7 +2508,7 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
     ThirtyTwoXDevice device = new();
     device.Reset();
     device.ResetSh2(slavePc: LoopPc + 6);
-    LoadEmptyDescriptorSpanLoop(device);
+    LoadEmptyDescriptorSpanDeviceLoop(device);
     WriteSh2LongForTest(device, 0x0600_2964, DescriptorBase, cpuIndex: 1);
     for (uint descriptor = 0; descriptor < 4; descriptor++)
     {
@@ -2488,7 +2537,7 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
     ThirtyTwoXDevice tailDevice = new();
     tailDevice.Reset();
     tailDevice.ResetSh2(slavePc: LoopPc + 0xA4);
-    LoadEmptyDescriptorSpanLoop(tailDevice);
+    LoadEmptyDescriptorSpanDeviceLoop(tailDevice);
     tailDevice.SlaveSh2.R[5] = 0x0000_0200;
     tailDevice.SlaveSh2.R[7] = 4;
     tailDevice.SlaveSh2.R[8] = Destination + 0x80;
@@ -2524,7 +2573,7 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
         }
     }
 
-    static void LoadEmptyDescriptorSpanLoop(ThirtyTwoXDevice target)
+    static void LoadEmptyDescriptorSpanDeviceLoop(ThirtyTwoXDevice target)
     {
         ushort[] prologue = [0xD42F, 0xE304, 0x6593, 0x5046, 0x88FF, 0x893B];
         for (int i = 0; i < prologue.Length; i++)
@@ -9305,6 +9354,41 @@ void AssertTrue(bool condition, string message, [CallerLineNumber] int line = 0)
 static void SetSh2Property(Sh2Cpu cpu, string propertyName, uint value)
 {
     typeof(Sh2Cpu).GetProperty(propertyName)!.SetValue(cpu, value);
+}
+
+static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
+    return (byte)method.Invoke(target, [address, cpuIndex])!;
+}
+
+static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("ReadSh2Word helper was not found");
+    return (ushort)method.Invoke(target, [address, cpuIndex])!;
+}
+
+static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
+    method.Invoke(target, [address, value, cpuIndex]);
+}
+
+static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+    method.Invoke(target, [address, value, cpuIndex]);
+}
+
+static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+    method.Invoke(target, [address, value, cpuIndex]);
 }
 
 readonly record struct EepromPins(uint SdaInAddress, int SdaInBit, uint SdaOutAddress, int SdaOutBit, uint SclAddress, int SclBit, bool WordAccess = false);
