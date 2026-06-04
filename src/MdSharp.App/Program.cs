@@ -5313,7 +5313,7 @@ bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
 
 static int CountFramebufferPayloadNonzero(ReadOnlySpan<byte> frameBuffer)
 {
-    int lineTableBytes = Math.Min(frameBuffer.Length, ThirtyTwoXHardwareProfile.NtscVisibleLines * 2);
+    int lineTableBytes = Math.Min(frameBuffer.Length, 256 * 2);
     int count = 0;
     for (int i = lineTableBytes; i < frameBuffer.Length; i++)
     {
