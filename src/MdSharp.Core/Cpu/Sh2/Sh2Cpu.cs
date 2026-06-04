@@ -610,6 +610,140 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
+        int maxCycles,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        cycles = 0;
+        const int TakenIterationCycles = 6;
+        const int FinalIterationCycles = 4;
+        const int MinimumBurstCycles = TakenIterationCycles * 4096;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort storeOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort addOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort dtOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((loadOpcode & 0xF00F) != 0x6005 ||
+            (storeOpcode & 0xF00F) != 0x2001 ||
+            (addOpcode & 0xF00F) != 0x300C ||
+            (dtOpcode & 0xF0FF) != 0x4010 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int valueRegister = (loadOpcode >> 8) & 0x0F;
+        int sourceRegister = (loadOpcode >> 4) & 0x0F;
+        int storeDestination = (storeOpcode >> 8) & 0x0F;
+        int storeSource = (storeOpcode >> 4) & 0x0F;
+        int addDestination = (addOpcode >> 8) & 0x0F;
+        int addSource = (addOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        if (valueRegister != 0 ||
+            storeSource != valueRegister ||
+            addDestination != storeDestination)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 12 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        int effectiveMaxCycles = Math.Max(maxCycles, MinimumBurstCycles);
+        uint maxIterations = (uint)(effectiveMaxCycles / TakenIterationCycles);
+        if (maxIterations == 0 && effectiveMaxCycles >= FinalIterationCycles)
+        {
+            maxIterations = 1;
+        }
+
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint source = R[sourceRegister];
+        uint destination = R[storeDestination];
+        uint stride = R[addSource];
+        uint completed = 0;
+        ushort value = 0;
+        while (completed < iterations)
+        {
+            ushort? read = readWord(source);
+            if (read is null)
+            {
+                break;
+            }
+
+            value = read.Value;
+            if (!writeWord(destination, value))
+            {
+                break;
+            }
+
+            source += 2;
+            destination += stride;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[sourceRegister] = source;
+        R[storeDestination] = destination;
+        R[valueRegister] = SignExtend16(value);
+        R[countRegister] = count - completed;
+        bool completedLoop = completed == count;
+        cycles = completedLoop
+            ? checked((int)(((completed - 1) * TakenIterationCycles) + FinalIterationCycles))
+            : checked((int)(completed * TakenIterationCycles));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 8;
+
+        if (completedLoop)
+        {
+            SetT(true);
+            PC = loopPc + 10;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardSdramLinkedListInsertRoutine(
         int maxCycles,
         Func<uint, uint?> readLong,
@@ -1734,6 +1868,117 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrWordCmpGtBfPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        bool startAtLoad = true;
+        ushort setupOpcode = 0;
+        if (peekBus.TryPeekWord(PC, out ushort possibleSetupOpcode) &&
+            (possibleSetupOpcode & 0xF000) == 0xE000 &&
+            peekBus.TryPeekWord(PC + 2, out ushort possibleLoadOpcode) &&
+            (possibleLoadOpcode & 0xFF00) == 0xC500)
+        {
+            setupOpcode = possibleSetupOpcode;
+            loopPc = PC + 2;
+            startAtLoad = false;
+        }
+
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort compareOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        {
+            if (PC < 2 ||
+                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
+                !peekBus.TryPeekWord(PC, out compareOpcode) ||
+                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            {
+                if (PC < 4 ||
+                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
+                    !peekBus.TryPeekWord(PC - 2, out compareOpcode) ||
+                    !peekBus.TryPeekWord(PC, out branchOpcode))
+                {
+                    return false;
+                }
+
+                loopPc = PC - 4;
+                startAtLoad = false;
+            }
+            else
+            {
+                loopPc = PC - 2;
+                startAtLoad = false;
+            }
+        }
+
+        if ((loadOpcode & 0xFF00) != 0xC500 ||
+            (compareOpcode & 0xF00F) != 0x3007 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int compareN = (compareOpcode >> 8) & 0x0F;
+        int compareM = (compareOpcode >> 4) & 0x0F;
+        if (compareN != 0 && compareM != 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 8 + (uint)(displacement * 2);
+        uint restartPc = loopPc;
+        if (target != loopPc)
+        {
+            if (target != loopPc - 2 ||
+                (setupOpcode == 0 && !peekBus.TryPeekWord(target, out setupOpcode)) ||
+                (setupOpcode & 0xF000) != 0xE000 ||
+                ((setupOpcode >> 8) & 0x0F) != compareM)
+            {
+                return false;
+            }
+
+            restartPc = target;
+        }
+
+        uint address = GBR + (uint)((loadOpcode & 0xFF) * 2);
+        if (!peekBus.TryPeekWord(address, out ushort wordValue))
+        {
+            return false;
+        }
+
+        uint value = (uint)(short)wordValue;
+        if (restartPc != loopPc)
+        {
+            R[compareM] = (uint)(sbyte)setupOpcode;
+        }
+
+        R[0] = value;
+        bool greaterThan = (int)R[compareN] > (int)R[compareM];
+        if (greaterThan)
+        {
+            return false;
+        }
+
+        SetT(false);
+        PC = restartPc;
+        cycles = Math.Max(1, maxCycles - (startAtLoad ? 0 : 1));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardGbrCmpEqBfBraPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -2261,6 +2506,87 @@ public sealed class Sh2Cpu
         SetT(false);
         PC = loopPc;
         cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
+    public bool TryFastForwardByteTstBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        {
+            if (PC < 2 ||
+                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
+                !peekBus.TryPeekWord(PC, out testOpcode) ||
+                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            {
+                if (PC < 4 ||
+                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
+                    !peekBus.TryPeekWord(PC - 2, out testOpcode) ||
+                    !peekBus.TryPeekWord(PC, out branchOpcode))
+                {
+                    return false;
+                }
+
+                loopPc = PC - 4;
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        if ((loadOpcode & 0xF00F) != 0x6000 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int testLeft = (testOpcode >> 8) & 0x0F;
+        int testRight = (testOpcode >> 4) & 0x0F;
+        if (loadDestination != 0 ||
+            testLeft != 0 ||
+            testRight != 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 8 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        if (!peekBus.TryPeekByte(R[loadSource], out byte byteValue) ||
+            byteValue == 0)
+        {
+            return false;
+        }
+
+        R[0] = (uint)(sbyte)byteValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 4;

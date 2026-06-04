@@ -729,6 +729,17 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((nextOpcode & 0xF00F) == 0x6005 &&
+                cpu.TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
@@ -805,6 +816,16 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (((nextOpcode & 0xFF00) == 0xC500 ||
+                    (nextOpcode & 0xF000) == 0xE000 ||
+                    (nextOpcode & 0xF00F) == 0x3007 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardGbrWordCmpGtBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrCmpEqBfBraPollLoop(cycleBudget, out fastCycles))
             {
@@ -836,6 +857,15 @@ public sealed class ThirtyTwoXDevice
 
             if ((nextOpcode & 0xF00F) == 0x6001 &&
                 cpu.TryFastForwardWordTstBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x6000 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardByteTstBfPollLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);
                 return fastCycles;
