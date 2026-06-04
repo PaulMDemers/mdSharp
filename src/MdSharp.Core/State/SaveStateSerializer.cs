@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 59;
+    private const int Version = 60;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -369,6 +369,8 @@ public static class SaveStateSerializer
         writer.Write(state.SlaveInterruptMask);
         writer.Write(state.MasterVerticalInterruptPending);
         writer.Write(state.SlaveVerticalInterruptPending);
+        writer.Write(state.MasterVresInterruptPending);
+        writer.Write(state.SlaveVresInterruptPending);
         writer.Write(state.MasterHorizontalInterruptPending);
         writer.Write(state.SlaveHorizontalInterruptPending);
         writer.Write(state.HorizontalInterruptPeriod);
@@ -463,6 +465,8 @@ public static class SaveStateSerializer
         ushort slaveInterruptMask = 0;
         bool masterVerticalInterruptPending = false;
         bool slaveVerticalInterruptPending = false;
+        bool masterVresInterruptPending = false;
+        bool slaveVresInterruptPending = false;
         bool masterHorizontalInterruptPending = false;
         bool slaveHorizontalInterruptPending = false;
         byte horizontalInterruptPeriod = 0;
@@ -503,6 +507,12 @@ public static class SaveStateSerializer
             slaveInterruptMask = reader.ReadUInt16();
             masterVerticalInterruptPending = reader.ReadBoolean();
             slaveVerticalInterruptPending = reader.ReadBoolean();
+            if (version >= 60)
+            {
+                masterVresInterruptPending = reader.ReadBoolean();
+                slaveVresInterruptPending = reader.ReadBoolean();
+            }
+
             masterHorizontalInterruptPending = reader.ReadBoolean();
             slaveHorizontalInterruptPending = reader.ReadBoolean();
             if (version >= 47)
@@ -615,6 +625,8 @@ public static class SaveStateSerializer
             slaveInterruptMask,
             masterVerticalInterruptPending,
             slaveVerticalInterruptPending,
+            masterVresInterruptPending,
+            slaveVresInterruptPending,
             masterHorizontalInterruptPending,
             slaveHorizontalInterruptPending,
             horizontalInterruptPeriod,

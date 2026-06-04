@@ -99,6 +99,7 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2CommandInterruptVector = 68;
     private const int Sh2HorizontalInterruptVector = 69;
     private const int Sh2VerticalInterruptVector = 70;
+    private const int Sh2VresInterruptVector = 71;
     private const int Sh2FrtInputCaptureInterruptVector = 64;
     private const int Sh2FrtInputCaptureInterruptLevel = 15;
     private const int Sh2SystemRegisterWaitCycles = 1;
@@ -256,6 +257,8 @@ public sealed class ThirtyTwoXDevice
     private long _cartridgeRomBusBusyUntilMasterCycle;
     private bool _masterVerticalInterruptPending;
     private bool _slaveVerticalInterruptPending;
+    private bool _masterVresInterruptPending;
+    private bool _slaveVresInterruptPending;
     private bool _masterHorizontalInterruptPending;
     private bool _slaveHorizontalInterruptPending;
     private byte _horizontalInterruptPeriod;
@@ -432,6 +435,8 @@ public sealed class ThirtyTwoXDevice
         _cartridgeRomBusBusyUntilMasterCycle = 0;
         _masterVerticalInterruptPending = false;
         _slaveVerticalInterruptPending = false;
+        _masterVresInterruptPending = false;
+        _slaveVresInterruptPending = false;
         _masterHorizontalInterruptPending = false;
         _slaveHorizontalInterruptPending = false;
         _horizontalInterruptPeriod = 0;
@@ -490,6 +495,18 @@ public sealed class ThirtyTwoXDevice
         {
             _vBlank = nowVBlank;
         }
+    }
+
+    public void TriggerResetButtonInterrupt()
+    {
+        if (!_adapterEnabled || !_sh2ResetReleased)
+        {
+            return;
+        }
+
+        _masterVresInterruptPending = true;
+        _slaveVresInterruptPending = true;
+        RequestPendingInterrupts();
     }
 
     public void SetHBlank(bool hBlank)
@@ -1711,6 +1728,8 @@ public sealed class ThirtyTwoXDevice
             _slaveInterruptMask,
             _masterVerticalInterruptPending,
             _slaveVerticalInterruptPending,
+            _masterVresInterruptPending,
+            _slaveVresInterruptPending,
             _masterHorizontalInterruptPending,
             _slaveHorizontalInterruptPending,
             _horizontalInterruptPeriod,
@@ -1819,6 +1838,8 @@ public sealed class ThirtyTwoXDevice
         _slaveInterruptMask = state.SlaveInterruptMask;
         _masterVerticalInterruptPending = state.MasterVerticalInterruptPending;
         _slaveVerticalInterruptPending = state.SlaveVerticalInterruptPending;
+        _masterVresInterruptPending = state.MasterVresInterruptPending;
+        _slaveVresInterruptPending = state.SlaveVresInterruptPending;
         _masterHorizontalInterruptPending = state.MasterHorizontalInterruptPending;
         _slaveHorizontalInterruptPending = state.SlaveHorizontalInterruptPending;
         _horizontalInterruptPeriod = state.HorizontalInterruptPeriod;
@@ -2623,7 +2644,8 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        if ((index & ~1) is ThirtyTwoXHardwareProfile.VInterruptClearOffset or
+        if ((index & ~1) is ThirtyTwoXHardwareProfile.VResInterruptClearOffset or
+            ThirtyTwoXHardwareProfile.VInterruptClearOffset or
             ThirtyTwoXHardwareProfile.HInterruptClearOffset or
             ThirtyTwoXHardwareProfile.CommandInterruptClearOffset or
             ThirtyTwoXHardwareProfile.PwmInterruptClearOffset)
@@ -2670,7 +2692,8 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        if (aligned is ThirtyTwoXHardwareProfile.VInterruptClearOffset or
+        if (aligned is ThirtyTwoXHardwareProfile.VResInterruptClearOffset or
+            ThirtyTwoXHardwareProfile.VInterruptClearOffset or
             ThirtyTwoXHardwareProfile.HInterruptClearOffset or
             ThirtyTwoXHardwareProfile.CommandInterruptClearOffset or
             ThirtyTwoXHardwareProfile.PwmInterruptClearOffset)
@@ -3857,6 +3880,16 @@ public sealed class ThirtyTwoXDevice
         RequestPendingWatchdogInterrupt(0);
         RequestPendingWatchdogInterrupt(1);
 
+        if (_masterVresInterruptPending)
+        {
+            MasterSh2.RequestInterrupt(14, Sh2VresInterruptVector);
+        }
+
+        if (_slaveVresInterruptPending)
+        {
+            SlaveSh2.RequestInterrupt(14, Sh2VresInterruptVector);
+        }
+
         if (_masterVerticalInterruptPending && (BuildSh2InterruptMask(0) & Sh2InterruptMaskVertical) != 0)
         {
             MasterSh2.RequestInterrupt(12, Sh2VerticalInterruptVector);
@@ -3933,6 +3966,9 @@ public sealed class ThirtyTwoXDevice
     {
         switch (offset)
         {
+            case ThirtyTwoXHardwareProfile.VResInterruptClearOffset:
+                ClearVresInterruptForCpu(cpuIndex);
+                break;
             case ThirtyTwoXHardwareProfile.VInterruptClearOffset:
                 ClearVerticalInterruptForCpu(cpuIndex);
                 break;
@@ -3946,6 +3982,12 @@ public sealed class ThirtyTwoXDevice
                 ClearPwmInterruptForCpu(cpuIndex);
                 break;
         }
+    }
+
+    private void ClearVresInterruptForCpu(int cpuIndex)
+    {
+        SetVresInterruptPending(cpuIndex, false);
+        ClearPendingSh2Interrupt(cpuIndex, 14, Sh2VresInterruptVector);
     }
 
     private void ClearVerticalInterruptForCpu(int cpuIndex)
@@ -3982,6 +4024,18 @@ public sealed class ThirtyTwoXDevice
         else
         {
             _slaveVerticalInterruptPending = pending;
+        }
+    }
+
+    private void SetVresInterruptPending(int cpuIndex, bool pending)
+    {
+        if (cpuIndex == 0)
+        {
+            _masterVresInterruptPending = pending;
+        }
+        else
+        {
+            _slaveVresInterruptPending = pending;
         }
     }
 
@@ -6180,6 +6234,8 @@ public sealed class ThirtyTwoXDevice
         ushort SlaveInterruptMask,
         bool MasterVerticalInterruptPending,
         bool SlaveVerticalInterruptPending,
+        bool MasterVresInterruptPending,
+        bool SlaveVresInterruptPending,
         bool MasterHorizontalInterruptPending,
         bool SlaveHorizontalInterruptPending,
         byte HorizontalInterruptPeriod,

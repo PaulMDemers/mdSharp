@@ -418,21 +418,42 @@ void ThirtyTwoXDeviceShell()
     {
         MasterVerticalInterruptPending = true,
         SlaveVerticalInterruptPending = true,
+        MasterVresInterruptPending = true,
+        SlaveVresInterruptPending = true,
         MasterHorizontalInterruptPending = true,
         SlaveHorizontalInterruptPending = true,
         MasterPwmInterruptPending = true,
         SlavePwmInterruptPending = true,
     });
+    WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.VResInterruptClearOffset), 0, cpuIndex: 0);
     WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.VInterruptClearOffset), 0, cpuIndex: 0);
     WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.HInterruptClearOffset), 0, cpuIndex: 0);
     WriteSh2WordForTest(interruptClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.PwmInterruptClearOffset), 0, cpuIndex: 0);
     ThirtyTwoXDevice.ThirtyTwoXState clearedState = interruptClearDevice.CaptureState();
+    AssertTrue(!clearedState.MasterVresInterruptPending, "master VRES interrupt clear should clear master latch");
+    AssertTrue(clearedState.SlaveVresInterruptPending, "master VRES interrupt clear should not clear slave latch");
     AssertTrue(!clearedState.MasterVerticalInterruptPending, "master V interrupt clear should clear master latch");
     AssertTrue(clearedState.SlaveVerticalInterruptPending, "master V interrupt clear should not clear slave latch");
     AssertTrue(!clearedState.MasterHorizontalInterruptPending, "master H interrupt clear should clear master latch");
     AssertTrue(clearedState.SlaveHorizontalInterruptPending, "master H interrupt clear should not clear slave latch");
     AssertTrue(!clearedState.MasterPwmInterruptPending, "master PWM interrupt clear should clear master latch");
     AssertTrue(clearedState.SlavePwmInterruptPending, "master PWM interrupt clear should not clear slave latch");
+    ThirtyTwoXDevice vresDevice = new();
+    vresDevice.Reset();
+    vresDevice.TriggerResetButtonInterrupt();
+    AssertEqual(0, vresDevice.MasterSh2.PendingInterruptLevel);
+    vresDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    vresDevice.TriggerResetButtonInterrupt();
+    AssertEqual(14, vresDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(71, vresDevice.MasterSh2.PendingInterruptVectorNumber);
+    AssertEqual(14, vresDevice.SlaveSh2.PendingInterruptLevel);
+    ThirtyTwoXDevice restoredVresDevice = new();
+    restoredVresDevice.RestoreState(vresDevice.CaptureState());
+    AssertTrue(restoredVresDevice.CaptureState().MasterVresInterruptPending, "VRES latch should survive capture/restore");
+    WriteSh2ByteForTest(restoredVresDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.VResInterruptClearOffset) + 1, 0);
+    AssertEqual(0, restoredVresDevice.MasterSh2.PendingInterruptLevel);
+    AssertTrue(!restoredVresDevice.CaptureState().MasterVresInterruptPending, "byte clear should clear master VRES latch");
+    AssertTrue(restoredVresDevice.CaptureState().SlaveVresInterruptPending, "byte clear should preserve slave VRES latch");
     ThirtyTwoXDevice commandClearDevice = new();
     commandClearDevice.Reset();
     commandClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset, 0x0003);
