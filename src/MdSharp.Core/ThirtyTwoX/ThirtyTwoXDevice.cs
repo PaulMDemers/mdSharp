@@ -841,11 +841,26 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (cpu.TryFastForwardMovLiteralLongTstBtPollLoop(cycleBudget, out fastCycles))
+                {
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
                 {
                     AdvanceSh2Watchdog(cpuIndex, fastCycles);
                     return fastCycles;
                 }
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x6002 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardMovLiteralLongTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
             }
 
             if ((nextOpcode & 0xF00F) == 0x6001 &&

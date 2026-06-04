@@ -21,6 +21,7 @@ Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticC
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
+Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
@@ -1872,6 +1873,34 @@ void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x2000_4020u, cpu.R[1]);
     AssertEqual(0x2000_4020u, cpu.R[2]);
+}
+
+void ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_22A4;
+    const uint FlagAddress = 0x0600_3150;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD00D); // MOV.L @(13,PC),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x6002); // MOV.L @R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x89FB); // BT loop
+    bus.WriteLong(LoopPc + 0x38, FlagAddress);
+    bus.WriteLong(FlagAddress, 0x0000_0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardMovLiteralLongTstBtPollLoop(300, out int cycles), "MOV literal/MOV.L/TST/BT zero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 6);
+    AssertTrue(cpu.TryFastForwardMovLiteralLongTstBtPollLoop(300, out _), "MOV literal/MOV.L/TST/BT zero poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteLong(FlagAddress, 0x0000_0001);
+    AssertTrue(!cpu.TryFastForwardMovLiteralLongTstBtPollLoop(300, out _), "nonzero MOV literal long poll should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward()
