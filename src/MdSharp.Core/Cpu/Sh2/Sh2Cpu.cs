@@ -12,6 +12,7 @@ public sealed class Sh2Cpu
 
     private readonly ISh2Bus _bus;
     private readonly string _name;
+    private readonly int[] _pendingInterruptVectorsByLevel = new int[16];
     private uint? _delaySlotPcRelativeBase;
     private int _delaySlotWaitCycles;
 
@@ -66,8 +67,7 @@ public sealed class Sh2Cpu
         LastUnhandledOpcodePc = 0;
         DelaySlotActive = false;
         _delaySlotWaitCycles = 0;
-        PendingInterruptLevel = 0;
-        PendingInterruptVectorNumber = 0;
+        ClearAllPendingInterrupts();
     }
 
     public void SetVbr(uint value)
@@ -82,19 +82,21 @@ public sealed class Sh2Cpu
             throw new ArgumentOutOfRangeException(nameof(level));
         }
 
-        if (level >= PendingInterruptLevel)
-        {
-            PendingInterruptLevel = level;
-            PendingInterruptVectorNumber = vectorNumber ?? (64 + level);
-        }
+        _pendingInterruptVectorsByLevel[level] = vectorNumber ?? (64 + level);
+        RefreshPendingInterruptView();
     }
 
     public void ClearPendingInterrupt(int level, int vectorNumber)
     {
-        if (PendingInterruptLevel == level && PendingInterruptVectorNumber == vectorNumber)
+        if (level is < 1 or > 15)
         {
-            PendingInterruptLevel = 0;
-            PendingInterruptVectorNumber = 0;
+            return;
+        }
+
+        if (_pendingInterruptVectorsByLevel[level] == vectorNumber)
+        {
+            _pendingInterruptVectorsByLevel[level] = 0;
+            RefreshPendingInterruptView();
         }
     }
 
@@ -739,6 +741,205 @@ public sealed class Sh2Cpu
         {
             SetT(false);
             PC = loopPc;
+        }
+
+        return true;
+    }
+
+    public bool TryFastForwardEmptyDescriptorSpanFillLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
+    {
+        const int CyclesPerIteration = 6;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        ushort[] prologueExpected = [0xD42F, 0xE304, 0x6593, 0x5046, 0x88FF, 0x893B];
+        ushort[] scanHeadExpected = [0x5046, 0x88FF, 0x893B];
+        ushort[] tailExpected =
+        [
+            0x4310, 0x8FBE, 0x742C, 0x4519, 0x4619, 0x655F,
+            0x666F, 0x4515, 0x8901, 0xA003, 0xE501, 0x35A7,
+            0x8B00, 0x65A3, 0x2851, 0x7802, 0x77FF, 0x4715,
+            0x89AA
+        ];
+
+        bool atPrologue = MatchesInstructionSequence(peekBus, loopPc, prologueExpected) &&
+            MatchesInstructionSequence(peekBus, loopPc + 0x84, tailExpected);
+        bool atScanLoop = false;
+        if (!atPrologue)
+        {
+            atScanLoop = MatchesInstructionSequence(peekBus, loopPc, scanHeadExpected);
+            if (!atScanLoop)
+            {
+                return false;
+            }
+
+            loopPc -= 6;
+            if (!MatchesInstructionSequence(peekBus, loopPc + 0x84, tailExpected))
+            {
+                return false;
+            }
+        }
+
+        uint descriptorBase = atPrologue
+            ? _bus.ReadLong(((loopPc + 4) & ~3u) + (0x2Fu * 4u))
+            : R[4] - ((4u - Math.Clamp(R[3], 1u, 4u)) * 44u);
+        if (descriptorBase == 0 ||
+            R[7] == 0 ||
+            R[8] == 0)
+        {
+            return false;
+        }
+
+        uint firstDescriptor = atPrologue ? 0u : 4u - Math.Clamp(R[3], 1u, 4u);
+        for (uint descriptor = firstDescriptor; descriptor < 4; descriptor++)
+        {
+            if (_bus.ReadLong(descriptorBase + (descriptor * 44u) + 24u) != 0xFFFF_FFFFu)
+            {
+                return false;
+            }
+        }
+
+        int spanWord = (short)(ushort)(R[9] >> 8);
+        int maximum = (int)R[10];
+        if (spanWord <= 0 || spanWord > maximum)
+        {
+            return false;
+        }
+
+        uint requested = atPrologue
+            ? Math.Min(R[7], int.MaxValue / CyclesPerIteration)
+            : 1u;
+        uint iterations = Math.Min(requested, (uint)(maxCycles / CyclesPerIteration));
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[8];
+        ushort value = (ushort)spanWord;
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, value))
+            {
+                break;
+            }
+
+            completed++;
+            address += 2;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[3] = 0;
+        R[4] = descriptorBase + (4u * 44u);
+        R[5] = (uint)spanWord;
+        R[6] = (uint)(short)(ushort)(R[6] >> 8);
+        R[8] += completed * 2;
+        R[7] -= completed;
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x89AA;
+        LastOpcodePc = loopPc + 0xA8;
+
+        if (R[7] == 0)
+        {
+            SetT(false);
+            PC = loopPc + 0xAA;
+        }
+        else
+        {
+            SetT(true);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
+    public bool TryFastForwardEmptyDescriptorSpanFillTail(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
+    {
+        const int CyclesPerTail = 4;
+        const int CyclesPerAdditionalWrite = 6;
+        cycles = 0;
+        if (maxCycles < CyclesPerTail ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus ||
+            R[7] == 0)
+        {
+            return false;
+        }
+
+        uint loopPc = PC - 0xA4;
+        ushort[] tailRemainderExpected = [0x77FF, 0x4715, 0x89AA];
+        ushort[] prologueExpected = [0xD42F, 0xE304, 0x6593, 0x5046, 0x88FF, 0x893B];
+        if (!MatchesInstructionSequence(peekBus, PC, tailRemainderExpected) ||
+            !MatchesInstructionSequence(peekBus, loopPc, prologueExpected))
+        {
+            return false;
+        }
+
+        ushort value = (ushort)(R[5] & 0xFFFF);
+        uint remainingAfterCurrent = R[7] - 1;
+        uint maximumAdditional = maxCycles <= CyclesPerTail
+            ? 0u
+            : (uint)((maxCycles - CyclesPerTail) / CyclesPerAdditionalWrite);
+        uint writes = Math.Min(remainingAfterCurrent, maximumAdditional);
+        uint address = R[8];
+        for (uint i = 0; i < writes; i++)
+        {
+            if (!writeWord(address, value))
+            {
+                writes = i;
+                break;
+            }
+
+            address += 2;
+        }
+
+        R[7] -= 1 + writes;
+        R[8] += writes * 2;
+        cycles = CyclesPerTail + checked((int)(writes * CyclesPerAdditionalWrite));
+        Cycles += cycles;
+        LastOpcode = 0x89AA;
+        LastOpcodePc = PC + 4;
+        if (R[7] == 0)
+        {
+            SetT(false);
+            PC = loopPc + 0xAA;
+        }
+        else
+        {
+            SetT(true);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesInstructionSequence(ISh2PeekBus peekBus, uint pc, ReadOnlySpan<ushort> expected)
+    {
+        for (int i = 0; i < expected.Length; i++)
+        {
+            if (!peekBus.TryPeekWord(pc + (uint)(i * 2), out ushort opcode) ||
+                opcode != expected[i])
+            {
+                return false;
+            }
         }
 
         return true;
@@ -3294,21 +3495,27 @@ public sealed class Sh2Cpu
         LastOpcodePc = state.LastOpcodePc;
         UnhandledOpcodeCount = state.UnhandledOpcodeCount;
         DelaySlotActive = state.DelaySlotActive;
-        PendingInterruptLevel = state.PendingInterruptLevel;
-        PendingInterruptVectorNumber = state.PendingInterruptVectorNumber;
+        ClearAllPendingInterrupts();
+        if (state.PendingInterruptLevel is >= 1 and <= 15)
+        {
+            _pendingInterruptVectorsByLevel[state.PendingInterruptLevel] = state.PendingInterruptVectorNumber != 0
+                ? state.PendingInterruptVectorNumber
+                : 64 + state.PendingInterruptLevel;
+            RefreshPendingInterruptView();
+        }
     }
 
     private int AcceptPendingInterrupt()
     {
-        if (PendingInterruptLevel == 0 || PendingInterruptLevel <= ((SR >> 4) & 0x0F))
+        int level = FindHighestAcceptablePendingInterruptLevel();
+        if (level == 0)
         {
             return 0;
         }
 
-        int level = PendingInterruptLevel;
-        int vectorNumber = PendingInterruptVectorNumber != 0 ? PendingInterruptVectorNumber : 64 + level;
-        PendingInterruptLevel = 0;
-        PendingInterruptVectorNumber = 0;
+        int vectorNumber = _pendingInterruptVectorsByLevel[level] != 0 ? _pendingInterruptVectorsByLevel[level] : 64 + level;
+        _pendingInterruptVectorsByLevel[level] = 0;
+        RefreshPendingInterruptView();
         uint sp = R[15];
         sp -= 4;
         _bus.WriteLong(sp, SR);
@@ -3321,6 +3528,44 @@ public sealed class Sh2Cpu
         InterruptObserver?.Invoke(new Sh2InterruptTrace(_name, level, vectorNumber, PC, SR, R[15]));
         InterruptAccepted?.Invoke(level, vectorNumber);
         return 5;
+    }
+
+    private void ClearAllPendingInterrupts()
+    {
+        Array.Clear(_pendingInterruptVectorsByLevel);
+        PendingInterruptLevel = 0;
+        PendingInterruptVectorNumber = 0;
+    }
+
+    private void RefreshPendingInterruptView()
+    {
+        for (int level = 15; level >= 1; level--)
+        {
+            int vector = _pendingInterruptVectorsByLevel[level];
+            if (vector != 0)
+            {
+                PendingInterruptLevel = level;
+                PendingInterruptVectorNumber = vector;
+                return;
+            }
+        }
+
+        PendingInterruptLevel = 0;
+        PendingInterruptVectorNumber = 0;
+    }
+
+    private int FindHighestAcceptablePendingInterruptLevel()
+    {
+        int srLevel = (int)((SR >> 4) & 0x0F);
+        for (int level = 15; level > srLevel; level--)
+        {
+            if (_pendingInterruptVectorsByLevel[level] != 0)
+            {
+                return level;
+            }
+        }
+
+        return 0;
     }
 
     private int Execute(ushort opcode, uint opcodePc)

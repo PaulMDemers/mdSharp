@@ -4145,6 +4145,7 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
     Console.WriteLine($"32X slaveRegs: {FormatSh2Registers(device.SlaveSh2)}");
     Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
     Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
+    Console.WriteLine($"32X fastPaths: emptyDescriptorSpan={device.EmptyDescriptorSpanFastPathHits:N0}/{device.EmptyDescriptorSpanFastPathAttempts:N0} emptyDescriptorTail={device.EmptyDescriptorSpanTailFastPathHits:N0}/{device.EmptyDescriptorSpanTailFastPathAttempts:N0}");
     Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
     for (int i = 0; i < words; i += 8)
     {

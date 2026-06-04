@@ -337,6 +337,10 @@ public sealed class ThirtyTwoXDevice
     public int DreqFifoWriteCount => _dreqFifoWriteCount;
     public int DreqDmaWordTransferCount => _dreqDmaWordTransferCount;
     public int DreqFifoCount => _dreqFifo.Count;
+    public int EmptyDescriptorSpanFastPathAttempts { get; private set; }
+    public int EmptyDescriptorSpanFastPathHits { get; private set; }
+    public int EmptyDescriptorSpanTailFastPathAttempts { get; private set; }
+    public int EmptyDescriptorSpanTailFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -738,6 +742,34 @@ public sealed class ThirtyTwoXDevice
             {
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);
                 return fastCycles;
+            }
+
+            if (nextOpcode == 0xD42F || nextOpcode == 0x5046)
+            {
+                EmptyDescriptorSpanFastPathAttempts++;
+                if (cpu.TryFastForwardEmptyDescriptorSpanFillLoop(
+                        cycleBudget,
+                        _sh2WordWriters[cpuIndex],
+                        out fastCycles))
+                {
+                    EmptyDescriptorSpanFastPathHits++;
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+            }
+
+            if (nextOpcode == 0x77FF)
+            {
+                EmptyDescriptorSpanTailFastPathAttempts++;
+                if (cpu.TryFastForwardEmptyDescriptorSpanFillTail(
+                        cycleBudget,
+                        _sh2WordWriters[cpuIndex],
+                        out fastCycles))
+                {
+                    EmptyDescriptorSpanTailFastPathHits++;
+                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
             }
 
             if ((nextOpcode & 0xF000) == 0xD000 &&
@@ -4835,7 +4867,7 @@ public sealed class ThirtyTwoXDevice
         byte value;
         if (address == Sh2WatchdogRegisterStart)
         {
-            value = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2WatchdogRegisterStart - Sh2PeripheralRegisterStart)];
+            value = ReadSh2WatchdogControl(cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "RP8", address, value);
             return value;
         }
@@ -4976,6 +5008,12 @@ public sealed class ThirtyTwoXDevice
         }
 
         TraceSh2MemoryAccess(cpuIndex, "WP16", Sh2WatchdogRegisterStart, value);
+    }
+
+    private byte ReadSh2WatchdogControl(int cpuIndex)
+    {
+        byte value = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2WatchdogRegisterStart - Sh2PeripheralRegisterStart)];
+        return (byte)(value & (Sh2WatchdogOverflow | Sh2WatchdogModeWatchdog | Sh2WatchdogTimerEnable));
     }
 
     private void WriteSh2WatchdogCounter(byte value, int cpuIndex)
@@ -5341,7 +5379,7 @@ public sealed class ThirtyTwoXDevice
     private static int GetSh2DmaInterruptVector(byte[] registers, int channel)
     {
         int offset = channel == 0 ? Sh2DmaVector0Offset : Sh2DmaVector1Offset;
-        return registers[offset] & 0x7F;
+        return registers[offset + 3] & 0x7F;
     }
 
     private static int GetSh2DmaTransferSize(uint channelControl)

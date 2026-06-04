@@ -35,6 +35,7 @@ Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFas
 Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
+Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
@@ -349,11 +350,11 @@ void ThirtyTwoXDeviceShell()
         return (ushort)method.Invoke(target, [address, 0])!;
     }
 
-    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value, int cpuIndex = 0)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
-        method.Invoke(target, [address, value, 0]);
+        method.Invoke(target, [address, value, cpuIndex]);
     }
 
     static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value, int cpuIndex = 0)
@@ -363,11 +364,11 @@ void ThirtyTwoXDeviceShell()
         method.Invoke(target, [address, value, cpuIndex]);
     }
 
-    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value)
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value, int cpuIndex = 0)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
-        method.Invoke(target, [address, value, 0]);
+        method.Invoke(target, [address, value, cpuIndex]);
     }
 
     AssertTrue(device.Sh2HeldInReset, "32X shell should hold SH-2s until adapter control releases them");
@@ -541,6 +542,16 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((byte)0x00, dualWorkerMismatchDevice.Sdram[0x201]);
     AssertEqual((byte)0x00, dualWorkerMismatchDevice.Sdram[0x202]);
     AssertEqual((byte)0x00, dualWorkerMismatchDevice.Sdram[0x203]);
+    ThirtyTwoXDevice dmaVectorDevice = new();
+    dmaVectorDevice.Reset();
+    const uint sh2DmaRegisterStart = 0xFFFF_FF80;
+    const uint sh2IpraDmaPriorityAddress = 0xFFFF_FEE2;
+    WriteSh2ByteForTest(dmaVectorDevice, sh2IpraDmaPriorityAddress, 0x04, cpuIndex: 1);
+    WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x28, 0x0000_0042, cpuIndex: 1);
+    WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x34, 0x0000_0001, cpuIndex: 1);
+    WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x4C, 0x0000_0006, cpuIndex: 1);
+    AssertEqual(4, dmaVectorDevice.SlaveSh2.PendingInterruptLevel);
+    AssertEqual(66, dmaVectorDevice.SlaveSh2.PendingInterruptVectorNumber);
     AssertEqual(0, device.RunSh2(4));
 
     byte[] cycleRom = new byte[0x20];
@@ -2366,6 +2377,177 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
     }
 }
 
+void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
+{
+    const uint LoopPc = 0x0600_28A6;
+    const uint DescriptorBase = 0x0603_F200;
+    const uint Destination = 0x0603_F000;
+    SyntheticSh2Bus bus = new();
+
+    LoadEmptyDescriptorSpanLoop(bus);
+
+    bus.WriteLong(0x0600_2964, DescriptorBase);
+    for (uint descriptor = 0; descriptor < 4; descriptor++)
+    {
+        bus.WriteLong(DescriptorBase + (descriptor * 44u) + 24u, 0xFFFF_FFFF);
+    }
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[7] = 4;
+    cpu.R[8] = Destination;
+    cpu.R[9] = 0x0002_0000;
+    cpu.R[10] = 0x0000_03FF;
+
+    AssertTrue(
+        cpu.TryFastForwardEmptyDescriptorSpanFillLoop(256, bus.TryWriteWord, out int cycles),
+        "empty descriptor span fill should fast-forward");
+    AssertEqual(24, cycles);
+    AssertEqual(LoopPc + 0xAA, cpu.PC);
+    AssertEqual(0u, cpu.R[7]);
+    AssertEqual(Destination + 8, cpu.R[8]);
+    AssertEqual((ushort)0x0200, bus.ReadWord(Destination + 0));
+    AssertEqual((ushort)0x0200, bus.ReadWord(Destination + 2));
+    AssertEqual((ushort)0x0200, bus.ReadWord(Destination + 4));
+    AssertEqual((ushort)0x0200, bus.ReadWord(Destination + 6));
+
+    SyntheticSh2Bus midBus = new();
+    LoadEmptyDescriptorSpanLoop(midBus);
+
+    for (uint descriptor = 0; descriptor < 4; descriptor++)
+    {
+        midBus.WriteLong(DescriptorBase + (descriptor * 44u) + 24u, 0xFFFF_FFFF);
+    }
+
+    Sh2Cpu midCpu = new(midBus, "test");
+    midCpu.Reset(LoopPc + 6);
+    midCpu.R[3] = 3;
+    midCpu.R[4] = DescriptorBase + 44;
+    midCpu.R[7] = 2;
+    midCpu.R[8] = Destination + 0x20;
+    midCpu.R[9] = 0x0002_0000;
+    midCpu.R[10] = 0x0000_03FF;
+    AssertTrue(
+        midCpu.TryFastForwardEmptyDescriptorSpanFillLoop(256, midBus.TryWriteWord, out int midCycles),
+        "empty descriptor span fill should fast-forward from the descriptor scan loop");
+    AssertEqual(6, midCycles);
+    AssertEqual(LoopPc, midCpu.PC);
+    AssertEqual(1u, midCpu.R[7]);
+    AssertEqual(Destination + 0x22, midCpu.R[8]);
+    AssertEqual((ushort)0x0200, midBus.ReadWord(Destination + 0x20));
+
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+    device.ResetSh2(slavePc: LoopPc + 6);
+    LoadEmptyDescriptorSpanLoop(device);
+    WriteSh2LongForTest(device, 0x0600_2964, DescriptorBase, cpuIndex: 1);
+    for (uint descriptor = 0; descriptor < 4; descriptor++)
+    {
+        WriteSh2LongForTest(device, DescriptorBase + (descriptor * 44u) + 24u, 0xFFFF_FFFF, cpuIndex: 1);
+    }
+
+    device.SlaveSh2.R[3] = 3;
+    device.SlaveSh2.R[4] = DescriptorBase + 44;
+    device.SlaveSh2.R[7] = 2;
+    device.SlaveSh2.R[8] = Destination + 0x40;
+    device.SlaveSh2.R[9] = 0x0002_0000;
+    device.SlaveSh2.R[10] = 0x0000_03FF;
+    int deviceCycles = InvokeStepSh2Cpu(device, cpuIndex: 1, cycleBudget: 256);
+    AssertEqual(6, deviceCycles);
+    AssertEqual(LoopPc, device.SlaveSh2.PC);
+    AssertEqual(1u, device.SlaveSh2.R[7]);
+    AssertEqual((byte)0x02, device.Sdram[0xF040]);
+    AssertEqual((byte)0x00, device.Sdram[0xF041]);
+    int burstCycles = InvokeStepSh2Cpu(device, cpuIndex: 1, cycleBudget: 256);
+    AssertEqual(6, burstCycles);
+    AssertEqual(LoopPc + 0xAA, device.SlaveSh2.PC);
+    AssertEqual(0u, device.SlaveSh2.R[7]);
+    AssertEqual((byte)0x02, device.Sdram[0xF042]);
+    AssertEqual((byte)0x00, device.Sdram[0xF043]);
+
+    ThirtyTwoXDevice tailDevice = new();
+    tailDevice.Reset();
+    tailDevice.ResetSh2(slavePc: LoopPc + 0xA4);
+    LoadEmptyDescriptorSpanLoop(tailDevice);
+    tailDevice.SlaveSh2.R[5] = 0x0000_0200;
+    tailDevice.SlaveSh2.R[7] = 4;
+    tailDevice.SlaveSh2.R[8] = Destination + 0x80;
+    int tailCycles = InvokeStepSh2Cpu(tailDevice, cpuIndex: 1, cycleBudget: 256);
+    AssertEqual(22, tailCycles);
+    AssertEqual(LoopPc + 0xAA, tailDevice.SlaveSh2.PC);
+    AssertEqual(0u, tailDevice.SlaveSh2.R[7]);
+    AssertEqual(Destination + 0x86, tailDevice.SlaveSh2.R[8]);
+    AssertEqual((byte)0x02, tailDevice.Sdram[0xF080]);
+    AssertEqual((byte)0x00, tailDevice.Sdram[0xF081]);
+    AssertEqual((byte)0x02, tailDevice.Sdram[0xF084]);
+    AssertEqual((byte)0x00, tailDevice.Sdram[0xF085]);
+
+    static void LoadEmptyDescriptorSpanLoop(SyntheticSh2Bus target)
+    {
+        target.WriteInstructionWord(LoopPc + 0x00, 0xD42F);
+        target.WriteInstructionWord(LoopPc + 0x02, 0xE304);
+        target.WriteInstructionWord(LoopPc + 0x04, 0x6593);
+        target.WriteInstructionWord(LoopPc + 0x06, 0x5046);
+        target.WriteInstructionWord(LoopPc + 0x08, 0x88FF);
+        target.WriteInstructionWord(LoopPc + 0x0A, 0x893B);
+        ushort[] tail =
+        [
+            0x4310, 0x8FBE, 0x742C, 0x4519, 0x4619, 0x655F,
+            0x666F, 0x4515, 0x8901, 0xA003, 0xE501, 0x35A7,
+            0x8B00, 0x65A3, 0x2851, 0x7802, 0x77FF, 0x4715,
+            0x89AA
+        ];
+
+        for (int i = 0; i < tail.Length; i++)
+        {
+            target.WriteInstructionWord(LoopPc + 0x84 + (uint)(i * 2), tail[i]);
+        }
+    }
+
+    static void LoadEmptyDescriptorSpanLoop(ThirtyTwoXDevice target)
+    {
+        ushort[] prologue = [0xD42F, 0xE304, 0x6593, 0x5046, 0x88FF, 0x893B];
+        for (int i = 0; i < prologue.Length; i++)
+        {
+            WriteSh2WordForTest(target, LoopPc + (uint)(i * 2), prologue[i], cpuIndex: 1);
+        }
+
+        ushort[] tail =
+        [
+            0x4310, 0x8FBE, 0x742C, 0x4519, 0x4619, 0x655F,
+            0x666F, 0x4515, 0x8901, 0xA003, 0xE501, 0x35A7,
+            0x8B00, 0x65A3, 0x2851, 0x7802, 0x77FF, 0x4715,
+            0x89AA
+        ];
+
+        for (int i = 0; i < tail.Length; i++)
+        {
+            WriteSh2WordForTest(target, LoopPc + 0x84 + (uint)(i * 2), tail[i], cpuIndex: 1);
+        }
+    }
+
+    static void WriteSh2WordForTest(ThirtyTwoXDevice target, uint address, ushort value, int cpuIndex)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Word helper was not found");
+        method.Invoke(target, [address, value, cpuIndex]);
+    }
+
+    static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint value, int cpuIndex)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
+        method.Invoke(target, [address, value, cpuIndex]);
+    }
+
+    static int InvokeStepSh2Cpu(ThirtyTwoXDevice target, int cpuIndex, int cycleBudget)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("StepSh2Cpu", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, binder: null, types: [typeof(int), typeof(int)], modifiers: null)
+            ?? throw new InvalidOperationException("StepSh2Cpu helper was not found");
+        return (int)method.Invoke(target, [cpuIndex, cycleBudget])!;
+    }
+}
+
 void ThirtyTwoXSh2FrameBufferWordFillLoopFastForward()
 {
     byte[] rom = new byte[0x80];
@@ -2885,7 +3067,7 @@ void ThirtyTwoXSh2DmaTransferSizeBits()
     ThirtyTwoXDevice interruptDevice = new(rom);
     interruptDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
     WriteSh2ByteForTest(interruptDevice, 0xFFFF_FEE2, 0x07); // DMAC priority = 7 in IPRA bits 11-8.
-    WriteSh2LongForTest(interruptDevice, 0xFFFF_FFA0, 0x5500_0000); // VCRDMA0 vector.
+    WriteSh2LongForTest(interruptDevice, 0xFFFF_FFA0, 0x0000_0055); // VCRDMA0 vector.
     WriteSh2LongForTest(interruptDevice, 0xFFFF_FF80, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 0xC0);
     WriteSh2LongForTest(interruptDevice, 0xFFFF_FF84, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x120);
     WriteSh2LongForTest(interruptDevice, 0xFFFF_FF88, 1);
@@ -3606,19 +3788,19 @@ void ThirtyTwoXSh2WatchdogKeyedWrites()
 
     ThirtyTwoXDevice device = new();
     device.Reset();
-    AssertEqual((byte)0x18, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE80));
     AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE81));
     AssertEqual((byte)0x1F, ReadSh2ByteForTest(device, 0xFFFF_FE83));
 
     WriteSh2WordForTest(device, 0xFFFF_FE80, 0x5AFF);
-    AssertEqual((byte)0x18, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE80));
     AssertEqual((byte)0xFF, ReadSh2ByteForTest(device, 0xFFFF_FE81));
 
     WriteSh2WordForTest(device, 0xFFFF_FE80, 0xA538);
-    AssertEqual((byte)0x38, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x20, ReadSh2ByteForTest(device, 0xFFFF_FE80));
 
     WriteSh2WordForTest(device, 0xFFFF_FE80, 0x1234);
-    AssertEqual((byte)0x38, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0x20, ReadSh2ByteForTest(device, 0xFFFF_FE80));
     AssertEqual((byte)0xFF, ReadSh2ByteForTest(device, 0xFFFF_FE81));
 }
 
@@ -3662,7 +3844,7 @@ void ThirtyTwoXSh2WatchdogIntervalInterrupt()
     InvokePrivate(device, "AdvanceSh2Watchdog", 0, 2);
     InvokePrivate(device, "RequestPendingInterrupts");
 
-    AssertEqual((byte)0xB8, ReadSh2ByteForTest(device, 0xFFFF_FE80));
+    AssertEqual((byte)0xA0, ReadSh2ByteForTest(device, 0xFFFF_FE80));
     AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0xFFFF_FE81));
     AssertEqual(15, device.MasterSh2.PendingInterruptLevel);
     AssertEqual(0x40, device.MasterSh2.PendingInterruptVectorNumber);
