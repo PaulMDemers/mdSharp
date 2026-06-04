@@ -2277,7 +2277,7 @@ void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
     cpu.Reset(LoopPc);
     cpu.R[15] = 0x0603_F000;
     AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out int cycles), "SDRAM flag tasklet dispatcher should fast-forward while the tasklet reports idle");
-    AssertEqual(4096, cycles);
+    AssertEqual(8192, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0603_F000u, cpu.R[15]);
     AssertEqual(0x0000_0080u, cpu.R[1]);
@@ -2393,7 +2393,7 @@ void ThirtyTwoXSh2GbrByteZeroBtPollLoopFastForward()
     cpu.Reset(LoopPc + 2);
     SetSh2Property(cpu, nameof(Sh2Cpu.GBR), 0x2000_4000u);
     AssertTrue(cpu.TryFastForwardGbrByteZeroTstBtPollLoop(1024, displacement: 0x20, out int cycles), "GBR byte zero BT poll should fast-forward from the TST instruction");
-    AssertEqual(256, cycles);
+    AssertEqual(1024, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0u, cpu.R[0]);
     AssertEqual(1u, cpu.SR & 1);
@@ -2420,7 +2420,7 @@ void ThirtyTwoXSh2LiteralByteDisplacementTstRegisterBtPollLoopFastForward()
     Sh2Cpu cpu = new(bus, "test");
     cpu.Reset(SetupPc);
     AssertTrue(cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(2048, out int cycles), "literal byte displacement TST register BT poll should fast-forward from setup");
-    AssertEqual(512, cycles);
+    AssertEqual(2048, cycles);
     AssertEqual(LoadPc, cpu.PC);
     AssertEqual(BaseAddress, cpu.R[14]);
     AssertEqual(0x80u, cpu.R[1]);

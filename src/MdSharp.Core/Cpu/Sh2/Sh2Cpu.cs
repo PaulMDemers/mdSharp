@@ -2808,7 +2808,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardGbrBytePairEqualInterruptIdleLoop(int maxCycles, out int cycles)
     {
-        const int MaxBurstCycles = 4096;
+        const int MaxBurstCycles = 8192;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -2870,7 +2870,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardGbrByteZeroTstBtPollLoop(int maxCycles, byte displacement, out int cycles)
     {
-        const int MaxBurstCycles = 256;
+        const int MaxBurstCycles = 1024;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -2926,7 +2926,7 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(int maxCycles, out int cycles)
     {
-        const int MaxBurstCycles = 512;
+        const int MaxBurstCycles = 4096;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
