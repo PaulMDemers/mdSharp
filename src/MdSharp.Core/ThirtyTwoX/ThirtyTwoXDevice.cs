@@ -816,14 +816,14 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (((nextOpcode & 0xF000) == 0xD000 || nextOpcode == 0x60E2) &&
+            if (IsLikelySdramFlagTaskletDispatcher(cpuIndex, cpu.PC, nextOpcode) &&
                 TryFastForwardSdramFlagTaskletDispatcher(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
             }
 
             if (cpuIndex == 1 &&
-                ((nextOpcode & 0xF000) == 0xD000 || nextOpcode == 0x4F22 || nextOpcode == 0x400B || (nextOpcode & 0xF000) == 0xA000) &&
+                IsLikelyGbrBytePairInterruptIdle(cpuIndex, cpu.PC, nextOpcode) &&
                 TryFastForwardGbrBytePairInterruptIdle(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
@@ -1056,6 +1056,54 @@ public sealed class ThirtyTwoXDevice
 
         AdvanceSh2Watchdog(cpuIndex, (int)Math.Min(delta, int.MaxValue));
         return cycles;
+    }
+
+    private bool IsLikelySdramFlagTaskletDispatcher(int cpuIndex, uint pc, ushort opcode)
+    {
+        if ((opcode & 0xF000) == 0xD000)
+        {
+            return TryPeekSh2Word(pc + 2, cpuIndex, out ushort loadOpcode) && loadOpcode == 0x60E2;
+        }
+
+        return opcode == 0x60E2 &&
+            pc >= 2 &&
+            TryPeekSh2Word(pc - 2, cpuIndex, out ushort literalOpcode) &&
+            (literalOpcode & 0xF000) == 0xD000;
+    }
+
+    private bool IsLikelyGbrBytePairInterruptIdle(int cpuIndex, uint pc, ushort opcode)
+    {
+        if ((opcode & 0xF000) == 0xD000)
+        {
+            return TryPeekSh2Word(pc + 2, cpuIndex, out ushort pushPrOpcode) && pushPrOpcode == 0x4F22;
+        }
+
+        if (opcode == 0x4F22)
+        {
+            return pc >= 2 &&
+                TryPeekSh2Word(pc - 2, cpuIndex, out ushort literalOpcode) &&
+                (literalOpcode & 0xF000) == 0xD000 &&
+                TryPeekSh2Word(pc + 2, cpuIndex, out ushort jsrOpcode) &&
+                jsrOpcode == 0x400B;
+        }
+
+        if (opcode == 0x400B)
+        {
+            return pc >= 4 &&
+                TryPeekSh2Word(pc - 4, cpuIndex, out ushort literalOpcode) &&
+                (literalOpcode & 0xF000) == 0xD000 &&
+                TryPeekSh2Word(pc - 2, cpuIndex, out ushort pushPrOpcode) &&
+                pushPrOpcode == 0x4F22;
+        }
+
+        return (opcode & 0xF000) == 0xA000 &&
+            pc >= 8 &&
+            TryPeekSh2Word(pc - 8, cpuIndex, out ushort literalAtLoopStart) &&
+            (literalAtLoopStart & 0xF000) == 0xD000 &&
+            TryPeekSh2Word(pc - 6, cpuIndex, out ushort pushPrAtLoopStart) &&
+            pushPrAtLoopStart == 0x4F22 &&
+            TryPeekSh2Word(pc + 2, cpuIndex, out ushort branchDelayOpcode) &&
+            branchDelayOpcode == 0x0009;
     }
 
     private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
