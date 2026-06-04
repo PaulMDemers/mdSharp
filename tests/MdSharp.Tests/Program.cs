@@ -3189,6 +3189,12 @@ void ThirtyTwoXCommunicationByteReadWriteEdge()
     AssertEqual((byte)0x44, oddLaneDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     oddLaneDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x00);
     AssertEqual((ushort)0x0000, oddLaneDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    ThirtyTwoXDevice pairedAckDevice = new();
+    pairedAckDevice.Reset();
+    WriteSh2ByteForTest(pairedAckDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2), 0x04);
+    WriteSh2ByteForTest(pairedAckDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3), 0x04);
+    AssertEqual((byte)0x04, pairedAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(pairedAckDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3)));
 
     ThirtyTwoXDevice commandAckDevice = new();
     commandAckDevice.Reset();

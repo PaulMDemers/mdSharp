@@ -5482,6 +5482,15 @@ public sealed class ThirtyTwoXDevice
         int oddRegisterIndex = registerIndex + 1;
         byte even = _systemRegisters[registerIndex];
         byte odd = _systemRegisters[oddRegisterIndex];
+        if (index == 2 && even != 0 && even == odd)
+        {
+            value = even;
+            _systemRegisters[oddRegisterIndex] = 0;
+            _m68kCommunicationStaleValid[index + 1] = false;
+            _m68kCommunicationStaleWordValid[index >> 1] = false;
+            return true;
+        }
+
         if (even != 0 || odd == 0)
         {
             value = 0;
