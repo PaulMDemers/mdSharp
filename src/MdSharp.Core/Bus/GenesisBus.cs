@@ -1361,7 +1361,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
     private void SyncThirtyTwoXSystemWriteBeforeAccess(uint address)
     {
-        if (_thirtyTwoX is null || !IsThirtyTwoXCommunicationAddress(address))
+        if (_thirtyTwoX is null ||
+            (!IsThirtyTwoXCommunicationAddress(address) && !IsThirtyTwoXAdapterControlAddress(address)))
         {
             return;
         }
@@ -1383,7 +1384,15 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
     private static bool IsThirtyTwoXSystemHandshakeAddress(uint address)
     {
-        return IsThirtyTwoXCommunicationAddress(address) || IsThirtyTwoXInterruptControlAddress(address);
+        return IsThirtyTwoXCommunicationAddress(address) ||
+            IsThirtyTwoXInterruptControlAddress(address) ||
+            IsThirtyTwoXAdapterControlAddress(address);
+    }
+
+    private static bool IsThirtyTwoXAdapterControlAddress(uint address)
+    {
+        const uint adapterControlStart = ThirtyTwoXHardwareProfile.M68kSystemRegisterStart + ThirtyTwoXHardwareProfile.AdapterControlOffset;
+        return address is >= adapterControlStart and < adapterControlStart + 2;
     }
 
     private static bool IsThirtyTwoXCommunicationAddress(uint address)

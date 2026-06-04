@@ -1831,6 +1831,25 @@ void ThirtyTwoXSh2DtBfDelayLoopFastForward()
     AssertTrue(completed <= 4, "completed DT/BF fast-forward should collapse the remaining loop");
     AssertEqual(0u, device.MasterSh2.R[0]);
     AssertTrue(device.MasterSh2.Halted, "SH-2 should execute the instruction after the collapsed delay loop");
+
+    ThirtyTwoXDevice branchEntryDevice = new(rom);
+    branchEntryDevice.Reset();
+    branchEntryDevice.ResetSh2(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
+    branchEntryDevice.RestoreState(branchEntryDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    branchEntryDevice.MasterSh2.R[0] = 32;
+    branchEntryDevice.RunSh2Cycles(1);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 2, branchEntryDevice.MasterSh2.PC);
+    int branchEntryPartial = branchEntryDevice.RunSh2Cycles(21);
+    AssertTrue(branchEntryPartial <= 2, "branch-entry DT/BF loop should collapse after landing on BF");
+    AssertEqual(22u, branchEntryDevice.MasterSh2.R[0]);
+    AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, branchEntryDevice.MasterSh2.PC);
 }
 
 void ThirtyTwoXSh2NopDtBfDelayLoopFastForward()
@@ -3622,6 +3641,20 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     });
     AssertEqual((ushort)0xD746, publishedChecksumDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
 
+    ThirtyTwoXDevice sixtyEightUpDevice = new();
+    sixtyEightUpDevice.Reset();
+    sixtyEightUpDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x3638);
+    sixtyEightUpDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14, 0x5550);
+    sixtyEightUpDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0000);
+    sixtyEightUpDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14, 0x0000);
+    AssertEqual((ushort)0x4F4B, sixtyEightUpDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14));
+
+    ThirtyTwoXDevice sixtyEightUpGuardDevice = new();
+    sixtyEightUpGuardDevice.Reset();
+    sixtyEightUpGuardDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0000);
+    sixtyEightUpGuardDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14, 0x0000);
+    AssertEqual((ushort)0x0000, sixtyEightUpGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14));
+
     byte[] maskRom = new byte[0x100];
     WriteWord(maskRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
     WriteWord(maskRom, 0x02, 0xE10F); // MOV #$0F,R1
@@ -3773,6 +3806,18 @@ void ThirtyTwoXCommunicationByteReadWriteEdge()
 
     AssertEqual((byte)0x00, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     AssertEqual((byte)0x01, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1));
+
+    ThirtyTwoXDevice highMailboxDevice = new();
+    highMailboxDevice.Reset();
+    WriteSh2WordForTest(
+        highMailboxDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        0x4F4B,
+        cpuIndex: 1);
+    AssertEqual((ushort)0x4F4B, ReadSh2WordForTest(
+        highMailboxDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual((ushort)0x4F4B, highMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14));
 }
 
 void ThirtyTwoXM68kSystemHandshakesSyncSh2()

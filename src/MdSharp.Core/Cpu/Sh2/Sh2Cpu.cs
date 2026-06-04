@@ -130,14 +130,30 @@ public sealed class Sh2Cpu
         }
 
         uint loopPc = PC;
+        bool startedAtBranch = false;
         if (!peekBus.TryPeekWord(loopPc, out ushort dtOpcode))
         {
-            return false;
+            if (loopPc < 2 ||
+                !peekBus.TryPeekWord(loopPc - 2, out dtOpcode))
+            {
+                return false;
+            }
+
+            loopPc -= 2;
+            startedAtBranch = true;
         }
 
         if ((dtOpcode & 0xF0FF) != 0x4010)
         {
-            return false;
+            if (loopPc < 2 ||
+                !peekBus.TryPeekWord(loopPc - 2, out dtOpcode) ||
+                (dtOpcode & 0xF0FF) != 0x4010)
+            {
+                return false;
+            }
+
+            loopPc -= 2;
+            startedAtBranch = true;
         }
 
         if (!peekBus.TryPeekWord(loopPc + 2, out ushort branchOpcode))
@@ -157,9 +173,25 @@ public sealed class Sh2Cpu
             return false;
         }
 
+        if (startedAtBranch && PC != loopPc + 2)
+        {
+            return false;
+        }
+
+        if (startedAtBranch && (SR & TBit) != 0)
+        {
+            return false;
+        }
+
         int register = (dtOpcode >> 8) & 0x0F;
         uint count = R[register];
-        uint maxIterations = (uint)(maxCycles / 2);
+        int entryCycles = startedAtBranch ? 1 : 0;
+        if (maxCycles <= entryCycles)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)((maxCycles - entryCycles) / 2);
         uint iterations = count == 0 ? maxIterations : Math.Min(count, maxIterations);
         if (iterations == 0)
         {
@@ -167,7 +199,7 @@ public sealed class Sh2Cpu
         }
 
         R[register] = count - iterations;
-        cycles = checked((int)(iterations * 2));
+        cycles = checked(entryCycles + (int)(iterations * 2));
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 2;

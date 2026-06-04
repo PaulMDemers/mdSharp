@@ -278,6 +278,7 @@ public sealed class ThirtyTwoXDevice
     private byte _bootRomPostStartSignatureReadMask;
     private byte _bootRomPostStartHostClearProtectMask;
     private bool _bootRomChecksumPublished;
+    private bool _bootRomSixtyEightUpPending;
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
 
@@ -462,6 +463,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomPostStartSignatureReadMask = 0;
         _bootRomPostStartHostClearProtectMask = 0;
         _bootRomChecksumPublished = false;
+        _bootRomSixtyEightUpPending = false;
         _adapterEnabled = false;
         _sh2ResetEnabled = true;
         _sh2ResetReleased = false;
@@ -1442,9 +1444,10 @@ public sealed class ThirtyTwoXDevice
     public void WriteSystemRegisterWord(ushort offset, ushort value)
     {
         int index = offset & (SystemRegisterBytes - 1);
-        bool hadBootRomSignature = HasPendingBootRomSignatureWrite((ushort)(index & ~1));
-        CancelBootRomHandshakeOnHostDataWrite((ushort)(index & ~1), value);
-        RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
+        ushort aligned = (ushort)(index & ~1);
+        bool hadBootRomSignature = HasPendingBootRomSignatureWrite(aligned);
+        CancelBootRomHandshakeOnHostDataWrite(aligned, value);
+        RetireObservedPostStartSignatureOnHostWrite(aligned);
         byte high = (byte)(value >> 8);
         byte low = (byte)value;
         if (!ConsumePostStartHostClearProtection((ushort)index, high))
@@ -1459,13 +1462,15 @@ public sealed class ThirtyTwoXDevice
 
         MarkM68kCommunicationHostByte((ushort)index, high);
         MarkM68kCommunicationHostByte((ushort)(index + 1), low);
+        TrackBootRomSixtyEightUpHostWrite(aligned, value);
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace("M68K", (ushort)index, (byte)(value >> 8)));
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace("M68K", (ushort)(index + 1), (byte)value));
         TraceSystemRegisterAccess("M68K", "W16", (ushort)index, value);
-        ApplySystemRegisterSideEffects((ushort)(index & ~1), allowAdapterControl: true);
+        ApplySystemRegisterSideEffects(aligned, allowAdapterControl: true);
         ReleaseBootRomLaunchOnHostCommand();
-        UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
-        PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
+        UpdateBootRomHandshakeAfterM68kWrite(aligned, hadBootRomSignature);
+        PublishBootRomChecksumAfterHostClear(aligned);
+        PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
     }
 
     public byte ReadVdpRegisterByte(ushort offset)
@@ -1883,6 +1888,7 @@ public sealed class ThirtyTwoXDevice
             _bootRomPostStartSignatureReadMask,
             _bootRomPostStartHostClearProtectMask,
             _bootRomChecksumPublished,
+            _bootRomSixtyEightUpPending,
             MasterSh2.CaptureState(),
             SlaveSh2.CaptureState());
     }
@@ -1993,6 +1999,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomPostStartSignatureReadMask = state.BootRomPostStartSignatureReadMask;
         _bootRomPostStartHostClearProtectMask = state.BootRomPostStartHostClearProtectMask;
         _bootRomChecksumPublished = state.BootRomChecksumPublished;
+        _bootRomSixtyEightUpPending = state.BootRomSixtyEightUpPending;
         MasterSh2.RestoreState(state.MasterSh2);
         SlaveSh2.RestoreState(state.SlaveSh2);
     }
@@ -3021,6 +3028,7 @@ public sealed class ThirtyTwoXDevice
             _bootRomPostStartSignatureHiddenFromSh2 = false;
             _bootRomPostStartSignatureReadMask = 0;
             _bootRomPostStartHostClearProtectMask = 0;
+            _bootRomSixtyEightUpPending = false;
         }
     }
 
@@ -3388,6 +3396,49 @@ public sealed class ThirtyTwoXDevice
         _m68kCommunicationStaleValid[8] = false;
         _m68kCommunicationStaleValid[9] = false;
         _bootRomChecksumPublished = true;
+    }
+
+    private void TrackBootRomSixtyEightUpHostWrite(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (_bootRomHandshakePending ||
+            (offset != comm + 12 && offset != comm + 14))
+        {
+            return;
+        }
+
+        ushort highCommand = offset == comm + 12 ? value : ReadBigEndianWord(_systemRegisters, comm + 12);
+        ushort lowCommand = offset == comm + 14 ? value : ReadBigEndianWord(_systemRegisters, comm + 14);
+        if (highCommand == 0x3638 &&
+            lowCommand == 0x5550)
+        {
+            _bootRomSixtyEightUpPending = true;
+        }
+    }
+
+    private void PublishBootRomSixtyEightUpReadyAfterHostClear(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (!_bootRomSixtyEightUpPending ||
+            offset != comm + 14 ||
+            value != 0 ||
+            _systemRegisters[comm + 12] != 0 ||
+            _systemRegisters[comm + 13] != 0 ||
+            _systemRegisters[comm + 14] != 0 ||
+            _systemRegisters[comm + 15] != 0)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 14, 0x4F4B);
+        _m68kCommunicationStaleWordValid[7] = false;
+        _m68kCommunicationStaleValid[14] = false;
+        _m68kCommunicationStaleValid[15] = false;
+        _m68kCommunicationPendingHostBytes[14] = false;
+        _m68kCommunicationPendingHostBytes[15] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[14] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[15] = false;
+        _bootRomSixtyEightUpPending = false;
     }
 
     private void UpdateBootRomHandshakeAfterM68kWrite(ushort offset, bool hadBootRomSignature)
@@ -6395,6 +6446,7 @@ public sealed class ThirtyTwoXDevice
         byte BootRomPostStartSignatureReadMask,
         byte BootRomPostStartHostClearProtectMask,
         bool BootRomChecksumPublished,
+        bool BootRomSixtyEightUpPending,
         Sh2Cpu.Sh2State MasterSh2,
         Sh2Cpu.Sh2State SlaveSh2);
 
