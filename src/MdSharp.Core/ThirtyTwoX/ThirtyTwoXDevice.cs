@@ -799,6 +799,13 @@ public sealed class ThirtyTwoXDevice
             }
 
             if ((nextOpcode & 0xFC00) == 0xC400 &&
+                cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrCmpEqBfBraPollLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);

@@ -32,6 +32,7 @@ Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLo
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 GBR register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward);
 Run("32X SH-2 padded GBR CMP/EQ BF/BRA poll loop fast-forward", ThirtyTwoXSh2PaddedGbrCmpEqBfBraPollLoopFastForward);
 Run("32X SH-2 linked-list insert fast-forward matches interpreter", ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter);
 Run("32X SH-2 DMA transfer size bits", ThirtyTwoXSh2DmaTransferSizeBits);
@@ -2258,6 +2259,30 @@ void ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward()
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     device.RunSh2Cycles(80);
     AssertTrue(device.MasterSh2.Halted, "zero poll value should let the SH-2 leave the loop and sleep");
+}
+
+void ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_01A4;
+    const uint Gbr = 0x2000_4000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC510); // MOV.W @(32,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x3100); // CMP/EQ R0,R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x8BFC); // BF loop
+    bus.WriteWord(Gbr + 32, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), Gbr);
+    cpu.R[1] = 0x0000_534D;
+    AssertTrue(cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(500, out int cycles), "GBR register compare poll should fast-forward while values differ");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteWord(Gbr + 32, 0x534D);
+    AssertTrue(!cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(500, out _), "matching GBR register compare poll should fall back and leave normally");
 }
 
 void ThirtyTwoXSh2PaddedGbrCmpEqBfBraPollLoopFastForward()

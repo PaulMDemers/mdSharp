@@ -1640,6 +1640,100 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrRegisterCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort compareOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((branchOpcode & 0xFF00) != 0x8B00 ||
+            (compareOpcode & 0xF00F) != 0x3000)
+        {
+            return false;
+        }
+
+        int compareN = (compareOpcode >> 8) & 0x0F;
+        int compareM = (compareOpcode >> 4) & 0x0F;
+        if (compareM != 0 && compareN != 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 8 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint value;
+        if ((loadOpcode & 0xFF00) == 0xC400)
+        {
+            uint address = GBR + (uint)(loadOpcode & 0xFF);
+            if (!peekBus.TryPeekByte(address, out byte byteValue))
+            {
+                return false;
+            }
+
+            value = (uint)(sbyte)byteValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC500)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 2);
+            if (!peekBus.TryPeekWord(address, out ushort wordValue))
+            {
+                return false;
+            }
+
+            value = (uint)(short)wordValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC600)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 4);
+            if (!peekBus.TryPeekWord(address, out ushort high) ||
+                !peekBus.TryPeekWord(address + 2, out ushort low))
+            {
+                return false;
+            }
+
+            value = (uint)((high << 16) | low);
+        }
+        else
+        {
+            return false;
+        }
+
+        R[0] = value;
+        bool equal = R[compareN] == R[compareM];
+        if (equal)
+        {
+            return false;
+        }
+
+        SetT(false);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardGbrCmpEqBfBraPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
