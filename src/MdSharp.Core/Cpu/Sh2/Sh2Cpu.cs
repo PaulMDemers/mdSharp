@@ -2924,6 +2924,79 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 512;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loadPc = PC;
+        if (!TryReadLiteralByteDisplacementTstRegisterBtPollLoop(peekBus, loadPc, out ushort baseLiteralOpcode, out ushort maskLiteralOpcode, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 ||
+                !TryReadLiteralByteDisplacementTstRegisterBtPollLoop(peekBus, PC - 2, out baseLiteralOpcode, out maskLiteralOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+            {
+                if (PC < 4 ||
+                    !TryReadLiteralByteDisplacementTstRegisterBtPollLoop(peekBus, PC - 4, out baseLiteralOpcode, out maskLiteralOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+                {
+                    if (PC < 6 ||
+                        !TryReadLiteralByteDisplacementTstRegisterBtPollLoop(peekBus, PC - 6, out baseLiteralOpcode, out maskLiteralOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+                    {
+                        if (PC < 8 ||
+                            !TryReadLiteralByteDisplacementTstRegisterBtPollLoop(peekBus, PC - 8, out baseLiteralOpcode, out maskLiteralOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+                        {
+                            return false;
+                        }
+
+                        loadPc = PC - 8;
+                    }
+                    else
+                    {
+                        loadPc = PC - 6;
+                    }
+                }
+                else
+                {
+                    loadPc = PC - 4;
+                }
+            }
+            else
+            {
+                loadPc = PC - 2;
+            }
+        }
+
+        int baseRegister = (loadOpcode >> 4) & 0x0F;
+        int maskRegister = (testOpcode >> 4) & 0x0F;
+        uint baseAddress = ReadPcRelativeLongLiteral(peekBus, loadPc - 4, baseLiteralOpcode);
+        uint mask = ReadPcRelativeLongLiteral(peekBus, loadPc - 2, maskLiteralOpcode);
+        uint address = baseAddress + (uint)(loadOpcode & 0x0F);
+        if (!peekBus.TryPeekByte(address, out byte byteValue) ||
+            (((uint)(sbyte)byteValue) & mask) != 0)
+        {
+            return false;
+        }
+
+        R[baseRegister] = baseAddress;
+        R[maskRegister] = mask;
+        R[0] = SignExtend8(byteValue);
+        SetT(true);
+        PC = loadPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loadPc + 4;
+        return true;
+    }
+
     private static bool TryReadSdramFlagTaskletDispatcher(
         ISh2PeekBus peekBus,
         uint loopPc,
@@ -3039,6 +3112,54 @@ public sealed class Sh2Cpu
         }
 
         return BranchByteTarget(loopPc + 4, branchOpcode) == loopPc;
+    }
+
+    private static bool TryReadLiteralByteDisplacementTstRegisterBtPollLoop(
+        ISh2PeekBus peekBus,
+        uint loadPc,
+        out ushort baseLiteralOpcode,
+        out ushort maskLiteralOpcode,
+        out ushort loadOpcode,
+        out ushort testOpcode,
+        out ushort branchOpcode)
+    {
+        baseLiteralOpcode = 0;
+        maskLiteralOpcode = 0;
+        loadOpcode = 0;
+        testOpcode = 0;
+        branchOpcode = 0;
+        if (loadPc < 4 ||
+            !peekBus.TryPeekWord(loadPc - 4, out baseLiteralOpcode) ||
+            !peekBus.TryPeekWord(loadPc - 2, out maskLiteralOpcode) ||
+            !peekBus.TryPeekWord(loadPc, out loadOpcode) ||
+            !peekBus.TryPeekWord(loadPc + 2, out testOpcode) ||
+            !peekBus.TryPeekWord(loadPc + 4, out branchOpcode))
+        {
+            return false;
+        }
+
+        if ((baseLiteralOpcode & 0xF000) != 0xD000 ||
+            (maskLiteralOpcode & 0xF000) != 0xD000 ||
+            (loadOpcode & 0xFF00) < 0x8400 ||
+            (loadOpcode & 0xFF00) > 0x84F0 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        int baseRegister = (loadOpcode >> 4) & 0x0F;
+        int maskRegister = (testOpcode >> 4) & 0x0F;
+        if (((baseLiteralOpcode >> 8) & 0x0F) != baseRegister ||
+            ((maskLiteralOpcode >> 8) & 0x0F) != maskRegister ||
+            (testOpcode >> 8 & 0x0F) != 0 ||
+            maskRegister == 0 ||
+            BranchByteTarget(loadPc + 4, branchOpcode) != loadPc)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool TryReadReadySdramFlagTasklet(

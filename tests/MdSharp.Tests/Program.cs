@@ -36,6 +36,7 @@ Run("32X SH-2 SDRAM flag tasklet dispatcher loop fast-forward", ThirtyTwoXSh2Sdr
 Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
 Run("32X SH-2 GBR byte-pair interrupt idle loop fast-forward", ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward);
 Run("32X SH-2 GBR byte zero BT poll loop fast-forward", ThirtyTwoXSh2GbrByteZeroBtPollLoopFastForward);
+Run("32X SH-2 literal byte displacement TST register BT poll loop fast-forward", ThirtyTwoXSh2LiteralByteDisplacementTstRegisterBtPollLoopFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
@@ -2399,6 +2400,39 @@ void ThirtyTwoXSh2GbrByteZeroBtPollLoopFastForward()
 
     bus.WriteByte(0x2000_4020, 0x80);
     AssertTrue(!cpu.TryFastForwardGbrByteZeroTstBtPollLoop(1024, displacement: 0x20, out _), "nonzero GBR byte should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2LiteralByteDisplacementTstRegisterBtPollLoopFastForward()
+{
+    const uint SetupPc = 0x0600_12F0;
+    const uint LoadPc = SetupPc + 4;
+    const uint BaseAddress = 0x2000_4100;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(SetupPc + 0, 0xDE04); // MOV.L base literal,R14
+    bus.WriteInstructionWord(SetupPc + 2, 0xD103); // MOV.L mask literal,R1
+    bus.WriteInstructionWord(SetupPc + 4, 0x84EA); // MOV.B @(10,R14),R0
+    bus.WriteInstructionWord(SetupPc + 6, 0x2018); // TST R1,R0
+    bus.WriteInstructionWord(SetupPc + 8, 0x89FC); // BT load
+    bus.WriteLong(0x0600_1300, 0x0000_0080);
+    bus.WriteLong(0x0600_1304, BaseAddress);
+    bus.WriteByte(BaseAddress + 10, 0x00);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(SetupPc);
+    AssertTrue(cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(2048, out int cycles), "literal byte displacement TST register BT poll should fast-forward from setup");
+    AssertEqual(512, cycles);
+    AssertEqual(LoadPc, cpu.PC);
+    AssertEqual(BaseAddress, cpu.R[14]);
+    AssertEqual(0x80u, cpu.R[1]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoadPc + 4);
+    AssertTrue(cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(2048, out _), "literal byte displacement TST register BT poll should fast-forward from the branch instruction");
+    AssertEqual(LoadPc, cpu.PC);
+
+    bus.WriteByte(BaseAddress + 10, 0x80);
+    AssertTrue(!cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(2048, out _), "set mask bit should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2MovWordSwapCopyLoopFastForward()

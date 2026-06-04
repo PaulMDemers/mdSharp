@@ -350,6 +350,8 @@ public sealed class ThirtyTwoXDevice
     public int GbrBytePairInterruptIdleFastPathHits { get; private set; }
     public int GbrByteZeroComm20PollFastPathAttempts { get; private set; }
     public int GbrByteZeroComm20PollFastPathHits { get; private set; }
+    public int LiteralByteDisplacementTstRegisterPollFastPathAttempts { get; private set; }
+    public int LiteralByteDisplacementTstRegisterPollFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -832,6 +834,13 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (cpuIndex == 0 &&
+                (((nextOpcode & 0xF000) == 0xD000) || ((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) || nextOpcode == 0x2018 || (nextOpcode & 0xFF00) == 0x8900) &&
+                TryFastForwardLiteralByteDisplacementTstRegisterPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
@@ -1042,6 +1051,19 @@ public sealed class ThirtyTwoXDevice
         }
 
         SdramFlagTaskletDispatcherFastPathHits++;
+        AdvanceSh2Watchdog(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardLiteralByteDisplacementTstRegisterPoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        LiteralByteDisplacementTstRegisterPollFastPathAttempts++;
+        if (!cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(cycleBudget, out cycles))
+        {
+            return false;
+        }
+
+        LiteralByteDisplacementTstRegisterPollFastPathHits++;
         AdvanceSh2Watchdog(cpuIndex, cycles);
         return true;
     }
