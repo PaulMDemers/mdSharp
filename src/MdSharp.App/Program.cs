@@ -5333,7 +5333,7 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
 
         if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
         {
-            string visible = "md-visible-32x-vdp-idle";
+            string visible = IsThirtyTwoXSh2Active(device) ? "md-visible-sh2-active-vdp-idle" : "md-visible-32x-vdp-idle";
             return WithThirtyTwoXExceptionSuffix(visible, exceptionSuffix);
         }
 
@@ -5357,7 +5357,7 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
 
     if (device.FrameBufferByteWriteCount > 0 || device.PaletteByteWriteCount > 0 || bitmapMode != 0)
     {
-        return "vdp-dark";
+        return IsThirtyTwoXSh2Active(device) ? "sh2-active-vdp-dark" : "vdp-dark";
     }
 
     if (device.MasterSh2.UnhandledOpcodeCount > 0 || device.SlaveSh2.UnhandledOpcodeCount > 0)
@@ -5366,6 +5366,18 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
     }
 
     return "stalled";
+}
+
+static bool IsThirtyTwoXSh2Active(ThirtyTwoXDevice device)
+{
+    return !device.Sh2HeldInReset &&
+        (device.MasterSh2.Cycles > 0 ||
+            device.SlaveSh2.Cycles > 0 ||
+            device.SdramFlagTaskletDispatcherFastPathHits > 0 ||
+            device.GbrBytePairInterruptIdleFastPathHits > 0 ||
+            device.GbrByteZeroComm20PollFastPathHits > 0 ||
+            device.LiteralByteDisplacementTstRegisterPollFastPathHits > 0 ||
+            device.ByteDisplacementZeroWaitFastPathHits > 0);
 }
 
 string ThirtyTwoXExceptionStatusSuffix(string exceptions)
@@ -5397,10 +5409,12 @@ bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
 
     return baseStatus is
         "vdp-dark" or
+        "sh2-active-vdp-dark" or
         "framebuffer-dark" or
         "framebuffer-no-palette" or
         "framebuffer-line-table-only" or
         "framebuffer-line-table-only-no-palette" or
+        "md-visible-sh2-active-vdp-idle" or
         "md-visible-32x-vdp-idle" or
         "md-visible-framebuffer-line-table-only" or
         "md-visible-framebuffer-line-table-only-no-palette" or
