@@ -794,7 +794,7 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if ((nextOpcode & 0xF000) == 0xD000 &&
+            if (((nextOpcode & 0xF000) == 0xD000 || nextOpcode == 0x60E2) &&
                 cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);

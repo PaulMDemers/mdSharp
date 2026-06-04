@@ -2282,6 +2282,13 @@ void ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward()
     AssertEqual(ValueAddress, cpu.R[14]);
     AssertEqual(1u, cpu.SR & 1);
 
+    cpu.Reset(LoopPc + 2);
+    cpu.R[14] = PointerAddress;
+    cpu.R[15] = 0x0603_F000;
+    AssertTrue(cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out _), "dispatcher should fast-forward from the load slot after the literal address is in R14");
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0603_F000u, cpu.R[15]);
+
     bus.WriteLong(ValueAddress, 0x0000_0081);
     AssertTrue(!cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(4096, out _), "dispatcher should fall back when the guarded tasklet value changes");
 }

@@ -2715,9 +2715,16 @@ public sealed class Sh2Cpu
         }
 
         uint loopPc = PC;
-        if (!TryReadSdramFlagTaskletDispatcher(peekBus, loopPc, out ushort branchOpcode, out uint taskletPc))
+        if (!TryReadSdramFlagTaskletDispatcher(peekBus, loopPc, out ushort branchOpcode, out uint pointerAddress, out uint taskletPc))
         {
-            return false;
+            if (PC < 2 ||
+                !TryReadSdramFlagTaskletDispatcher(peekBus, PC - 2, out branchOpcode, out pointerAddress, out taskletPc) ||
+                R[14] != pointerAddress)
+            {
+                return false;
+            }
+
+            loopPc = PC - 2;
         }
 
         if (!TryReadReadySdramFlagTasklet(peekBus, taskletPc, out ushort flagWord, out uint secondAddress, out uint currentValue, out uint compareValue))
@@ -2804,9 +2811,11 @@ public sealed class Sh2Cpu
         ISh2PeekBus peekBus,
         uint loopPc,
         out ushort branchOpcode,
+        out uint pointerAddress,
         out uint taskletPc)
     {
         branchOpcode = 0;
+        pointerAddress = 0;
         taskletPc = 0;
         if (!peekBus.TryPeekWord(loopPc, out ushort literalOpcode) ||
             !peekBus.TryPeekWord(loopPc + 2, out ushort loadOpcode) ||
@@ -2831,7 +2840,7 @@ public sealed class Sh2Cpu
             return false;
         }
 
-        uint pointerAddress = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        pointerAddress = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
         return TryPeekLong(peekBus, pointerAddress, out taskletPc);
     }
 
