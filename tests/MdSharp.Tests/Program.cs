@@ -34,6 +34,7 @@ Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordP
 Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFastForward);
 Run("32X SH-2 SDRAM flag tasklet dispatcher loop fast-forward", ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward);
 Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
+Run("32X SH-2 GBR byte-pair interrupt idle loop fast-forward", ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
@@ -2335,6 +2336,46 @@ void ThirtyTwoXSh2GbrBytePairTaskletFastForward()
     cpu.R[15] = 0x0603_DFFC;
     bus.WriteByte(0x2000_402D, 0x3D);
     AssertTrue(!cpu.TryFastForwardGbrBytePairEqualTaskletReturn(32, out _), "mismatched communication bytes should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0660;
+    const uint RoutinePc = 0x0600_4B64;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD002); // MOV.L literal,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x4F22); // STS.L PR,@-R15
+    bus.WriteInstructionWord(LoopPc + 4, 0x400B); // JSR @R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 8, 0xAFFA); // BRA loop
+    bus.WriteInstructionWord(LoopPc + 10, 0x0009); // NOP
+    bus.WriteLong(0x0600_066C, RoutinePc);
+    bus.WriteInstructionWord(RoutinePc + 0, 0xC42D); // MOV.B @(45,GBR),R0
+    bus.WriteInstructionWord(RoutinePc + 2, 0x6103); // MOV R0,R1
+    bus.WriteInstructionWord(RoutinePc + 4, 0xC42C); // MOV.B @(44,GBR),R0
+    bus.WriteInstructionWord(RoutinePc + 6, 0x3100); // CMP/EQ R0,R1
+    bus.WriteInstructionWord(RoutinePc + 8, 0x8944); // BT return
+    bus.WriteInstructionWord(0x0600_4BF8, 0x000B); // RTS
+    bus.WriteInstructionWord(0x0600_4BFA, 0x4F26); // LDS.L @R15+,PR
+    bus.WriteByte(0x2000_402C, 0x0D);
+    bus.WriteByte(0x2000_402D, 0x0D);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 4);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), 0x2000_4000u);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0600_0658u);
+    cpu.R[15] = 0x0603_E000;
+    AssertTrue(cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(8192, out int cycles), "GBR byte-pair interrupt idle loop should fast-forward when communication bytes match");
+    AssertEqual(4096, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0600_0658u, cpu.PR);
+    AssertEqual(0x0603_E000u, cpu.R[15]);
+    AssertEqual(0x0Du, cpu.R[0]);
+    AssertEqual(0x0Du, cpu.R[1]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteByte(0x2000_402D, 0x0E);
+    AssertTrue(!cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(8192, out _), "mismatched communication bytes should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2MovWordSwapCopyLoopFastForward()

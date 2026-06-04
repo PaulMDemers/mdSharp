@@ -49,6 +49,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
+    Console.WriteLine("  mdsharp --32x-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
     Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
@@ -430,6 +431,22 @@ if (args[0].Equals("--32x-inspect-state", StringComparison.OrdinalIgnoreCase))
     uint address = args.Length > 5 ? ParseNumber(args[5]) : ThirtyTwoXHardwareProfile.Sh2SdramStart;
     int words = args.Length > 6 && int.TryParse(args[6], out int parsedWords) ? parsedWords : 32;
     InspectThirtyTwoXState(args[1], args[2], frames, instructionsPerFrame, address, words);
+    return;
+}
+
+if (args[0].Equals("--32x-pc-profile", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int top = args.Length > 5 && int.TryParse(args[5], out int parsedTop) ? parsedTop : 80;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    ProfileThirtyTwoXHotPcs(args[1], args[2], frames, instructionsPerFrame, top, startFrame);
     return;
 }
 
@@ -4145,7 +4162,7 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
     Console.WriteLine($"32X slaveRegs: {FormatSh2Registers(device.SlaveSh2)}");
     Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
     Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
-    Console.WriteLine($"32X fastPaths: emptyDescriptorSpan={device.EmptyDescriptorSpanFastPathHits:N0}/{device.EmptyDescriptorSpanFastPathAttempts:N0} emptyDescriptorTail={device.EmptyDescriptorSpanTailFastPathHits:N0}/{device.EmptyDescriptorSpanTailFastPathAttempts:N0} longDiffPoll={device.LongDifferencePollFastPathHits:N0}/{device.LongDifferencePollFastPathAttempts:N0}");
+    Console.WriteLine($"32X fastPaths: emptyDescriptorSpan={device.EmptyDescriptorSpanFastPathHits:N0}/{device.EmptyDescriptorSpanFastPathAttempts:N0} emptyDescriptorTail={device.EmptyDescriptorSpanTailFastPathHits:N0}/{device.EmptyDescriptorSpanTailFastPathAttempts:N0} longDiffPoll={device.LongDifferencePollFastPathHits:N0}/{device.LongDifferencePollFastPathAttempts:N0} sdramTaskletDispatcher={device.SdramFlagTaskletDispatcherFastPathHits:N0}/{device.SdramFlagTaskletDispatcherFastPathAttempts:N0} gbrBytePairIdle={device.GbrBytePairInterruptIdleFastPathHits:N0}/{device.GbrBytePairInterruptIdleFastPathAttempts:N0}");
     Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
     for (int i = 0; i < words; i += 8)
     {
@@ -4207,6 +4224,80 @@ void InspectThirtyTwoXState(string romPath, string statePath, int frames, int in
 
         Console.WriteLine(line.ToString());
     }
+}
+
+void ProfileThirtyTwoXHotPcs(string romPath, string outputCsv, int frames, int instructionsPerFrame, int top, int startFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Dictionary<ulong, long> samples = [];
+    Dictionary<ulong, ushort> opcodes = [];
+    int currentFrame = 0;
+    long totalSamples = 0;
+    device.Sh2PcSampleObserver = (cpuIndex, pc, opcode) =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        ulong key = ((ulong)(uint)cpuIndex << 32) | pc;
+        samples.TryGetValue(key, out long count);
+        samples[key] = count + 1;
+        opcodes[key] = opcode;
+        totalSamples++;
+    };
+
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        for (currentFrame = 0; currentFrame < frames; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        device.Sh2PcSampleObserver = null;
+        stopwatch.Stop();
+    }
+
+    string? directory = Path.GetDirectoryName(outputCsv);
+    if (!string.IsNullOrEmpty(directory))
+    {
+        Directory.CreateDirectory(directory);
+    }
+
+    int rank = 0;
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8);
+    writer.WriteLine("rank,cpu,pc,opcode,samples,percent");
+    foreach (KeyValuePair<ulong, long> entry in samples.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).Take(Math.Max(0, top)))
+    {
+        rank++;
+        int cpuIndex = (int)(entry.Key >> 32);
+        uint pc = (uint)entry.Key;
+        ushort opcode = opcodes.TryGetValue(entry.Key, out ushort sampledOpcode) ? sampledOpcode : (ushort)0;
+        double percent = totalSamples == 0 ? 0.0 : (entry.Value * 100.0) / totalSamples;
+        writer.WriteLine(string.Join(
+            ',',
+            rank.ToString(CultureInfo.InvariantCulture),
+            Csv(cpuIndex == 0 ? "master" : "slave"),
+            $"${pc:X8}",
+            $"${opcode:X4}",
+            entry.Value.ToString(CultureInfo.InvariantCulture),
+            percent.ToString("0.0000", CultureInfo.InvariantCulture)));
+    }
+
+    Console.WriteLine($"Profiled {Path.GetFileName(romPath)} for {frames:N0} frame(s), startFrame={startFrame:N0}, samples={totalSamples:N0}, elapsed={stopwatch.Elapsed.TotalSeconds:0.###}s");
+    Console.WriteLine($"Wrote top {Math.Min(top, samples.Count):N0} SH-2 PC sample row(s) to {Path.GetFullPath(outputCsv)}");
 }
 
 void DumpThirtyTwoXSdram(string romPath, string outputPath, int frames, int instructionsPerFrame)

@@ -344,6 +344,10 @@ public sealed class ThirtyTwoXDevice
     public int EmptyDescriptorSpanTailFastPathHits { get; private set; }
     public int LongDifferencePollFastPathAttempts { get; private set; }
     public int LongDifferencePollFastPathHits { get; private set; }
+    public int SdramFlagTaskletDispatcherFastPathAttempts { get; private set; }
+    public int SdramFlagTaskletDispatcherFastPathHits { get; private set; }
+    public int GbrBytePairInterruptIdleFastPathAttempts { get; private set; }
+    public int GbrBytePairInterruptIdleFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -357,6 +361,7 @@ public sealed class ThirtyTwoXDevice
     public Action<FrameBufferAccessTrace>? FrameBufferAccessObserver { get; set; }
     public Action<Sh2Cpu.Sh2LinkedListTrace>? Sh2LinkedListObserver { get; set; }
     public Action<Sh2Cpu.Sh2RechainTrace>? Sh2RechainObserver { get; set; }
+    public Action<int, uint, ushort>? Sh2PcSampleObserver { get; set; }
     public Func<uint, bool>? Sh2MemoryAccessTraceFilter { get; set; }
     public bool AdapterEnabled => _adapterEnabled;
     public bool Sh2ResetEnabled => _sh2ResetEnabled;
@@ -695,6 +700,17 @@ public sealed class ThirtyTwoXDevice
             !cpu.DelaySlotActive &&
             cpu.InstructionObserver is null &&
             TryPeekSh2Word(cpu.PC, cpuIndex, out nextOpcode);
+        Action<int, uint, ushort>? pcSampleObserver = Sh2PcSampleObserver;
+        if (pcSampleObserver is not null)
+        {
+            ushort sampledOpcode = nextOpcode;
+            if (!canProbeFastPath)
+            {
+                _ = TryPeekSh2Word(cpu.PC, cpuIndex, out sampledOpcode);
+            }
+
+            pcSampleObserver(cpuIndex, cpu.PC, sampledOpcode);
+        }
 
         if (canProbeFastPath)
         {
@@ -795,9 +811,15 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (((nextOpcode & 0xF000) == 0xD000 || nextOpcode == 0x60E2) &&
-                cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(cycleBudget, out fastCycles))
+                TryFastForwardSdramFlagTaskletDispatcher(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (cpuIndex == 1 &&
+                ((nextOpcode & 0xF000) == 0xD000 || nextOpcode == 0x4F22 || nextOpcode == 0x400B || (nextOpcode & 0xF000) == 0xA000) &&
+                TryFastForwardGbrBytePairInterruptIdle(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
                 return fastCycles;
             }
 
@@ -1000,6 +1022,32 @@ public sealed class ThirtyTwoXDevice
 
         AdvanceSh2Watchdog(cpuIndex, (int)Math.Min(delta, int.MaxValue));
         return cycles;
+    }
+
+    private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        SdramFlagTaskletDispatcherFastPathAttempts++;
+        if (!cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(cycleBudget, out cycles))
+        {
+            return false;
+        }
+
+        SdramFlagTaskletDispatcherFastPathHits++;
+        AdvanceSh2Watchdog(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardGbrBytePairInterruptIdle(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        GbrBytePairInterruptIdleFastPathAttempts++;
+        if (!cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(cycleBudget, out cycles))
+        {
+            return false;
+        }
+
+        GbrBytePairInterruptIdleFastPathHits++;
+        AdvanceSh2Watchdog(cpuIndex, cycles);
+        return true;
     }
 
     private bool IsSlaveInInterruptDispatcherIdle()
