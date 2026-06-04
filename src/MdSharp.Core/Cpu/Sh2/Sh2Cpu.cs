@@ -2868,6 +2868,62 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrByteZeroTstBtPollLoop(int maxCycles, byte displacement, out int cycles)
+    {
+        const int MaxBurstCycles = 256;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadGbrByteZeroTstBtPollLoop(peekBus, loopPc, out ushort loadOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 ||
+                !TryReadGbrByteZeroTstBtPollLoop(peekBus, PC - 2, out loadOpcode, out branchOpcode))
+            {
+                if (PC < 4 ||
+                    !TryReadGbrByteZeroTstBtPollLoop(peekBus, PC - 4, out loadOpcode, out branchOpcode))
+                {
+                    return false;
+                }
+
+                loopPc = PC - 4;
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        if ((byte)loadOpcode != displacement)
+        {
+            return false;
+        }
+
+        uint address = GBR + displacement;
+        if (!peekBus.TryPeekByte(address, out byte value) ||
+            value != 0)
+        {
+            return false;
+        }
+
+        R[0] = 0;
+        SetT(true);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     private static bool TryReadSdramFlagTaskletDispatcher(
         ISh2PeekBus peekBus,
         uint loopPc,
@@ -2962,6 +3018,27 @@ public sealed class Sh2Cpu
             peekBus.TryPeekWord(returnPc + 2, out ushort restorePrOpcode) &&
             rtsOpcode == 0x000B &&
             restorePrOpcode == 0x4F26;
+    }
+
+    private static bool TryReadGbrByteZeroTstBtPollLoop(ISh2PeekBus peekBus, uint loopPc, out ushort loadOpcode, out ushort branchOpcode)
+    {
+        loadOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(loopPc, out loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out branchOpcode))
+        {
+            return false;
+        }
+
+        if ((loadOpcode & 0xFF00) != 0xC400 ||
+            testOpcode != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        return BranchByteTarget(loopPc + 4, branchOpcode) == loopPc;
     }
 
     private static bool TryReadReadySdramFlagTasklet(

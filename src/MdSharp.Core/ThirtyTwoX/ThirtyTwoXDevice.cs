@@ -348,6 +348,8 @@ public sealed class ThirtyTwoXDevice
     public int SdramFlagTaskletDispatcherFastPathHits { get; private set; }
     public int GbrBytePairInterruptIdleFastPathAttempts { get; private set; }
     public int GbrBytePairInterruptIdleFastPathHits { get; private set; }
+    public int GbrByteZeroComm20PollFastPathAttempts { get; private set; }
+    public int GbrByteZeroComm20PollFastPathHits { get; private set; }
     public ushort LastBitmapModeWrite => _lastBitmapModeWrite;
     public ushort LastFrameBufferControlWrite => _lastFrameBufferControlWrite;
     public ushort MasterInterruptMask => BuildSh2InterruptMask(cpuIndex: 0);
@@ -823,6 +825,13 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (cpuIndex == 0 &&
+                (nextOpcode == 0xC420 || nextOpcode == 0x2008 || (nextOpcode & 0xFF00) == 0x8900) &&
+                TryFastForwardGbrByteZeroComm20Poll(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
@@ -1033,6 +1042,19 @@ public sealed class ThirtyTwoXDevice
         }
 
         SdramFlagTaskletDispatcherFastPathHits++;
+        AdvanceSh2Watchdog(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardGbrByteZeroComm20Poll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        GbrByteZeroComm20PollFastPathAttempts++;
+        if (!cpu.TryFastForwardGbrByteZeroTstBtPollLoop(cycleBudget, displacement: 0x20, out cycles))
+        {
+            return false;
+        }
+
+        GbrByteZeroComm20PollFastPathHits++;
         AdvanceSh2Watchdog(cpuIndex, cycles);
         return true;
     }

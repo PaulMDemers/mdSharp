@@ -35,6 +35,7 @@ Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFas
 Run("32X SH-2 SDRAM flag tasklet dispatcher loop fast-forward", ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward);
 Run("32X SH-2 GBR byte-pair tasklet fast-forward", ThirtyTwoXSh2GbrBytePairTaskletFastForward);
 Run("32X SH-2 GBR byte-pair interrupt idle loop fast-forward", ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward);
+Run("32X SH-2 GBR byte zero BT poll loop fast-forward", ThirtyTwoXSh2GbrByteZeroBtPollLoopFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
@@ -2376,6 +2377,28 @@ void ThirtyTwoXSh2GbrBytePairInterruptIdleLoopFastForward()
 
     bus.WriteByte(0x2000_402D, 0x0E);
     AssertTrue(!cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(8192, out _), "mismatched communication bytes should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2GbrByteZeroBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_483E;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC420); // MOV.B @(32,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    bus.WriteByte(0x2000_4020, 0x00);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 2);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), 0x2000_4000u);
+    AssertTrue(cpu.TryFastForwardGbrByteZeroTstBtPollLoop(1024, displacement: 0x20, out int cycles), "GBR byte zero BT poll should fast-forward from the TST instruction");
+    AssertEqual(256, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteByte(0x2000_4020, 0x80);
+    AssertTrue(!cpu.TryFastForwardGbrByteZeroTstBtPollLoop(1024, displacement: 0x20, out _), "nonzero GBR byte should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2MovWordSwapCopyLoopFastForward()
