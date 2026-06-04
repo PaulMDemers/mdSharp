@@ -3502,10 +3502,16 @@ void ThirtyTwoXM68kBusShell()
     rom[0x1235] = 0xC3;
     rom[0x000010] = 0x11;
     rom[0x000011] = 0x22;
+    rom[0x000012] = 0x23;
+    rom[0x000013] = 0x24;
     rom[0x100010] = 0x33;
     rom[0x100011] = 0x44;
+    rom[0x100012] = 0x45;
+    rom[0x100013] = 0x46;
     rom[0x200010] = 0x55;
     rom[0x200011] = 0x66;
+    rom[0x200012] = 0x67;
+    rom[0x200013] = 0x68;
     MegaDrive machine = new(CartridgeImage.FromBytes(rom));
     machine.Reset();
 
@@ -3537,16 +3543,22 @@ void ThirtyTwoXM68kBusShell()
     AssertEqual((ushort)0x5AC3, machine.Bus.ReadWord(0x88_1234));
     AssertEqual((ushort)0x1122, machine.Bus.ReadWord(0x90_0010));
     machine.Bus.WriteWord(0xA1_5104, 0x0001);
+    AssertEqual((byte)0x33, machine.Bus.ReadByte(0x90_0010));
+    AssertEqual((byte)0x44, machine.Bus.ReadByte(0x90_0011));
     AssertEqual((ushort)0x3344, machine.Bus.ReadWord(0x90_0010));
+    AssertEqual(0x3344_4546u, machine.Bus.ReadLong(0x90_0010));
     AssertEqual((ushort)0x1122, machine.Bus.ReadWord(0x88_0010));
     machine.Bus.WriteByte(0xA1_5105, 0x02);
     AssertEqual((ushort)0x5566, machine.Bus.ReadWord(0x90_0010));
+    AssertEqual(0x5566_6768u, machine.Bus.ReadLong(0x90_0010));
 
     MegaDrive.MegaDriveState state = machine.CaptureState();
     machine.Bus.WriteWord(0xA1_5200, 0x0000);
+    machine.Bus.WriteWord(0xA1_5104, 0x0000);
     machine.RestoreState(state);
     AssertEqual((ushort)0x7ACE, machine.Bus.ReadWord(0xA1_5200));
     AssertEqual((ushort)0x0000, machine.Bus.ReadWord(0x84_0000));
+    AssertEqual((ushort)0x5566, machine.Bus.ReadWord(0x90_0010));
 }
 
 void ThirtyTwoXM68kVectorRomMapping()
