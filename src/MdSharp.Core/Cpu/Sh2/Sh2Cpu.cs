@@ -1640,6 +1640,118 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrCmpEqBfBraPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort compareOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchFalseOpcode))
+        {
+            return false;
+        }
+
+        if ((branchFalseOpcode & 0xFF00) != 0x8B00 ||
+            (compareOpcode & 0xFF00) != 0x8800)
+        {
+            return false;
+        }
+
+        int branchFalseDisplacement = (sbyte)branchFalseOpcode;
+        uint exitPc = loopPc + 8 + (uint)(branchFalseDisplacement * 2);
+        if (exitPc <= loopPc + 8 || exitPc > loopPc + 32)
+        {
+            return false;
+        }
+
+        uint braPc = exitPc - 4;
+        for (uint pc = loopPc + 6; pc < braPc; pc += 2)
+        {
+            if (!peekBus.TryPeekWord(pc, out ushort nopOpcode) || nopOpcode != 0x0009)
+            {
+                return false;
+            }
+        }
+
+        if (!peekBus.TryPeekWord(braPc, out ushort braOpcode) ||
+            (braOpcode & 0xF000) != 0xA000 ||
+            !peekBus.TryPeekWord(braPc + 2, out ushort delayOpcode) ||
+            delayOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        int braDisplacement = SignExtend12(braOpcode & 0x0FFF);
+        uint target = braPc + 4 + (uint)(braDisplacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint value;
+        if ((loadOpcode & 0xFF00) == 0xC400)
+        {
+            uint address = GBR + (uint)(loadOpcode & 0xFF);
+            if (!peekBus.TryPeekByte(address, out byte byteValue))
+            {
+                return false;
+            }
+
+            value = (uint)(sbyte)byteValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC500)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 2);
+            if (!peekBus.TryPeekWord(address, out ushort wordValue))
+            {
+                return false;
+            }
+
+            value = (uint)(short)wordValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC600)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 4);
+            if (!peekBus.TryPeekWord(address, out ushort high) ||
+                !peekBus.TryPeekWord(address + 2, out ushort low))
+            {
+                return false;
+            }
+
+            value = (uint)((high << 16) | low);
+        }
+        else
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = value == (uint)(sbyte)immediate;
+        if (!equal)
+        {
+            return false;
+        }
+
+        cycles = maxCycles;
+        Cycles += cycles;
+        R[0] = value;
+        SetT(true);
+        PC = loopPc;
+        LastOpcode = braOpcode;
+        LastOpcodePc = braPc;
+        return true;
+    }
+
     public bool TryFastForwardMovLiteralTstBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;

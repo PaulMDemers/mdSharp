@@ -32,6 +32,7 @@ Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLo
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 padded GBR CMP/EQ BF/BRA poll loop fast-forward", ThirtyTwoXSh2PaddedGbrCmpEqBfBraPollLoopFastForward);
 Run("32X SH-2 linked-list insert fast-forward matches interpreter", ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter);
 Run("32X SH-2 DMA transfer size bits", ThirtyTwoXSh2DmaTransferSizeBits);
 Run("32X SH-2 arithmetic flags", ThirtyTwoXSh2ArithmeticFlags);
@@ -2236,6 +2237,37 @@ void ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward()
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     device.RunSh2Cycles(80);
     AssertTrue(device.MasterSh2.Halted, "zero poll value should let the SH-2 leave the loop and sleep");
+}
+
+void ThirtyTwoXSh2PaddedGbrCmpEqBfBraPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0100;
+    const uint Gbr = 0x2000_4000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0x00, 0xC536); // MOV.W @(108,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 0x02, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 0x04, 0x8B07); // BF exit
+    bus.WriteInstructionWord(LoopPc + 0x06, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x08, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x0A, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x0C, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x0E, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x10, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x12, 0xAFF5); // BRA loop
+    bus.WriteInstructionWord(LoopPc + 0x14, 0x0009); // NOP
+    bus.WriteWord(Gbr + 108, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.GBR), Gbr);
+    AssertTrue(cpu.TryFastForwardGbrCmpEqBfBraPollLoop(500, out int cycles), "padded GBR zero poll should fast-forward");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteWord(Gbr + 108, 0x0001);
+    AssertTrue(!cpu.TryFastForwardGbrCmpEqBfBraPollLoop(500, out _), "non-zero padded poll value should fall back and exit normally");
 }
 
 void ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter()

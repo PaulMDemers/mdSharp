@@ -781,6 +781,13 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((nextOpcode & 0xFC00) == 0xC400 &&
+                cpu.TryFastForwardGbrCmpEqBfBraPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF000) == 0xD000)
             {
                 if (cpu.TryFastForwardMovLiteralTstBfPollLoop(cycleBudget, out fastCycles))
