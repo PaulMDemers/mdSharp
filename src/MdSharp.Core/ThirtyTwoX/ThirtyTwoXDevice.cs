@@ -2713,7 +2713,7 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
         {
             _sdram[cachedSdramOffset] = value;
-            UpdateSh2SdramCacheByte(cachedSdramOffset, value);
+            UpdateSh2SdramCacheByte(cachedSdramOffset, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "WC8", address, value);
             return;
         }
@@ -2721,7 +2721,7 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
             _sdram[sdramOffset] = value;
-            UpdateSh2SdramCacheByte(sdramOffset, value);
+            UpdateSh2SdramCacheByte(sdramOffset, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "W8", address, value);
             return;
         }
@@ -2870,8 +2870,8 @@ public sealed class ThirtyTwoXDevice
         {
             _sdram[overflowSdramOffset] = (byte)(value >> 8);
             _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
-            UpdateSh2SdramCacheByte(overflowSdramOffset, _sdram[overflowSdramOffset]);
-            UpdateSh2SdramCacheByte((overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)]);
+            UpdateSh2SdramCacheByte(overflowSdramOffset, _sdram[overflowSdramOffset], cpuIndex);
+            UpdateSh2SdramCacheByte((overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)], cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
             return;
         }
@@ -6546,12 +6546,17 @@ public sealed class ThirtyTwoXDevice
 
     private void UpdateSh2SdramCacheByte(int sdramOffset, byte value)
     {
-        uint cacheAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart +
-            (uint)(sdramOffset & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
         for (int cpuIndex = 0; cpuIndex < ThirtyTwoXHardwareProfile.Sh2CpuCount; cpuIndex++)
         {
-            WriteSh2CachedAreaByte(cacheAddress, value, cpuIndex);
+            UpdateSh2SdramCacheByte(sdramOffset, value, cpuIndex);
         }
+    }
+
+    private void UpdateSh2SdramCacheByte(int sdramOffset, byte value, int cpuIndex)
+    {
+        uint cacheAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart +
+            (uint)(sdramOffset & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
+        WriteSh2CachedAreaByte(cacheAddress, value, cpuIndex);
     }
 
     private bool TryFindSh2CacheLine(int cpuIndex, int entry, uint tag, out int lineIndex)

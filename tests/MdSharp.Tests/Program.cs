@@ -1548,18 +1548,18 @@ void ThirtyTwoXSh2FrtCounterWritesAndFlags()
 
 void ThirtyTwoXSh2CoreExecutesSyntheticCode()
 {
-    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address)
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address, int cpuIndex = 0)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("ReadSh2Byte helper was not found");
-        return (byte)method.Invoke(target, [address, 0])!;
+        return (byte)method.Invoke(target, [address, cpuIndex])!;
     }
 
-    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value)
+    static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value, int cpuIndex = 0)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("WriteSh2Byte helper was not found");
-        method.Invoke(target, [address, value, 0]);
+        method.Invoke(target, [address, value, cpuIndex]);
     }
 
     static uint ReadSh2LongForTest(ThirtyTwoXDevice target, uint address)
@@ -1637,6 +1637,19 @@ void ThirtyTwoXSh2CoreExecutesSyntheticCode()
     AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
     WriteSh2ByteForTest(cacheControlDevice, 0xFFFF_FE92, 0x19);
     AssertEqual((byte)0x42, ReadSh2ByteForTest(cacheControlDevice, cachedRomByte));
+
+    ThirtyTwoXDevice sdramCacheIsolationDevice = new(cacheControlRom);
+    uint cachedSdramByte = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x20;
+    uint cacheThroughSdramByte = ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart + 0x20;
+    WriteSh2ByteForTest(sdramCacheIsolationDevice, cacheThroughSdramByte, 0x11, cpuIndex: 0);
+    WriteSh2ByteForTest(sdramCacheIsolationDevice, 0xFFFF_FE92, 0x01, cpuIndex: 0);
+    WriteSh2ByteForTest(sdramCacheIsolationDevice, 0xFFFF_FE92, 0x01, cpuIndex: 1);
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 0));
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 1));
+    WriteSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, 0x22, cpuIndex: 0);
+    AssertEqual((byte)0x22, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 0));
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 1));
+    AssertEqual((byte)0x22, ReadSh2ByteForTest(sdramCacheIsolationDevice, cacheThroughSdramByte, cpuIndex: 1));
 
     ThirtyTwoXDevice cacheAddressArrayDevice = new(cacheControlRom);
     WriteSh2ByteForTest(cacheAddressArrayDevice, 0xFFFF_FE92, 0xC1); // Select way 3 and enable cache.
