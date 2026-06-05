@@ -7502,8 +7502,10 @@ ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
         Environment.GetEnvironmentVariable("MDSHARP_32X_M68K_BIOS") ?? string.Empty,
         Path.Combine(AppContext.BaseDirectory, "32X_G_BIOS.BIN"),
         Path.Combine(AppContext.BaseDirectory, "32X_M68K_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "Sega 32X BIOS", "32X", "32X - Genesis BIOS.bin"),
         Path.Combine(Environment.CurrentDirectory, "32X_G_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_M68K_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "Sega 32X BIOS", "32X", "32X - Genesis BIOS.bin"),
     ];
 
     foreach (string candidate in candidates)
@@ -7525,9 +7527,11 @@ ReadOnlyMemory<byte>? TryLoadThirtyTwoXMasterSh2Bios()
         Path.Combine(AppContext.BaseDirectory, "32X_M_BIOS.BIN"),
         Path.Combine(AppContext.BaseDirectory, "32X_MASTER_BIOS.BIN"),
         Path.Combine(AppContext.BaseDirectory, "32X_MSH2_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "Sega 32X BIOS", "32X", "32X - Master BIOS.bin"),
         Path.Combine(Environment.CurrentDirectory, "32X_M_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_MASTER_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_MSH2_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "Sega 32X BIOS", "32X", "32X - Master BIOS.bin"),
     ];
 
     foreach (string candidate in candidates)
@@ -7549,9 +7553,11 @@ ReadOnlyMemory<byte>? TryLoadThirtyTwoXSlaveSh2Bios()
         Path.Combine(AppContext.BaseDirectory, "32X_S_BIOS.BIN"),
         Path.Combine(AppContext.BaseDirectory, "32X_SLAVE_BIOS.BIN"),
         Path.Combine(AppContext.BaseDirectory, "32X_SSH2_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "Sega 32X BIOS", "32X", "32X - Slave BIOS.bin"),
         Path.Combine(Environment.CurrentDirectory, "32X_S_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_SLAVE_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_SSH2_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "Sega 32X BIOS", "32X", "32X - Slave BIOS.bin"),
     ];
 
     foreach (string candidate in candidates)

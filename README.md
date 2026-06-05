@@ -237,6 +237,7 @@ Recommended local-only folders/files:
 - `32X_G_BIOS.BIN` or `32X_M68K_BIOS.BIN` for local-only 32X 68000 BIOS testing, or set `MDSHARP_32X_M68K_BIOS`
 - `32X_M_BIOS.BIN`, `32X_MASTER_BIOS.BIN`, or `32X_MSH2_BIOS.BIN` for local-only 32X master SH-2 BIOS testing, or set `MDSHARP_32X_MASTER_SH2_BIOS`
 - `32X_S_BIOS.BIN`, `32X_SLAVE_BIOS.BIN`, or `32X_SSH2_BIOS.BIN` for local-only 32X slave SH-2 BIOS testing, or set `MDSHARP_32X_SLAVE_SH2_BIOS`
+- `Sega 32X BIOS/32X/32X - Genesis BIOS.bin`, `32X - Master BIOS.bin`, and `32X - Slave BIOS.bin` are also detected for local 32X BIOS testing
 - local `.wav`, `.flac`, `.mp3`, or `.ogg` reference audio used for diagnostics
 
 These paths are ignored by the release-oriented `.gitignore`, with only `.gitkeep` placeholders tracked for empty local folders.

@@ -61,6 +61,7 @@ snap/
 
 # Local BIOS/coproc blobs and cartridge images. Keep these out unless a file is
 # explicitly redistributable and intentionally unignored.
+Sega 32X BIOS/
 svp.bin
 *.smd
 *.gen
