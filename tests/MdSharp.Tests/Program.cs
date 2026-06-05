@@ -3726,6 +3726,53 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4F4B, postStartSh2MailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     AssertEqual((ushort)0xBEEF, ReadSh2WordForTest(postStartSh2MailboxDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2)));
 
+    ThirtyTwoXDevice postStartReadyDevice = new(sh2ReadyRom);
+    postStartReadyDevice.Reset();
+    postStartReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertEqual((ushort)0x4D5F, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((ushort)0x4F4B, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x535F, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4F4B, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartReadyDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    WriteSh2WordForTest(
+        postStartReadyDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0),
+        0x4D52);
+    WriteSh2WordForTest(
+        postStartReadyDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
+        0x4459);
+    WriteSh2WordForTest(
+        postStartReadyDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4),
+        0x5352);
+    WriteSh2WordForTest(
+        postStartReadyDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6),
+        0x4459);
+    AssertEqual((ushort)0x4D52, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((ushort)0x4459, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    AssertEqual((ushort)0x5352, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+    AssertEqual((ushort)0x4459, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
+    AssertEqual((byte)0x4D, postStartReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((byte)0x52, postStartReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1));
+    postStartReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0, 0x0000);
+    postStartReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
+    postStartReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4, 0x0000);
+    postStartReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6, 0x0000);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0)));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2)));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4), cpuIndex: 1));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6), cpuIndex: 1));
+    _ = postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0);
+    _ = postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4);
+    AssertEqual((ushort)0x0000, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0));
+    AssertEqual((ushort)0x0000, postStartReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
+
     AssertTrue(!sh2ReadyDevice.BootRomHandshakePending, "valid 32X user programs should run after the host observes the post-start boot signature");
     AssertTrue(sh2ReadyDevice.RunSh2(8) > 0, "SH-2 application code should be able to publish ready flags after the boot signature");
     AssertEqual((byte)0x4D, sh2ReadyDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
