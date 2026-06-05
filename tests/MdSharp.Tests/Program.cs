@@ -68,6 +68,7 @@ Run("32X 68000 vector ROM mapping", ThirtyTwoXM68kVectorRomMapping);
 Run("32X 68000 VBlank uses adapter level 5", ThirtyTwoXM68kVBlankUsesAdapterLevel5);
 Run("32X SH-2 boot ROM ready marker", ThirtyTwoXSh2BootRomReadyMarker);
 Run("32X SH-2 boot ROM maps optional BIOS images", ThirtyTwoXSh2BootRomMapsOptionalBiosImages);
+Run("32X SH-2 real BIOS boot uses reset vectors", ThirtyTwoXSh2RealBiosBootUsesResetVectors);
 Run("68k reset and simple instructions", CpuResetAndSimpleInstructions);
 Run("68k Codemasters DNLD reset vectors", CodemastersDnldResetVectors);
 Run("VDP register and VRAM writes", VdpRegisterAndVramWrites);
@@ -4657,6 +4658,31 @@ void ThirtyTwoXSh2BootRomMapsOptionalBiosImages()
     AssertEqual((byte)0xEF, ReadSh2ByteForTest(device, 0x2000_0002, 1));
     AssertEqual((ushort)0x1234, ReadSh2WordForTest(device, 0x0000_0000, 0));
     AssertEqual((ushort)0xABCD, ReadSh2WordForTest(device, 0x0000_0000, 1));
+}
+
+void ThirtyTwoXSh2RealBiosBootUsesResetVectors()
+{
+    byte[] masterBios = new byte[0x1000];
+    byte[] slaveBios = new byte[0x1000];
+    WriteLong(masterBios, 0x00, 0x0000_0140);
+    WriteLong(masterBios, 0x04, 0x0604_0000);
+    WriteLong(slaveBios, 0x00, 0x0000_0180);
+    WriteLong(slaveBios, 0x04, 0x0603_F800);
+
+    ThirtyTwoXDevice device = new(masterSh2Bios: masterBios, slaveSh2Bios: slaveBios, useRealSh2BiosBoot: true);
+    device.Reset();
+
+    AssertEqual(0x0000_0140u, device.MasterSh2.PC);
+    AssertEqual(0x0604_0000u, device.MasterSh2.R[15]);
+    AssertEqual(0x0000_0180u, device.SlaveSh2.PC);
+    AssertEqual(0x0603_F800u, device.SlaveSh2.R[15]);
+
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    AssertEqual(0x0000_0140u, device.MasterSh2.PC);
+    AssertEqual(0x0604_0000u, device.MasterSh2.R[15]);
+    AssertEqual(0x0000_0180u, device.SlaveSh2.PC);
+    AssertEqual(0x0603_F800u, device.SlaveSh2.R[15]);
+    AssertTrue(!device.BootRomHandshakePending, "real SH-2 BIOS boot should not seed the synthetic M_OK/S_OK handshake");
 }
 
 void CpuResetAndSimpleInstructions()

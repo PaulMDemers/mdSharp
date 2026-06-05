@@ -69,7 +69,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private int _lightGunY = Vdp.ScreenHeight / 2;
     private bool _lightGunVisible;
 
-    public GenesisBus(CartridgeImage cartridge, Vdp vdp, Psg psg, Ym2612 ym2612, bool pal = false, ThreeButtonController? controller1 = null, ThreeButtonController? controller2 = null, ThreeButtonController? controller3 = null, ThreeButtonController? controller4 = null, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null)
+    public GenesisBus(CartridgeImage cartridge, Vdp vdp, Psg psg, Ym2612 ym2612, bool pal = false, ThreeButtonController? controller1 = null, ThreeButtonController? controller2 = null, ThreeButtonController? controller3 = null, ThreeButtonController? controller4 = null, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null, bool thirtyTwoXUseRealSh2BiosBoot = false)
     {
         Cartridge = cartridge;
         Vdp = vdp;
@@ -86,7 +86,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         _teamPlayer = new SegaTeamPlayerAdapter(_controllers);
         _svp = cartridge.Diagnostics.HasSvp ? new SvpDevice(cartridge.Rom) : null;
         _thirtyTwoX = cartridge.Diagnostics.Requires32X
-            ? new ThirtyTwoXDevice(cartridge.Rom, pal, thirtyTwoXMasterSh2Bios, thirtyTwoXSlaveSh2Bios)
+            ? new ThirtyTwoXDevice(cartridge.Rom, pal, thirtyTwoXMasterSh2Bios, thirtyTwoXSlaveSh2Bios, thirtyTwoXUseRealSh2BiosBoot)
             : null;
         if (_thirtyTwoX is not null && thirtyTwoXM68kBios.HasValue && !thirtyTwoXM68kBios.Value.IsEmpty)
         {

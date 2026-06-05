@@ -235,6 +235,7 @@ public sealed class ThirtyTwoXDevice
         [],
         []
     ];
+    private readonly bool _useRealSh2BiosBoot;
     private readonly MarsUserHeader _userHeader;
     private readonly bool _pal;
     private bool _adapterEnabled;
@@ -300,7 +301,7 @@ public sealed class ThirtyTwoXDevice
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
 
-    public ThirtyTwoXDevice(ReadOnlyMemory<byte> cartridgeRom = default, bool pal = false, ReadOnlyMemory<byte>? masterSh2Bios = null, ReadOnlyMemory<byte>? slaveSh2Bios = null)
+    public ThirtyTwoXDevice(ReadOnlyMemory<byte> cartridgeRom = default, bool pal = false, ReadOnlyMemory<byte>? masterSh2Bios = null, ReadOnlyMemory<byte>? slaveSh2Bios = null, bool useRealSh2BiosBoot = false)
     {
         _cartridgeRom = cartridgeRom;
         _pal = pal;
@@ -314,6 +315,7 @@ public sealed class ThirtyTwoXDevice
             _sh2Bios[1] = slaveSh2Bios.Value.ToArray();
         }
 
+        _useRealSh2BiosBoot = useRealSh2BiosBoot && HasCompleteSh2BiosSet();
         _userHeader = MarsUserHeader.Parse(cartridgeRom.Span);
         Sh2MemoryBus masterBus = new(this, cpuIndex: 0);
         Sh2MemoryBus slaveBus = new(this, cpuIndex: 1);
@@ -515,7 +517,7 @@ public sealed class ThirtyTwoXDevice
         WriteBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.BitmapModeOffset, _pal ? (ushort)0x0000 : (ushort)0x8000);
         _latchedBitmapMode = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.BitmapModeOffset);
         _latchedScreenShiftControl = 0;
-        ResetSh2FromUserHeader();
+        ResetSh2ForStartup();
     }
 
     public void BeginFrame(bool pal)
@@ -622,6 +624,51 @@ public sealed class ThirtyTwoXDevice
             MasterSh2.R[15] = ReadSh2Long(masterVectorBase + 4, cpuIndex: 0);
             SlaveSh2.R[15] = ReadSh2Long(slaveVectorBase + 4, cpuIndex: 1);
         }
+    }
+
+    private void ResetSh2ForStartup()
+    {
+        if (_useRealSh2BiosBoot)
+        {
+            ResetSh2FromBootRom();
+        }
+        else
+        {
+            ResetSh2FromUserHeader();
+        }
+    }
+
+    private void ResetSh2FromBootRom()
+    {
+        Array.Clear(_sdram);
+        ResetSh2CacheTags();
+        ResetSh2PeripheralDefaults();
+        MasterSh2.Reset(ReadSh2BiosLong(cpuIndex: 0, offset: 0));
+        SlaveSh2.Reset(ReadSh2BiosLong(cpuIndex: 1, offset: 0));
+        MasterSh2.R[15] = ReadSh2BiosLong(cpuIndex: 0, offset: 4);
+        SlaveSh2.R[15] = ReadSh2BiosLong(cpuIndex: 1, offset: 4);
+        MasterSh2.SetVbr(0);
+        SlaveSh2.SetVbr(0);
+        ResetSh2FrtBaseCycles();
+    }
+
+    private bool HasCompleteSh2BiosSet()
+    {
+        return _sh2Bios[0].Length >= 8 && _sh2Bios[1].Length >= 8;
+    }
+
+    private uint ReadSh2BiosLong(int cpuIndex, int offset)
+    {
+        byte[] bios = _sh2Bios[cpuIndex & 1];
+        if (offset < 0 || offset + 3 >= bios.Length)
+        {
+            return 0;
+        }
+
+        return (uint)((bios[offset] << 24) |
+            (bios[offset + 1] << 16) |
+            (bios[offset + 2] << 8) |
+            bios[offset + 3]);
     }
 
     public int RunSh2(int maxInstructionsPerCpu)
@@ -3295,12 +3342,12 @@ public sealed class ThirtyTwoXDevice
 
         if (Sh2HeldInReset)
         {
-            ResetSh2FromUserHeader();
+            ResetSh2ForStartup();
         }
         else if (wasHeld)
         {
-            ResetSh2FromUserHeader();
-            _bootRomHandshakePending = SeedBootRomCommunicationHandshake();
+            ResetSh2ForStartup();
+            _bootRomHandshakePending = _useRealSh2BiosBoot ? false : SeedBootRomCommunicationHandshake();
             _bootRomSignatureRead = false;
             _bootRomSignatureReadbackActive = false;
             _bootRomLaunchPending = false;

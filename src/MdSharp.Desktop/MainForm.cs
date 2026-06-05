@@ -778,7 +778,8 @@ internal sealed class MainForm : Form
             cartridge,
             thirtyTwoXM68kBios: TryLoadThirtyTwoXM68kBios(),
             thirtyTwoXMasterSh2Bios: TryLoadThirtyTwoXMasterSh2Bios(),
-            thirtyTwoXSlaveSh2Bios: TryLoadThirtyTwoXSlaveSh2Bios());
+            thirtyTwoXSlaveSh2Bios: TryLoadThirtyTwoXSlaveSh2Bios(),
+            thirtyTwoXUseRealSh2BiosBoot: UseRealThirtyTwoXSh2BiosBoot());
         machine.Reset();
         _cartridge = cartridge;
         _machine = machine;
@@ -810,6 +811,14 @@ internal sealed class MainForm : Form
         }
 
         return null;
+    }
+
+    private static bool UseRealThirtyTwoXSh2BiosBoot()
+    {
+        string? value = Environment.GetEnvironmentVariable("MDSHARP_32X_REAL_SH2_BIOS_BOOT");
+        return value is "1" ||
+            value?.Equals("true", StringComparison.OrdinalIgnoreCase) == true ||
+            value?.Equals("yes", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static ReadOnlyMemory<byte>? TryLoadThirtyTwoXMasterSh2Bios()

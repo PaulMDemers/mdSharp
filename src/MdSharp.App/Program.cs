@@ -7492,7 +7492,16 @@ MegaDrive CreateMachineFromCartridge(CartridgeImage cartridge)
         IsPalRegion(cartridge),
         TryLoadThirtyTwoXM68kBios(),
         TryLoadThirtyTwoXMasterSh2Bios(),
-        TryLoadThirtyTwoXSlaveSh2Bios());
+        TryLoadThirtyTwoXSlaveSh2Bios(),
+        UseRealThirtyTwoXSh2BiosBoot());
+}
+
+bool UseRealThirtyTwoXSh2BiosBoot()
+{
+    string? value = Environment.GetEnvironmentVariable("MDSHARP_32X_REAL_SH2_BIOS_BOOT");
+    return value is "1" ||
+        value?.Equals("true", StringComparison.OrdinalIgnoreCase) == true ||
+        value?.Equals("yes", StringComparison.OrdinalIgnoreCase) == true;
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
