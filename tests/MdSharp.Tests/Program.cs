@@ -1650,6 +1650,10 @@ void ThirtyTwoXSh2CoreExecutesSyntheticCode()
     AssertEqual((byte)0x22, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 0));
     AssertEqual((byte)0x11, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 1));
     AssertEqual((byte)0x22, ReadSh2ByteForTest(sdramCacheIsolationDevice, cacheThroughSdramByte, cpuIndex: 1));
+    WriteSh2ByteForTest(sdramCacheIsolationDevice, cacheThroughSdramByte, 0x33, cpuIndex: 0);
+    AssertEqual((byte)0x22, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 0));
+    AssertEqual((byte)0x11, ReadSh2ByteForTest(sdramCacheIsolationDevice, cachedSdramByte, cpuIndex: 1));
+    AssertEqual((byte)0x33, ReadSh2ByteForTest(sdramCacheIsolationDevice, cacheThroughSdramByte, cpuIndex: 1));
 
     ThirtyTwoXDevice cacheAddressArrayDevice = new(cacheControlRom);
     WriteSh2ByteForTest(cacheAddressArrayDevice, 0xFFFF_FE92, 0xC1); // Select way 3 and enable cache.

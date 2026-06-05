@@ -2721,7 +2721,6 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
             _sdram[sdramOffset] = value;
-            UpdateSh2SdramCacheByte(sdramOffset, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "W8", address, value);
             return;
         }
@@ -2870,8 +2869,6 @@ public sealed class ThirtyTwoXDevice
         {
             _sdram[overflowSdramOffset] = (byte)(value >> 8);
             _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
-            UpdateSh2SdramCacheByte(overflowSdramOffset, _sdram[overflowSdramOffset], cpuIndex);
-            UpdateSh2SdramCacheByte((overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)], cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
             return;
         }
