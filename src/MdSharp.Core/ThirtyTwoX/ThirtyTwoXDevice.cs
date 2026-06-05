@@ -3841,8 +3841,7 @@ public sealed class ThirtyTwoXDevice
     {
         for (int y = 0; y < OutputHeight; y++)
         {
-            int lineAddress = ReadBigEndianWord(source, y * 2) * 2;
-            if (lineAddress < 0 || lineAddress >= source.Length)
+            if (!TryReadFrameBufferLineAddress(source, y, out int lineAddress))
             {
                 continue;
             }
@@ -3868,8 +3867,7 @@ public sealed class ThirtyTwoXDevice
         {
             for (int y = 0; y < OutputHeight; y++)
             {
-                int lineAddress = ReadBigEndianWord(source, y * 2) * 2;
-                if (lineAddress < 0 || lineAddress >= source.Length)
+                if (!TryReadFrameBufferLineAddress(source, y, out int lineAddress))
                 {
                     continue;
                 }
@@ -3896,8 +3894,7 @@ public sealed class ThirtyTwoXDevice
         {
             for (int y = 0; y < OutputHeight; y++)
             {
-                int lineAddress = ReadBigEndianWord(source, y * 2) * 2;
-                if (lineAddress < 0 || lineAddress >= source.Length)
+                if (!TryReadFrameBufferLineAddress(source, y, out int lineAddress))
                 {
                     continue;
                 }
@@ -3924,8 +3921,7 @@ public sealed class ThirtyTwoXDevice
 
         for (int y = 0; y < OutputHeight; y++)
         {
-            int lineAddress = ReadBigEndianWord(source, y * 2) * 2;
-            if (lineAddress < 0 || lineAddress >= source.Length)
+            if (!TryReadFrameBufferLineAddress(source, y, out int lineAddress))
             {
                 continue;
             }
@@ -3947,6 +3943,19 @@ public sealed class ThirtyTwoXDevice
         }
 
         return false;
+    }
+
+    private static bool TryReadFrameBufferLineAddress(ReadOnlySpan<byte> source, int y, out int lineAddress)
+    {
+        ushort lineAddressWord = ReadBigEndianWord(source, y * 2);
+        if (lineAddressWord == 0)
+        {
+            lineAddress = 0;
+            return false;
+        }
+
+        lineAddress = lineAddressWord * 2;
+        return lineAddress < source.Length;
     }
 
     private void CompositePackedPixelLine(Span<byte> framebuffer, ReadOnlySpan<byte> source, int y, int lineAddress, bool blueFirst, bool shiftLeft, bool thirtyTwoXPriority, ReadOnlySpan<bool> mdOpaquePixels)
@@ -5741,7 +5750,7 @@ public sealed class ThirtyTwoXDevice
     {
         if (value != 0 ||
             !TryGetCommunicationByteIndex(offset, out int index) ||
-            index < 8 ||
+            index < 14 ||
             !_m68kCommunicationPendingHostBytes[index])
         {
             return false;
@@ -5870,7 +5879,8 @@ public sealed class ThirtyTwoXDevice
         // cross-side read/write timing as undefined. Keep the old byte visible to
         // the 68000 for one read when an SH-2 publishes a new nonzero byte, but do
         // not mutate the shared byte. The other SH-2 may be polling the same mailbox.
-        if (offset is ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2 or
+        if (index < 2 ||
+            offset is ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2 or
             ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3 ||
             previousValue != 0 || value == 0)
         {
@@ -5887,8 +5897,16 @@ public sealed class ThirtyTwoXDevice
         if (!TryGetCommunicationByteIndex(offset, out int index) ||
             (index & 1) != 0 ||
             previousValue == 0 ||
+            value == 0 ||
             previousValue == value)
         {
+            if (TryGetCommunicationByteIndex(offset, out int clearIndex) && (clearIndex & 1) == 0)
+            {
+                _m68kCommunicationStaleWordValid[clearIndex >> 1] = false;
+                _m68kCommunicationStaleValid[clearIndex] = false;
+                _m68kCommunicationStaleValid[clearIndex + 1] = false;
+            }
+
             return;
         }
 

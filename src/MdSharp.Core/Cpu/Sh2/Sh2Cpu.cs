@@ -191,7 +191,14 @@ public sealed class Sh2Cpu
             return false;
         }
 
-        uint maxIterations = (uint)((maxCycles - entryCycles) / 2);
+        uint maxIterations = startedAtBranch
+            ? (uint)((maxCycles - entryCycles) / 2)
+            : (uint)(maxCycles / 2);
+        if (startedAtBranch && maxIterations > 0)
+        {
+            maxIterations--;
+        }
+
         uint iterations = count == 0 ? maxIterations : Math.Min(count, maxIterations);
         if (iterations == 0)
         {
@@ -213,6 +220,11 @@ public sealed class Sh2Cpu
         {
             SetT(false);
             PC = loopPc;
+            if (startedAtBranch)
+            {
+                Cycles += maxCycles - cycles;
+                cycles = maxCycles;
+            }
         }
 
         return true;
@@ -2175,31 +2187,48 @@ public sealed class Sh2Cpu
             startAtLoad = false;
         }
 
-        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 2, out ushort compareOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        ushort loadOpcode = 0;
+        ushort compareOpcode = 0;
+        ushort branchOpcode = 0;
+        bool found = false;
+        if (!startAtLoad)
         {
-            if (PC < 2 ||
-                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
-                !peekBus.TryPeekWord(PC, out compareOpcode) ||
-                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            found = peekBus.TryPeekWord(loopPc, out loadOpcode) &&
+                peekBus.TryPeekWord(loopPc + 2, out compareOpcode) &&
+                peekBus.TryPeekWord(loopPc + 4, out branchOpcode);
+        }
+        else
+        {
+            ReadOnlySpan<int> offsets = [0, -2, -4];
+            foreach (int offset in offsets)
             {
-                if (PC < 4 ||
-                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
-                    !peekBus.TryPeekWord(PC - 2, out compareOpcode) ||
-                    !peekBus.TryPeekWord(PC, out branchOpcode))
+                if (offset < 0 && PC < (uint)-offset)
                 {
-                    return false;
+                    continue;
                 }
 
-                loopPc = PC - 4;
-                startAtLoad = false;
+                uint candidate = (uint)(PC + offset);
+                if (peekBus.TryPeekWord(candidate, out ushort candidateLoadOpcode) &&
+                    peekBus.TryPeekWord(candidate + 2, out ushort candidateCompareOpcode) &&
+                    peekBus.TryPeekWord(candidate + 4, out ushort candidateBranchOpcode) &&
+                    (candidateLoadOpcode & 0xFF00) == 0xC500 &&
+                    (candidateCompareOpcode & 0xF00F) == 0x3007 &&
+                    (candidateBranchOpcode & 0xFF00) == 0x8B00)
+                {
+                    loopPc = candidate;
+                    loadOpcode = candidateLoadOpcode;
+                    compareOpcode = candidateCompareOpcode;
+                    branchOpcode = candidateBranchOpcode;
+                    startAtLoad = offset == 0;
+                    found = true;
+                    break;
+                }
             }
-            else
-            {
-                loopPc = PC - 2;
-                startAtLoad = false;
-            }
+        }
+
+        if (!found)
+        {
+            return false;
         }
 
         if ((loadOpcode & 0xFF00) != 0xC500 ||
@@ -3420,29 +3449,39 @@ public sealed class Sh2Cpu
         }
 
         uint loopPc = PC;
-        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        ushort loadOpcode = 0;
+        ushort testOpcode = 0;
+        ushort branchOpcode = 0;
+        bool found = false;
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
         {
-            if (PC < 2 ||
-                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
-                !peekBus.TryPeekWord(PC, out testOpcode) ||
-                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            if (offset < 0 && PC < (uint)-offset)
             {
-                if (PC < 4 ||
-                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
-                    !peekBus.TryPeekWord(PC - 2, out testOpcode) ||
-                    !peekBus.TryPeekWord(PC, out branchOpcode))
-                {
-                    return false;
-                }
+                continue;
+            }
 
-                loopPc = PC - 4;
-            }
-            else
+            uint candidate = (uint)(PC + offset);
+            if (peekBus.TryPeekWord(candidate, out ushort candidateLoadOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out ushort candidateTestOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out ushort candidateBranchOpcode) &&
+                (candidateLoadOpcode & 0xFF00) >= 0x8500 &&
+                (candidateLoadOpcode & 0xFF00) <= 0x85F0 &&
+                (candidateTestOpcode & 0xF00F) == 0x2008 &&
+                (candidateBranchOpcode & 0xFF00) == 0x8900)
             {
-                loopPc = PC - 2;
+                loopPc = candidate;
+                loadOpcode = candidateLoadOpcode;
+                testOpcode = candidateTestOpcode;
+                branchOpcode = candidateBranchOpcode;
+                found = true;
+                break;
             }
+        }
+
+        if (!found)
+        {
+            return false;
         }
 
         if ((loadOpcode & 0xFF00) < 0x8500 ||
@@ -3649,29 +3688,38 @@ public sealed class Sh2Cpu
         }
 
         uint loopPc = PC;
-        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        ushort loadOpcode = 0;
+        ushort testOpcode = 0;
+        ushort branchOpcode = 0;
+        bool found = false;
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
         {
-            if (PC < 2 ||
-                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
-                !peekBus.TryPeekWord(PC, out testOpcode) ||
-                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            if (offset < 0 && PC < (uint)-offset)
             {
-                if (PC < 4 ||
-                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
-                    !peekBus.TryPeekWord(PC - 2, out testOpcode) ||
-                    !peekBus.TryPeekWord(PC, out branchOpcode))
-                {
-                    return false;
-                }
+                continue;
+            }
 
-                loopPc = PC - 4;
-            }
-            else
+            uint candidate = (uint)(PC + offset);
+            if (peekBus.TryPeekWord(candidate, out ushort candidateLoadOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out ushort candidateTestOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out ushort candidateBranchOpcode) &&
+                (candidateLoadOpcode & 0xF00F) == 0x6000 &&
+                (candidateTestOpcode & 0xF00F) == 0x2008 &&
+                (candidateBranchOpcode & 0xFF00) == 0x8B00)
             {
-                loopPc = PC - 2;
+                loopPc = candidate;
+                loadOpcode = candidateLoadOpcode;
+                testOpcode = candidateTestOpcode;
+                branchOpcode = candidateBranchOpcode;
+                found = true;
+                break;
             }
+        }
+
+        if (!found)
+        {
+            return false;
         }
 
         if ((loadOpcode & 0xF00F) != 0x6000 ||
@@ -3729,29 +3777,39 @@ public sealed class Sh2Cpu
         }
 
         uint loopPc = PC;
-        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
+        ushort loadOpcode = 0;
+        ushort testOpcode = 0;
+        ushort branchOpcode = 0;
+        bool found = false;
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
         {
-            if (PC < 2 ||
-                !peekBus.TryPeekWord(PC - 2, out loadOpcode) ||
-                !peekBus.TryPeekWord(PC, out testOpcode) ||
-                !peekBus.TryPeekWord(PC + 2, out branchOpcode))
+            if (offset < 0 && PC < (uint)-offset)
             {
-                if (PC < 4 ||
-                    !peekBus.TryPeekWord(PC - 4, out loadOpcode) ||
-                    !peekBus.TryPeekWord(PC - 2, out testOpcode) ||
-                    !peekBus.TryPeekWord(PC, out branchOpcode))
-                {
-                    return false;
-                }
+                continue;
+            }
 
-                loopPc = PC - 4;
-            }
-            else
+            uint candidate = (uint)(PC + offset);
+            if (peekBus.TryPeekWord(candidate, out ushort candidateLoadOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out ushort candidateTestOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out ushort candidateBranchOpcode) &&
+                (candidateLoadOpcode & 0xFF00) >= 0x8400 &&
+                (candidateLoadOpcode & 0xFF00) <= 0x84F0 &&
+                (candidateTestOpcode & 0xFF00) == 0xC800 &&
+                (candidateBranchOpcode & 0xFF00) == 0x8900)
             {
-                loopPc = PC - 2;
+                loopPc = candidate;
+                loadOpcode = candidateLoadOpcode;
+                testOpcode = candidateTestOpcode;
+                branchOpcode = candidateBranchOpcode;
+                found = true;
+                break;
             }
+        }
+
+        if (!found)
+        {
+            return false;
         }
 
         if ((loadOpcode & 0xFF00) < 0x8400 ||

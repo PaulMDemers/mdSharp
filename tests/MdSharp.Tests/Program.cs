@@ -508,6 +508,11 @@ void ThirtyTwoXDeviceShell()
     lowerCommandClearDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0xFF);
     WriteSh2ByteForTest(lowerCommandClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset), 0, cpuIndex: 0);
     AssertEqual((byte)0x00, lowerCommandClearDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    ThirtyTwoXDevice upperCommandClearDevice = new();
+    upperCommandClearDevice.Reset();
+    upperCommandClearDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0xFFFF);
+    WriteSh2WordForTest(upperCommandClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0, cpuIndex: 0);
+    AssertEqual((ushort)0x0000, upperCommandClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
@@ -555,7 +560,7 @@ void ThirtyTwoXDeviceShell()
     WriteSh2ByteForTest(dmaVectorDevice, sh2IpraDmaPriorityAddress, 0x04, cpuIndex: 1);
     WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x28, 0x0000_0042, cpuIndex: 1);
     WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x34, 0x0000_0001, cpuIndex: 1);
-    WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x4C, 0x0000_0006, cpuIndex: 1);
+    WriteSh2LongForTest(dmaVectorDevice, sh2DmaRegisterStart + 0x1C, 0x0000_0006, cpuIndex: 1);
     AssertEqual(4, dmaVectorDevice.SlaveSh2.PendingInterruptLevel);
     AssertEqual(66, dmaVectorDevice.SlaveSh2.PendingInterruptVectorNumber);
     AssertEqual(0, device.RunSh2(4));
@@ -1849,11 +1854,12 @@ void ThirtyTwoXSh2DtBfDelayLoopFastForward()
         BootRomLaunchPending = false,
     });
     branchEntryDevice.MasterSh2.R[0] = 32;
+    SetSh2BoolProperty(branchEntryDevice.SlaveSh2, nameof(Sh2Cpu.Halted), true);
     branchEntryDevice.RunSh2Cycles(1);
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 2, branchEntryDevice.MasterSh2.PC);
     int branchEntryPartial = branchEntryDevice.RunSh2Cycles(21);
-    AssertTrue(branchEntryPartial <= 2, "branch-entry DT/BF loop should collapse after landing on BF");
-    AssertEqual(22u, branchEntryDevice.MasterSh2.R[0]);
+    AssertTrue(branchEntryPartial <= 3, "branch-entry DT/BF loop should collapse after landing on BF");
+    AssertEqual(27u, branchEntryDevice.MasterSh2.R[0]);
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, branchEntryDevice.MasterSh2.PC);
 }
 
@@ -2554,6 +2560,7 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
         "MOV.W postincrement strided copy loop should fast-forward");
     AssertTrue(cycles > 0, "fast-forwarded strided copy loop should consume cycles");
     fast.Step();
+    fast.Step();
 
     AssertEqual(interpreted.PC, fast.PC);
     AssertEqual(interpreted.R[0], fast.R[0]);
@@ -2574,6 +2581,7 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
         bus.WriteInstructionWord(LoopPc + 8, 0x8BFA); // BF loop
         bus.WriteInstructionWord(LoopPc + 10, 0x000B); // RTS
         bus.WriteInstructionWord(LoopPc + 12, 0x0009); // NOP
+        bus.WriteInstructionWord(LoopPc + 0x10, 0x001B); // SLEEP
     }
 
     static void SeedData(SyntheticSh2Bus bus)
@@ -2591,6 +2599,7 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
         cpu.R[2] = 4;
         cpu.R[10] = Source;
         cpu.R[11] = Destination;
+        SetSh2Property(cpu, nameof(Sh2Cpu.PR), LoopPc + 0x10);
         return cpu;
     }
 }
@@ -2674,14 +2683,14 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
     AssertEqual(6, deviceCycles);
     AssertEqual(LoopPc, device.SlaveSh2.PC);
     AssertEqual(1u, device.SlaveSh2.R[7]);
-    AssertEqual((byte)0x02, device.Sdram[0xF040]);
-    AssertEqual((byte)0x00, device.Sdram[0xF041]);
+    AssertEqual((byte)0x02, device.Sdram[0x3F040]);
+    AssertEqual((byte)0x00, device.Sdram[0x3F041]);
     int burstCycles = InvokeStepSh2Cpu(device, cpuIndex: 1, cycleBudget: 256);
     AssertEqual(6, burstCycles);
     AssertEqual(LoopPc + 0xAA, device.SlaveSh2.PC);
     AssertEqual(0u, device.SlaveSh2.R[7]);
-    AssertEqual((byte)0x02, device.Sdram[0xF042]);
-    AssertEqual((byte)0x00, device.Sdram[0xF043]);
+    AssertEqual((byte)0x02, device.Sdram[0x3F042]);
+    AssertEqual((byte)0x00, device.Sdram[0x3F043]);
 
     ThirtyTwoXDevice tailDevice = new();
     tailDevice.Reset();
@@ -2695,10 +2704,10 @@ void ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward()
     AssertEqual(LoopPc + 0xAA, tailDevice.SlaveSh2.PC);
     AssertEqual(0u, tailDevice.SlaveSh2.R[7]);
     AssertEqual(Destination + 0x86, tailDevice.SlaveSh2.R[8]);
-    AssertEqual((byte)0x02, tailDevice.Sdram[0xF080]);
-    AssertEqual((byte)0x00, tailDevice.Sdram[0xF081]);
-    AssertEqual((byte)0x02, tailDevice.Sdram[0xF084]);
-    AssertEqual((byte)0x00, tailDevice.Sdram[0xF085]);
+    AssertEqual((byte)0x02, tailDevice.Sdram[0x3F080]);
+    AssertEqual((byte)0x00, tailDevice.Sdram[0x3F081]);
+    AssertEqual((byte)0x02, tailDevice.Sdram[0x3F084]);
+    AssertEqual((byte)0x00, tailDevice.Sdram[0x3F085]);
 
     static void LoadEmptyDescriptorSpanLoop(SyntheticSh2Bus target)
     {
@@ -9501,6 +9510,11 @@ void AssertTrue(bool condition, string message, [CallerLineNumber] int line = 0)
 }
 
 static void SetSh2Property(Sh2Cpu cpu, string propertyName, uint value)
+{
+    typeof(Sh2Cpu).GetProperty(propertyName)!.SetValue(cpu, value);
+}
+
+static void SetSh2BoolProperty(Sh2Cpu cpu, string propertyName, bool value)
 {
     typeof(Sh2Cpu).GetProperty(propertyName)!.SetValue(cpu, value);
 }
