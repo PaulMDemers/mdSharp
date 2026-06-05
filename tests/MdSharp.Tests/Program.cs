@@ -46,6 +46,7 @@ Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBuffer
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
 Run("32X SH-2 GBR register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward);
+Run("32X SH-2 null linked-list idle loop fast-forward", ThirtyTwoXSh2NullLinkedListIdleLoopFastForward);
 Run("32X SH-2 GBR word CMP/GT BF poll loop fast-forward", ThirtyTwoXSh2GbrWordCmpGtBfPollLoopFastForward);
 Run("32X SH-2 padded GBR CMP/EQ BF/BRA poll loop fast-forward", ThirtyTwoXSh2PaddedGbrCmpEqBfBraPollLoopFastForward);
 Run("32X SH-2 linked-list insert fast-forward matches interpreter", ThirtyTwoXSh2LinkedListInsertFastForwardMatchesInterpreter);
@@ -2949,6 +2950,42 @@ void ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward()
 
     bus.WriteWord(Gbr + 32, 0x534D);
     AssertTrue(!cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(500, out _), "matching GBR register compare poll should fall back and leave normally");
+}
+
+void ThirtyTwoXSh2NullLinkedListIdleLoopFastForward()
+{
+    const uint LoopPc = 0x0600_4588;
+    const uint ListRoot = 0x2600_4A84;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0x00, 0xDD0B); // MOV.L @(literal,PC),R13
+    bus.WriteInstructionWord(LoopPc + 0x02, 0x6ED2); // MOV.L @R13,R14
+    bus.WriteInstructionWord(LoopPc + 0x04, 0x5DD1); // MOV.L @(4,R13),R13
+    bus.WriteInstructionWord(LoopPc + 0x06, 0x2EE8); // TST R14,R14
+    bus.WriteInstructionWord(LoopPc + 0x08, 0x8F08); // BF/S work
+    bus.WriteInstructionWord(LoopPc + 0x0A, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x0C, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x0E, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x10, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x12, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x14, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x16, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 0x18, 0xAFF2); // BRA loop
+    bus.WriteInstructionWord(LoopPc + 0x1A, 0x0009); // NOP
+    bus.WriteLong(LoopPc + 0x30, ListRoot);
+    bus.WriteLong(ListRoot, 0);
+    bus.WriteLong(ListRoot + 4, 0xFFFF_FFFF);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardSdramNullLinkedListIdleLoop(1024, bus.TryReadLong, out int cycles), "null linked-list idle loop should fast-forward while no work is queued");
+    AssertEqual(1024, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(ListRoot, cpu.R[13]);
+    AssertEqual(0u, cpu.R[14]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteLong(ListRoot, 0x2600_5000);
+    AssertTrue(!cpu.TryFastForwardSdramNullLinkedListIdleLoop(1024, bus.TryReadLong, out _), "queued linked-list work should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2GbrWordCmpGtBfPollLoopFastForward()

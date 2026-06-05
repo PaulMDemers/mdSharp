@@ -2161,6 +2161,115 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardSdramNullLinkedListIdleLoop(int maxCycles, Func<uint, uint?> readLong, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort literalOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort headLoadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort nextLoadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((literalOpcode & 0xF000) != 0xD000 ||
+            (headLoadOpcode & 0xF00F) != 0x6002 ||
+            (nextLoadOpcode & 0xF00F) != 0x5001 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8F00)
+        {
+            return false;
+        }
+
+        int baseRegister = (literalOpcode >> 8) & 0x0F;
+        int headSourceRegister = (headLoadOpcode >> 4) & 0x0F;
+        int headValueRegister = (headLoadOpcode >> 8) & 0x0F;
+        int nextBaseRegister = (nextLoadOpcode >> 4) & 0x0F;
+        int nextValueRegister = (nextLoadOpcode >> 8) & 0x0F;
+        int testN = (testOpcode >> 8) & 0x0F;
+        int testM = (testOpcode >> 4) & 0x0F;
+        if (headSourceRegister != baseRegister ||
+            nextBaseRegister != baseRegister ||
+            nextValueRegister != baseRegister ||
+            testN != headValueRegister ||
+            testM != headValueRegister)
+        {
+            return false;
+        }
+
+        uint branchTarget = BranchByteTarget(loopPc + 8, branchOpcode);
+        if (branchTarget <= loopPc + 10)
+        {
+            return false;
+        }
+
+        uint baseAddress = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        uint? headNullable = readLong(baseAddress);
+        uint? nextNullable = readLong(baseAddress + 4);
+        if (!headNullable.HasValue ||
+            !nextNullable.HasValue ||
+            headNullable.Value != 0 ||
+            nextNullable.Value != 0xFFFF_FFFFu)
+        {
+            return false;
+        }
+
+        uint? braPc = null;
+        for (uint pc = loopPc + 10; pc < branchTarget; pc += 2)
+        {
+            if (!peekBus.TryPeekWord(pc, out ushort opcode))
+            {
+                return false;
+            }
+
+            if ((opcode & 0xF000) == 0xA000)
+            {
+                if (BranchWordTarget(pc, opcode) != loopPc ||
+                    pc + 2 >= branchTarget ||
+                    !peekBus.TryPeekWord(pc + 2, out ushort delayOpcode) ||
+                    delayOpcode != 0x0009)
+                {
+                    return false;
+                }
+
+                braPc = pc;
+                break;
+            }
+
+            if (opcode != 0x0009)
+            {
+                return false;
+            }
+        }
+
+        if (!braPc.HasValue)
+        {
+            return false;
+        }
+
+        cycles = maxCycles;
+        Cycles += cycles;
+        R[baseRegister] = baseAddress;
+        R[headValueRegister] = 0;
+        SetT(true);
+        PC = loopPc;
+        LastOpcode = 0x0009;
+        LastOpcodePc = braPc.Value + 2;
+        return true;
+    }
+
     public bool TryFastForwardGbrWordCmpGtBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;

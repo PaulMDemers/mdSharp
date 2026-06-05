@@ -869,6 +869,17 @@ public sealed class ThirtyTwoXDevice
                 AdvanceSh2Watchdog(cpuIndex, fastCycles);
                 return fastCycles;
             }
+
+            if (cycleBudget != int.MaxValue &&
+                (nextOpcode & 0xF000) == 0xD000 &&
+                cpu.TryFastForwardSdramNullLinkedListIdleLoop(
+                    cycleBudget,
+                    _sh2LongReaders[cpuIndex],
+                    out fastCycles))
+            {
+                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                return fastCycles;
+            }
         }
 
         if (EnableSh2ListFastPaths &&
