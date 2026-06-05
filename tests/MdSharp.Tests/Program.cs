@@ -17,6 +17,7 @@ Run("cartridge diagnostics", CartridgeDiagnosticsReport);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
 Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
+Run("32X SH-2 FRT counter writes and flags", ThirtyTwoXSh2FrtCounterWritesAndFlags);
 Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticCode);
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
@@ -1490,6 +1491,48 @@ void ThirtyTwoXSh2FrtInputCaptureSignal()
     device.SlaveSh2.Run(4);
     AssertEqual(0x0000_0055u, device.SlaveSh2.R[2]);
     AssertTrue(device.SlaveSh2.Halted, "input capture should vector through FRT vector 64 when ICIE is enabled");
+}
+
+void ThirtyTwoXSh2FrtCounterWritesAndFlags()
+{
+    byte[] rom = new byte[0x100];
+    for (int offset = 0; offset < rom.Length; offset += 2)
+    {
+        WriteWord(rom, offset, 0x0009); // NOP
+    }
+
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(0, 0);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+    });
+
+    WriteSh2WordForTest(device, 0xFFFF_FE12, 0x1234);
+    AssertEqual((ushort)0x1234, ReadSh2WordForTest(device, 0xFFFF_FE12));
+
+    device.RunSh2Cycles(64);
+    ushort advanced = ReadSh2WordForTest(device, 0xFFFF_FE12);
+    AssertTrue(advanced > 0x1234, "FRC should advance from the CPU-written counter value");
+
+    ThirtyTwoXDevice flagsDevice = new(rom);
+    flagsDevice.ResetSh2(0, 0);
+    flagsDevice.RestoreState(flagsDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+    });
+
+    WriteSh2WordForTest(flagsDevice, 0xFFFF_FE12, 0xFFFC);
+    WriteSh2WordForTest(flagsDevice, 0xFFFF_FE14, 0xFFFF);
+    flagsDevice.RunSh2Cycles(64);
+
+    byte ftcsr = ReadSh2ByteForTest(flagsDevice, 0xFFFF_FE11);
+    AssertTrue((ftcsr & 0x08) != 0, "FRT should set OCFA when FRC crosses OCRA");
+    AssertTrue((ftcsr & 0x02) != 0, "FRT should set OVF when FRC wraps");
 }
 
 void ThirtyTwoXSh2CoreExecutesSyntheticCode()

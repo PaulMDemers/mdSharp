@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 62;
+    private const int Version = 63;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -339,6 +339,9 @@ public static class SaveStateSerializer
         WriteArray(writer, state.WatchdogCycleCounters);
         WriteArray(writer, state.WatchdogInterruptPending);
         WriteArray(writer, state.WatchdogWriteSelect);
+        WriteArray(writer, state.FrtBaseCycles);
+        WriteArray(writer, state.FrtBaseCounters);
+        WriteArray(writer, state.FrtLastCounters);
         WriteArray(writer, state.MasterCacheDataArray);
         WriteArray(writer, state.SlaveCacheDataArray);
         WriteArray(writer, state.MasterCacheDataValid);
@@ -437,6 +440,9 @@ public static class SaveStateSerializer
         int[] watchdogCycleCounters = version >= 53 ? ReadIntArray(reader) : new int[2];
         bool[] watchdogInterruptPending = version >= 53 ? ReadBoolArray(reader) : new bool[2];
         byte[] watchdogWriteSelect = version >= 53 ? ReadByteArray(reader) : new byte[2];
+        long[] frtBaseCycles = version >= 63 ? ReadLongArray(reader) : new long[2];
+        ushort[] frtBaseCounters = version >= 63 ? ReadUShortArray(reader) : new ushort[2];
+        ushort[] frtLastCounters = version >= 63 ? ReadUShortArray(reader) : new ushort[2];
         byte[] masterCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
         byte[] slaveCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
         byte[] masterCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(masterCacheDataArray);
@@ -609,6 +615,9 @@ public static class SaveStateSerializer
             watchdogCycleCounters,
             watchdogInterruptPending,
             watchdogWriteSelect,
+            frtBaseCycles,
+            frtBaseCounters,
+            frtLastCounters,
             masterCacheDataArray,
             slaveCacheDataArray,
             masterCacheDataValid,
@@ -1032,6 +1041,15 @@ public static class SaveStateSerializer
         }
     }
 
+    private static void WriteArray(BinaryWriter writer, long[] values)
+    {
+        writer.Write(values.Length);
+        foreach (long value in values)
+        {
+            writer.Write(value);
+        }
+    }
+
     private static void WriteArray(BinaryWriter writer, bool[] values)
     {
         writer.Write(values.Length);
@@ -1054,6 +1072,7 @@ public static class SaveStateSerializer
     private static ushort[] ReadUShortArray(BinaryReader reader) => ReadArray(reader, r => r.ReadUInt16());
     private static uint[] ReadUIntArray(BinaryReader reader) => ReadArray(reader, r => r.ReadUInt32());
     private static int[] ReadIntArray(BinaryReader reader) => ReadArray(reader, r => r.ReadInt32());
+    private static long[] ReadLongArray(BinaryReader reader) => ReadArray(reader, r => r.ReadInt64());
     private static bool[] ReadBoolArray(BinaryReader reader) => ReadArray(reader, r => r.ReadBoolean());
     private static double[] ReadDoubleArray(BinaryReader reader) => ReadArray(reader, r => r.ReadDouble());
 

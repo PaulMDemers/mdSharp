@@ -22,6 +22,9 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2PeripheralRegisterEnd = Sh2PeripheralRegisterStart + Sh2PeripheralRegisterBytes;
     private const uint Sh2FrtRegisterStart = 0xFFFF_FE10;
     private const uint Sh2FreeRunningCounterStart = 0xFFFF_FE12;
+    private const uint Sh2FrtOutputCompareRegisterStart = 0xFFFF_FE14;
+    private const uint Sh2FrtControlRegisterAddress = 0xFFFF_FE16;
+    private const uint Sh2FrtControlStatusRegisterAddress = 0xFFFF_FE11;
     private const uint Sh2FrtInputCaptureRegisterStart = 0xFFFF_FE18;
     private const uint Sh2WatchdogRegisterStart = 0xFFFF_FE80;
     private const uint Sh2WatchdogCounterAddress = 0xFFFF_FE81;
@@ -120,7 +123,12 @@ public sealed class ThirtyTwoXDevice
     private const int CartridgeRomBusMasterCyclesPerByte = 12;
     private const int Sh2CommunicationSyncStepLimit = 32768;
     private const byte Sh2FrtTierInputCaptureEnable = 0x80;
+    private const byte Sh2FrtTierOutputCompareAEnable = 0x08;
+    private const byte Sh2FrtTierOverflowEnable = 0x02;
     private const byte Sh2FrtFtcsrInputCaptureFlag = 0x80;
+    private const byte Sh2FrtFtcsrOutputCompareAFlag = 0x08;
+    private const byte Sh2FrtFtcsrOverflowFlag = 0x02;
+    private const byte Sh2FrtFtcsrWritableMask = 0x8E;
     private const byte Sh2WatchdogWriteCounterKey = 0x5A;
     private const byte Sh2WatchdogWriteControlKey = 0xA5;
     private const byte Sh2WatchdogControlInitial = 0x18;
@@ -206,6 +214,9 @@ public sealed class ThirtyTwoXDevice
     private readonly int[] _sh2WatchdogCycleCounters = new int[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly bool[] _sh2WatchdogInterruptPending = new bool[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly byte[] _sh2WatchdogWriteSelect = new byte[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly long[] _sh2FrtBaseCycles = new long[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly ushort[] _sh2FrtBaseCounters = new ushort[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly ushort[] _sh2FrtLastCounters = new ushort[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly int[] _sh2WaitCycles = new int[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Dictionary<uint, byte[]>[] _sh2LowCartridgeCacheLines =
     [
@@ -424,6 +435,9 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sh2WatchdogCycleCounters);
         Array.Clear(_sh2WatchdogInterruptPending);
         Array.Clear(_sh2WatchdogWriteSelect);
+        Array.Clear(_sh2FrtBaseCycles);
+        Array.Clear(_sh2FrtBaseCounters);
+        Array.Clear(_sh2FrtLastCounters);
         _sh2LowCartridgeCacheLines[0].Clear();
         _sh2LowCartridgeCacheLines[1].Clear();
         ResetSh2PeripheralDefaults();
@@ -561,9 +575,13 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sh2WatchdogCycleCounters);
         Array.Clear(_sh2WatchdogInterruptPending);
         Array.Clear(_sh2WatchdogWriteSelect);
+        Array.Clear(_sh2FrtBaseCycles);
+        Array.Clear(_sh2FrtBaseCounters);
+        Array.Clear(_sh2FrtLastCounters);
         ResetSh2PeripheralDefaults();
         MasterSh2.Reset(masterPc);
         SlaveSh2.Reset(slavePc);
+        ResetSh2FrtBaseCycles();
     }
 
     public void ResetSh2FromUserHeader()
@@ -578,6 +596,7 @@ public sealed class ThirtyTwoXDevice
         uint slave = _userHeader.IsValid ? NormalizeSh2ProgramAddress(_userHeader.SlaveStart) : ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart;
         MasterSh2.Reset(master);
         SlaveSh2.Reset(slave);
+        ResetSh2FrtBaseCycles();
         if (_userHeader.IsValid)
         {
             uint masterVectorBase = NormalizeSh2ProgramAddress(_userHeader.MasterVectorBase);
@@ -731,7 +750,7 @@ public sealed class ThirtyTwoXDevice
                         Sh2FrameBufferWordFillLoopCycles,
                         out fastCycles))
                 {
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -745,7 +764,7 @@ public sealed class ThirtyTwoXDevice
                         Sh2LongStoreFillLoopCycles,
                         out fastCycles))
                 {
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -757,7 +776,7 @@ public sealed class ThirtyTwoXDevice
                     _sh2WordWriters[cpuIndex],
                     out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -768,7 +787,7 @@ public sealed class ThirtyTwoXDevice
                     _sh2WordWriters[cpuIndex],
                     out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -781,7 +800,7 @@ public sealed class ThirtyTwoXDevice
                         out fastCycles))
                 {
                     EmptyDescriptorSpanFastPathHits++;
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -795,7 +814,7 @@ public sealed class ThirtyTwoXDevice
                         out fastCycles))
                 {
                     EmptyDescriptorSpanTailFastPathHits++;
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -813,7 +832,7 @@ public sealed class ThirtyTwoXDevice
                         out fastCycles))
                 {
                     LongDifferencePollFastPathHits++;
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -851,7 +870,7 @@ public sealed class ThirtyTwoXDevice
                 if (cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(cycleBudget, out fastCycles))
                 {
                     ByteDisplacementZeroWaitFastPathHits++;
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -859,14 +878,14 @@ public sealed class ThirtyTwoXDevice
             if ((nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFF00) == 0xC400 &&
                 cpu.TryFastForwardGbrBytePairEqualTaskletReturn(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -877,7 +896,7 @@ public sealed class ThirtyTwoXDevice
                     _sh2LongReaders[cpuIndex],
                     out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
         }
@@ -890,7 +909,7 @@ public sealed class ThirtyTwoXDevice
                 Sh2LinkedListObserver,
                 out fastCycles))
         {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
+            AdvanceSh2InternalTimers(cpuIndex, fastCycles);
             return fastCycles;
         }
 
@@ -902,7 +921,7 @@ public sealed class ThirtyTwoXDevice
                 Sh2RechainObserver,
                 out fastCycles))
         {
-            AdvanceSh2Watchdog(cpuIndex, fastCycles);
+            AdvanceSh2InternalTimers(cpuIndex, fastCycles);
             return fastCycles;
         }
 
@@ -911,35 +930,35 @@ public sealed class ThirtyTwoXDevice
             if ((nextOpcode & 0xF0FF) == 0x4010 &&
                 cpu.TryFastForwardDtBfLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode == 0x0009 || (nextOpcode & 0xF0FF) == 0x4010) &&
                 cpu.TryFastForwardNopDtBfDelayLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFF00) == 0x8400 &&
                 cpu.TryFastForwardTstBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrCmpEqBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -949,14 +968,14 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8B00) &&
                 cpu.TryFastForwardGbrWordCmpGtBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrCmpEqBfBraPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -964,19 +983,19 @@ public sealed class ThirtyTwoXDevice
             {
                 if (cpu.TryFastForwardMovLiteralTstBfPollLoop(cycleBudget, out fastCycles))
                 {
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
 
                 if (cpu.TryFastForwardMovLiteralLongTstBtPollLoop(cycleBudget, out fastCycles))
                 {
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
 
                 if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
                 {
-                    AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                     return fastCycles;
                 }
             }
@@ -986,14 +1005,14 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardMovLiteralLongTstBtPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xF00F) == 0x6001 &&
                 cpu.TryFastForwardWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1002,7 +1021,7 @@ public sealed class ThirtyTwoXDevice
                     ((nextOpcode & 0xFF00) >= 0x8500 && (nextOpcode & 0xFF00) <= 0x85F0)) &&
                 cpu.TryFastForwardWordDisplacementTstBtPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1012,14 +1031,14 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardLongTstBtPaddedPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xF00F) == 0x6001 &&
                 cpu.TryFastForwardWordTstBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1028,7 +1047,7 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8B00) &&
                 cpu.TryFastForwardByteTstBfPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1037,21 +1056,21 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardByteDisplacementTstImmediateBtPollLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xF00F) == 0x2008 &&
                 cpu.TryFastForwardTstBfsDelayAddLoop(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
             if ((nextOpcode & 0xFF00) == 0x8900 &&
                 cpu.TryFastForwardTwoStageWordZeroPollRing(cycleBudget, out fastCycles))
             {
-                AdvanceSh2Watchdog(cpuIndex, fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
         }
@@ -1064,7 +1083,7 @@ public sealed class ThirtyTwoXDevice
             delta = cycles;
         }
 
-        AdvanceSh2Watchdog(cpuIndex, (int)Math.Min(delta, int.MaxValue));
+        AdvanceSh2InternalTimers(cpuIndex, (int)Math.Min(delta, int.MaxValue));
         return cycles;
     }
 
@@ -1170,7 +1189,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         SdramFlagTaskletDispatcherFastPathHits++;
-        AdvanceSh2Watchdog(cpuIndex, cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
     }
 
@@ -1183,7 +1202,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         LiteralByteDisplacementTstRegisterPollFastPathHits++;
-        AdvanceSh2Watchdog(cpuIndex, cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
     }
 
@@ -1196,7 +1215,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         GbrByteZeroComm20PollFastPathHits++;
-        AdvanceSh2Watchdog(cpuIndex, cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
     }
 
@@ -1209,7 +1228,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         GbrBytePairInterruptIdleFastPathHits++;
-        AdvanceSh2Watchdog(cpuIndex, cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
     }
 
@@ -2063,6 +2082,9 @@ public sealed class ThirtyTwoXDevice
             (int[])_sh2WatchdogCycleCounters.Clone(),
             (bool[])_sh2WatchdogInterruptPending.Clone(),
             (byte[])_sh2WatchdogWriteSelect.Clone(),
+            (long[])_sh2FrtBaseCycles.Clone(),
+            (ushort[])_sh2FrtBaseCounters.Clone(),
+            (ushort[])_sh2FrtLastCounters.Clone(),
             (byte[])_sh2CacheDataArrays[0].Clone(),
             (byte[])_sh2CacheDataArrays[1].Clone(),
             (byte[])_sh2CacheDataValid[0].Clone(),
@@ -2174,6 +2196,9 @@ public sealed class ThirtyTwoXDevice
         Array.Copy(state.WatchdogCycleCounters, _sh2WatchdogCycleCounters, Math.Min(_sh2WatchdogCycleCounters.Length, state.WatchdogCycleCounters.Length));
         Array.Copy(state.WatchdogInterruptPending, _sh2WatchdogInterruptPending, Math.Min(_sh2WatchdogInterruptPending.Length, state.WatchdogInterruptPending.Length));
         Array.Copy(state.WatchdogWriteSelect, _sh2WatchdogWriteSelect, Math.Min(_sh2WatchdogWriteSelect.Length, state.WatchdogWriteSelect.Length));
+        Array.Copy(state.FrtBaseCycles, _sh2FrtBaseCycles, Math.Min(_sh2FrtBaseCycles.Length, state.FrtBaseCycles.Length));
+        Array.Copy(state.FrtBaseCounters, _sh2FrtBaseCounters, Math.Min(_sh2FrtBaseCounters.Length, state.FrtBaseCounters.Length));
+        Array.Copy(state.FrtLastCounters, _sh2FrtLastCounters, Math.Min(_sh2FrtLastCounters.Length, state.FrtLastCounters.Length));
         CopyStateArray(state.MasterCacheDataArray, _sh2CacheDataArrays[0]);
         CopyStateArray(state.SlaveCacheDataArray, _sh2CacheDataArrays[1]);
         CopyStateArray(state.MasterCacheDataValid, _sh2CacheDataValid[0]);
@@ -5363,13 +5388,21 @@ public sealed class ThirtyTwoXDevice
 
         if (address == Sh2FrtRegisterStart + 1)
         {
-            registers[index] = (byte)((registers[index] & value & 0x8E) | (value & 0x01));
+            registers[index] = (byte)((registers[index] & value & Sh2FrtFtcsrWritableMask) | (value & 0x01));
             TraceSh2MemoryAccess(cpuIndex, "WP8", address, registers[index]);
             return;
         }
 
-        if (address == Sh2FrtRegisterStart + 6)
+        if (address is >= Sh2FreeRunningCounterStart and < Sh2FreeRunningCounterStart + 2)
         {
+            WriteSh2FreeRunningCounterByte(address, value, cpuIndex);
+            TraceSh2MemoryAccess(cpuIndex, "WP8", address, value);
+            return;
+        }
+
+        if (address == Sh2FrtControlRegisterAddress)
+        {
+            LatchSh2FreeRunningCounter(cpuIndex);
             registers[index] = (byte)(value & 0x83);
             TraceSh2MemoryAccess(cpuIndex, "WP8", address, registers[index]);
             return;
@@ -5452,6 +5485,12 @@ public sealed class ThirtyTwoXDevice
         }
     }
 
+    private void AdvanceSh2InternalTimers(int cpuIndex, int cycles)
+    {
+        AdvanceSh2Watchdog(cpuIndex, cycles);
+        AdvanceSh2FreeRunningTimer(cpuIndex, cycles);
+    }
+
     private void AdvanceSh2Watchdog(int cpuIndex, int cycles)
     {
         if (cycles <= 0)
@@ -5500,24 +5539,138 @@ public sealed class ThirtyTwoXDevice
         return vector & 0x7F;
     }
 
+    private void WriteSh2FreeRunningCounterByte(uint address, byte value, int cpuIndex)
+    {
+        int index = cpuIndex & 1;
+        ushort current = BuildSh2FreeRunningCounter(index);
+        ushort next = (address & 1) == 0
+            ? (ushort)((current & 0x00FF) | (value << 8))
+            : (ushort)((current & 0xFF00) | value);
+        SetSh2FreeRunningCounter(index, next);
+    }
+
+    private void LatchSh2FreeRunningCounter(int cpuIndex)
+    {
+        int index = cpuIndex & 1;
+        SetSh2FreeRunningCounter(index, BuildSh2FreeRunningCounter(index));
+    }
+
+    private void SetSh2FreeRunningCounter(int cpuIndex, ushort counter)
+    {
+        int index = cpuIndex & 1;
+        _sh2FrtBaseCounters[index] = counter;
+        _sh2FrtLastCounters[index] = counter;
+        _sh2FrtBaseCycles[index] = GetSh2Cycles(index);
+    }
+
+    private void ResetSh2FrtBaseCycles()
+    {
+        for (int cpu = 0; cpu < ThirtyTwoXHardwareProfile.Sh2CpuCount; cpu++)
+        {
+            _sh2FrtBaseCycles[cpu] = GetSh2Cycles(cpu);
+            _sh2FrtLastCounters[cpu] = _sh2FrtBaseCounters[cpu];
+        }
+    }
+
+    private void AdvanceSh2FreeRunningTimer(int cpuIndex, int cycles)
+    {
+        if (cycles <= 0)
+        {
+            return;
+        }
+
+        int index = cpuIndex & 1;
+        int divider = GetSh2FreeRunningCounterDivider(index);
+        if (divider == int.MaxValue)
+        {
+            _sh2FrtLastCounters[index] = BuildSh2FreeRunningCounter(index);
+            return;
+        }
+
+        ushort previous = _sh2FrtLastCounters[index];
+        ushort current = BuildSh2FreeRunningCounter(index);
+        _sh2FrtLastCounters[index] = current;
+        if (current == previous)
+        {
+            return;
+        }
+
+        byte[] registers = _sh2PeripheralRegisters[index];
+        int ftcsrIndex = (int)(Sh2FrtControlStatusRegisterAddress - Sh2PeripheralRegisterStart);
+        byte flags = 0;
+        ushort ocra = ReadBigEndianWord(registers, (int)(Sh2FrtOutputCompareRegisterStart - Sh2PeripheralRegisterStart));
+        if (CounterRangeIncludes(previous, current, ocra))
+        {
+            flags |= Sh2FrtFtcsrOutputCompareAFlag;
+        }
+
+        if (current < previous)
+        {
+            flags |= Sh2FrtFtcsrOverflowFlag;
+        }
+
+        if (flags == 0)
+        {
+            return;
+        }
+
+        registers[ftcsrIndex] |= flags;
+        byte tier = registers[(int)(Sh2FrtRegisterStart - Sh2PeripheralRegisterStart)];
+        Sh2Cpu cpu = index == 0 ? MasterSh2 : SlaveSh2;
+        if ((flags & Sh2FrtFtcsrOutputCompareAFlag) != 0 && (tier & Sh2FrtTierOutputCompareAEnable) != 0)
+        {
+            cpu.RequestInterrupt(Sh2FrtInputCaptureInterruptLevel, Sh2FrtInputCaptureInterruptVector);
+        }
+
+        if ((flags & Sh2FrtFtcsrOverflowFlag) != 0 && (tier & Sh2FrtTierOverflowEnable) != 0)
+        {
+            cpu.RequestInterrupt(Sh2FrtInputCaptureInterruptLevel, Sh2FrtInputCaptureInterruptVector);
+        }
+    }
+
+    private static bool CounterRangeIncludes(ushort previous, ushort current, ushort target)
+    {
+        if (current > previous)
+        {
+            return target > previous && target <= current;
+        }
+
+        if (current < previous)
+        {
+            return target > previous || target <= current;
+        }
+
+        return false;
+    }
+
     private ushort BuildSh2FreeRunningCounter(int cpuIndex)
     {
-        long cycles = (cpuIndex & 1) == 0 ? MasterSh2.Cycles : SlaveSh2.Cycles;
-        byte tcr = _sh2PeripheralRegisters[cpuIndex & 1][(int)((Sh2FrtRegisterStart + 6) - Sh2PeripheralRegisterStart)];
-        int divider = (tcr & 0x03) switch
+        int index = cpuIndex & 1;
+        int divider = GetSh2FreeRunningCounterDivider(index);
+        if (divider == int.MaxValue)
+        {
+            return _sh2FrtBaseCounters[index];
+        }
+
+        long elapsedCycles = Math.Max(0, GetSh2Cycles(index) - _sh2FrtBaseCycles[index]);
+        return (ushort)(_sh2FrtBaseCounters[index] + (elapsedCycles / divider));
+    }
+
+    private int GetSh2FreeRunningCounterDivider(int cpuIndex)
+    {
+        byte tcr = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2FrtControlRegisterAddress - Sh2PeripheralRegisterStart)];
+        return (tcr & 0x03) switch
         {
             0x00 => 8,
             0x01 => 32,
             0x02 => 128,
             _ => int.MaxValue,
         };
+    }
 
-        if (divider == int.MaxValue)
-        {
-            return 0;
-        }
-
-        return (ushort)(cycles / divider);
+    private long GetSh2Cycles(int cpuIndex)
+    {
+        return (cpuIndex & 1) == 0 ? MasterSh2.Cycles : SlaveSh2.Cycles;
     }
 
     private void ResetSh2PeripheralDefaults()
@@ -5533,6 +5686,7 @@ public sealed class ThirtyTwoXDevice
             registers[(int)(Sh2WatchdogRegisterStart - Sh2PeripheralRegisterStart)] = Sh2WatchdogControlInitial;
             registers[(int)(Sh2WatchdogCounterAddress - Sh2PeripheralRegisterStart)] = 0x00;
             registers[(int)(Sh2WatchdogResetControlAddress - Sh2PeripheralRegisterStart)] = Sh2WatchdogResetControlInitial;
+            SetSh2FreeRunningCounter(cpu, 0);
         }
     }
 
@@ -6781,6 +6935,9 @@ public sealed class ThirtyTwoXDevice
         int[] WatchdogCycleCounters,
         bool[] WatchdogInterruptPending,
         byte[] WatchdogWriteSelect,
+        long[] FrtBaseCycles,
+        ushort[] FrtBaseCounters,
+        ushort[] FrtLastCounters,
         byte[] MasterCacheDataArray,
         byte[] SlaveCacheDataArray,
         byte[] MasterCacheDataValid,
