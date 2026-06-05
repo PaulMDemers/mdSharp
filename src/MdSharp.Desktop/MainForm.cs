@@ -774,7 +774,11 @@ internal sealed class MainForm : Form
             SramStore.Load(path, cartridge, _settings.SaveRamDirectory);
         }
 
-        MegaDrive machine = new(cartridge, thirtyTwoXM68kBios: TryLoadThirtyTwoXM68kBios());
+        MegaDrive machine = new(
+            cartridge,
+            thirtyTwoXM68kBios: TryLoadThirtyTwoXM68kBios(),
+            thirtyTwoXMasterSh2Bios: TryLoadThirtyTwoXMasterSh2Bios(),
+            thirtyTwoXSlaveSh2Bios: TryLoadThirtyTwoXSlaveSh2Bios());
         machine.Reset();
         _cartridge = cartridge;
         _machine = machine;
@@ -793,6 +797,54 @@ internal sealed class MainForm : Form
             Path.Combine(AppContext.BaseDirectory, "32X_M68K_BIOS.BIN"),
             Path.Combine(Environment.CurrentDirectory, "32X_G_BIOS.BIN"),
             Path.Combine(Environment.CurrentDirectory, "32X_M68K_BIOS.BIN"),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+            {
+                return File.ReadAllBytes(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private static ReadOnlyMemory<byte>? TryLoadThirtyTwoXMasterSh2Bios()
+    {
+        string[] candidates =
+        [
+            Environment.GetEnvironmentVariable("MDSHARP_32X_MASTER_SH2_BIOS") ?? string.Empty,
+            Path.Combine(AppContext.BaseDirectory, "32X_M_BIOS.BIN"),
+            Path.Combine(AppContext.BaseDirectory, "32X_MASTER_BIOS.BIN"),
+            Path.Combine(AppContext.BaseDirectory, "32X_MSH2_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_M_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_MASTER_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_MSH2_BIOS.BIN"),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+            {
+                return File.ReadAllBytes(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private static ReadOnlyMemory<byte>? TryLoadThirtyTwoXSlaveSh2Bios()
+    {
+        string[] candidates =
+        [
+            Environment.GetEnvironmentVariable("MDSHARP_32X_SLAVE_SH2_BIOS") ?? string.Empty,
+            Path.Combine(AppContext.BaseDirectory, "32X_S_BIOS.BIN"),
+            Path.Combine(AppContext.BaseDirectory, "32X_SLAVE_BIOS.BIN"),
+            Path.Combine(AppContext.BaseDirectory, "32X_SSH2_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_S_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_SLAVE_BIOS.BIN"),
+            Path.Combine(Environment.CurrentDirectory, "32X_SSH2_BIOS.BIN"),
         ];
 
         foreach (string candidate in candidates)

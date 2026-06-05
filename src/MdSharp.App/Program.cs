@@ -5098,7 +5098,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         }
         else
         {
-            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine = CreateMachineFromCartridge(cartridge);
             machine.Reset();
             device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
             for (; completedFrames < frames; completedFrames++)
@@ -5485,7 +5485,7 @@ void RegressFolder(string folder, string outputCsv, int frames, int instructions
         try
         {
             CartridgeImage cartridge = CartridgeImage.FromFile(file);
-            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine = CreateMachineFromCartridge(cartridge);
             machine.Reset();
             for (int frame = 0; frame < frames; frame++)
             {
@@ -5611,7 +5611,7 @@ CompatibilityResult RunCompatibilityCase(string romPath, string romRoot, string 
         }
         else
         {
-            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine = CreateMachineFromCartridge(cartridge);
             machine.Reset();
             for (; completedFrames < frames; completedFrames++)
             {
@@ -5742,7 +5742,7 @@ PostMenuCompatibilityResult RunPostMenuCompatibilityCase(PostMenuCompatibilityCa
             Func<int, GenesisButton>? player2Input = string.IsNullOrWhiteSpace(testCase.Player2Script)
                 ? null
                 : ResolveInputScript(testCase.Player2Script!);
-            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine = CreateMachineFromCartridge(cartridge);
             machine.Reset();
             for (; completedFrames < Math.Max(1, testCase.Frames); completedFrames++)
             {
@@ -6011,7 +6011,7 @@ PerfSuiteResult RunPerfSuiteCase(string romPath, string romRoot, int frames, int
     try
     {
         CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-        machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+        machine = CreateMachineFromCartridge(cartridge);
         machine.CollectFramePerformance = frameProfile;
         machine.Vdp.CollectRenderPerformance = frameProfile;
         machine.Reset();
@@ -6421,7 +6421,7 @@ VisualCheckpointResult RunVisualCheckpointCase(
     try
     {
         CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-        machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+        machine = CreateMachineFromCartridge(cartridge);
         machine.Reset();
         for (; completedFrames < spec.Frames; completedFrames++)
         {
@@ -6700,7 +6700,7 @@ MovieVisualCheckpointResult RunMovieVisualCheckpointCase(
             }
 
             movie.RestoreInitialSaveRam(cartridge);
-            machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+            machine = CreateMachineFromCartridge(cartridge);
             machine.Reset();
             for (; completedFrames < spec.TargetFrame; completedFrames++)
             {
@@ -7338,7 +7338,7 @@ MovieRegressionResult RunMovieRegressionCase(string moviePath, string movieRoot,
         }
 
         movie.RestoreInitialSaveRam(cartridge);
-        machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+        machine = CreateMachineFromCartridge(cartridge);
         machine.Reset();
         for (; completedFrames < movie.FrameCount; completedFrames++)
         {
@@ -7482,7 +7482,17 @@ bool IsPalRegion(CartridgeImage cartridge)
 MegaDrive CreateMachine(string romPath)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-    return new MegaDrive(cartridge, IsPalRegion(cartridge), TryLoadThirtyTwoXM68kBios());
+    return CreateMachineFromCartridge(cartridge);
+}
+
+MegaDrive CreateMachineFromCartridge(CartridgeImage cartridge)
+{
+    return new MegaDrive(
+        cartridge,
+        IsPalRegion(cartridge),
+        TryLoadThirtyTwoXM68kBios(),
+        TryLoadThirtyTwoXMasterSh2Bios(),
+        TryLoadThirtyTwoXSlaveSh2Bios());
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
@@ -7494,6 +7504,54 @@ ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
         Path.Combine(AppContext.BaseDirectory, "32X_M68K_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_G_BIOS.BIN"),
         Path.Combine(Environment.CurrentDirectory, "32X_M68K_BIOS.BIN"),
+    ];
+
+    foreach (string candidate in candidates)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+        {
+            return File.ReadAllBytes(candidate);
+        }
+    }
+
+    return null;
+}
+
+ReadOnlyMemory<byte>? TryLoadThirtyTwoXMasterSh2Bios()
+{
+    string[] candidates =
+    [
+        Environment.GetEnvironmentVariable("MDSHARP_32X_MASTER_SH2_BIOS") ?? string.Empty,
+        Path.Combine(AppContext.BaseDirectory, "32X_M_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "32X_MASTER_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "32X_MSH2_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_M_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_MASTER_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_MSH2_BIOS.BIN"),
+    ];
+
+    foreach (string candidate in candidates)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+        {
+            return File.ReadAllBytes(candidate);
+        }
+    }
+
+    return null;
+}
+
+ReadOnlyMemory<byte>? TryLoadThirtyTwoXSlaveSh2Bios()
+{
+    string[] candidates =
+    [
+        Environment.GetEnvironmentVariable("MDSHARP_32X_SLAVE_SH2_BIOS") ?? string.Empty,
+        Path.Combine(AppContext.BaseDirectory, "32X_S_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "32X_SLAVE_BIOS.BIN"),
+        Path.Combine(AppContext.BaseDirectory, "32X_SSH2_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_S_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_SLAVE_BIOS.BIN"),
+        Path.Combine(Environment.CurrentDirectory, "32X_SSH2_BIOS.BIN"),
     ];
 
     foreach (string candidate in candidates)
@@ -12989,7 +13047,7 @@ SmokeResult RunSmoke(string path, int instructionBudget)
             return new SmokeResult("unsupported", executed, 0, cartridgeDetail, string.Empty);
         }
 
-        machine = new MegaDrive(cartridge, IsPalRegion(cartridge));
+        machine = CreateMachineFromCartridge(cartridge);
         machine.Reset();
 
         for (; executed < instructionBudget && !machine.MainCpu.Stopped; executed++)

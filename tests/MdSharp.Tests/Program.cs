@@ -67,6 +67,7 @@ Run("32X 68000 bus shell", ThirtyTwoXM68kBusShell);
 Run("32X 68000 vector ROM mapping", ThirtyTwoXM68kVectorRomMapping);
 Run("32X 68000 VBlank uses adapter level 5", ThirtyTwoXM68kVBlankUsesAdapterLevel5);
 Run("32X SH-2 boot ROM ready marker", ThirtyTwoXSh2BootRomReadyMarker);
+Run("32X SH-2 boot ROM maps optional BIOS images", ThirtyTwoXSh2BootRomMapsOptionalBiosImages);
 Run("68k reset and simple instructions", CpuResetAndSimpleInstructions);
 Run("68k Codemasters DNLD reset vectors", CodemastersDnldResetVectors);
 Run("VDP register and VRAM writes", VdpRegisterAndVramWrites);
@@ -4613,6 +4614,49 @@ void ThirtyTwoXSh2BootRomReadyMarker()
     AssertEqual((byte)0x00, ReadSh2ByteForTest(device, 0x0000_0FFF));
     AssertEqual((ushort)0x000B, ReadSh2WordForTest(device, 0x0000_0000));
     AssertEqual((ushort)0x0009, ReadSh2WordForTest(device, 0x0000_0002));
+}
+
+void ThirtyTwoXSh2BootRomMapsOptionalBiosImages()
+{
+    byte[] masterBios = new byte[0x1000];
+    byte[] slaveBios = new byte[0x1000];
+    masterBios[0] = 0x12;
+    masterBios[1] = 0x34;
+    masterBios[2] = 0x56;
+    slaveBios[0] = 0xAB;
+    slaveBios[1] = 0xCD;
+    slaveBios[2] = 0xEF;
+
+    ThirtyTwoXDevice device = new(masterSh2Bios: masterBios, slaveSh2Bios: slaveBios);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+
+    static byte ReadSh2ByteForTest(ThirtyTwoXDevice target, uint address, int cpuIndex)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Byte", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Byte reflection hook missing");
+        return (byte)method.Invoke(target, [address, cpuIndex])!;
+    }
+
+    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address, int cpuIndex)
+    {
+        System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReadSh2Word reflection hook missing");
+        return (ushort)method.Invoke(target, [address, cpuIndex])!;
+    }
+
+    AssertEqual((byte)0x12, ReadSh2ByteForTest(device, 0x0000_0000, 0));
+    AssertEqual((byte)0xAB, ReadSh2ByteForTest(device, 0x0000_0000, 1));
+    AssertEqual((byte)0x56, ReadSh2ByteForTest(device, 0x2000_0002, 0));
+    AssertEqual((byte)0xEF, ReadSh2ByteForTest(device, 0x2000_0002, 1));
+    AssertEqual((ushort)0x1234, ReadSh2WordForTest(device, 0x0000_0000, 0));
+    AssertEqual((ushort)0xABCD, ReadSh2WordForTest(device, 0x0000_0000, 1));
 }
 
 void CpuResetAndSimpleInstructions()

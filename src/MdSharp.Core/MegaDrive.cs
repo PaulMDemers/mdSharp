@@ -18,13 +18,21 @@ public sealed class MegaDrive
     private static readonly double BassShelfAlpha = LowPassAlpha(AudioConstants.BassShelfCutoffHz, AudioConstants.DefaultSampleRate);
     private static readonly double OutputFilterAlpha = LowPassAlpha(AudioConstants.OutputLowPassCutoffHz, AudioConstants.DefaultSampleRate);
 
-    public MegaDrive(CartridgeImage cartridge, bool pal = false, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null)
+    public MegaDrive(CartridgeImage cartridge, bool pal = false, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null)
     {
         IsPal = pal;
         Vdp = new Vdp();
         Psg = new Psg();
         Ym2612 = new Ym2612();
-        Bus = new GenesisBus(cartridge, Vdp, Psg, Ym2612, pal, thirtyTwoXM68kBios: thirtyTwoXM68kBios);
+        Bus = new GenesisBus(
+            cartridge,
+            Vdp,
+            Psg,
+            Ym2612,
+            pal,
+            thirtyTwoXM68kBios: thirtyTwoXM68kBios,
+            thirtyTwoXMasterSh2Bios: thirtyTwoXMasterSh2Bios,
+            thirtyTwoXSlaveSh2Bios: thirtyTwoXSlaveSh2Bios);
         MainCpu = new M68kCpu(Bus);
         MainCpu.LineFInstructionOverride = TryHandleThirtyTwoXSdkLineF;
         MainCpu.TrapInstructionOverride = TryHandleThirtyTwoXSdkTrap;

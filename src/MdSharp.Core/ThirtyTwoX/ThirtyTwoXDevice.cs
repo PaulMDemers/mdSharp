@@ -230,6 +230,11 @@ public sealed class ThirtyTwoXDevice
     private readonly Func<uint, uint?>[] _sh2LongReaders = new Func<uint, uint?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly byte[] _sh2DmaRequestSelect = new byte[2];
     private readonly ReadOnlyMemory<byte> _cartridgeRom;
+    private readonly byte[][] _sh2Bios =
+    [
+        [],
+        []
+    ];
     private readonly MarsUserHeader _userHeader;
     private readonly bool _pal;
     private bool _adapterEnabled;
@@ -295,10 +300,20 @@ public sealed class ThirtyTwoXDevice
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
 
-    public ThirtyTwoXDevice(ReadOnlyMemory<byte> cartridgeRom = default, bool pal = false)
+    public ThirtyTwoXDevice(ReadOnlyMemory<byte> cartridgeRom = default, bool pal = false, ReadOnlyMemory<byte>? masterSh2Bios = null, ReadOnlyMemory<byte>? slaveSh2Bios = null)
     {
         _cartridgeRom = cartridgeRom;
         _pal = pal;
+        if (masterSh2Bios.HasValue && !masterSh2Bios.Value.IsEmpty)
+        {
+            _sh2Bios[0] = masterSh2Bios.Value.ToArray();
+        }
+
+        if (slaveSh2Bios.HasValue && !slaveSh2Bios.Value.IsEmpty)
+        {
+            _sh2Bios[1] = slaveSh2Bios.Value.ToArray();
+        }
+
         _userHeader = MarsUserHeader.Parse(cartridgeRom.Span);
         Sh2MemoryBus masterBus = new(this, cpuIndex: 0);
         Sh2MemoryBus slaveBus = new(this, cpuIndex: 1);
@@ -2342,7 +2357,7 @@ public sealed class ThirtyTwoXDevice
             return value;
         }
 
-        if (TryReadSh2BootRomByte(address, out byte bootRomValue))
+        if (TryReadSh2BootRomByte(address, cpuIndex, out byte bootRomValue))
         {
             TraceSh2MemoryAccess(cpuIndex, "RB8", address, bootRomValue);
             return bootRomValue;
@@ -2414,7 +2429,7 @@ public sealed class ThirtyTwoXDevice
 
     internal ushort ReadSh2Word(uint address, int cpuIndex)
     {
-        if (TryReadSh2BootRomServiceWord(address, out ushort bootServiceWord))
+        if (TryReadSh2BootRomServiceWord(address, cpuIndex, out ushort bootServiceWord))
         {
             TraceSh2MemoryAccess(cpuIndex, "RB16", address, bootServiceWord);
             return bootServiceWord;
@@ -2516,7 +2531,7 @@ public sealed class ThirtyTwoXDevice
             return true;
         }
 
-        if (TryReadSh2BootRomByte(address, out value))
+        if (TryReadSh2BootRomByte(address, cpuIndex, out value))
         {
             return true;
         }
@@ -2587,7 +2602,7 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
-    private bool TryReadSh2BootRomByte(uint address, out byte value)
+    private bool TryReadSh2BootRomByte(uint address, int cpuIndex, out byte value)
     {
         if (!AdapterEnabled || !_sh2ResetReleased)
         {
@@ -2600,6 +2615,13 @@ public sealed class ThirtyTwoXDevice
         {
             value = 0;
             return false;
+        }
+
+        byte[] bios = _sh2Bios[cpuIndex & 1];
+        if (normalized < bios.Length)
+        {
+            value = bios[normalized];
+            return true;
         }
 
         // Several retail titles poll the SH-2 boot ROM's first byte after
@@ -2609,7 +2631,7 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
-    private bool TryReadSh2BootRomServiceWord(uint address, out ushort value)
+    private bool TryReadSh2BootRomServiceWord(uint address, int cpuIndex, out ushort value)
     {
         if (!AdapterEnabled || !_sh2ResetReleased)
         {
@@ -2622,6 +2644,13 @@ public sealed class ThirtyTwoXDevice
         {
             value = 0;
             return false;
+        }
+
+        byte[] bios = _sh2Bios[cpuIndex & 1];
+        if (normalized + 1 < bios.Length)
+        {
+            value = (ushort)((bios[normalized] << 8) | bios[normalized + 1]);
+            return true;
         }
 
         value = normalized switch
