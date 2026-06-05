@@ -670,6 +670,17 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x0002, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
     AssertEqual((ushort)0x4002, ReadSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
+    ThirtyTwoXDevice flushedDreqDevice = new();
+    flushedDreqDevice.Reset();
+    flushedDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);
+    flushedDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x1357);
+    flushedDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset, 0x2468);
+    AssertEqual(2, flushedDreqDevice.DreqFifoCount);
+    flushedDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0000);
+    AssertEqual(0, flushedDreqDevice.DreqFifoCount);
+    AssertEqual((ushort)0xFFFF, flushedDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+    AssertEqual((ushort)0x4000, ReadSh2WordForTest(flushedDreqDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
+
     ThirtyTwoXDevice fullDreqDevice = new();
     fullDreqDevice.Reset();
     fullDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0004);

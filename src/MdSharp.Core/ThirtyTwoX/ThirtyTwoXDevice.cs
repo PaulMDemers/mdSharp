@@ -78,7 +78,7 @@ public sealed class ThirtyTwoXDevice
     private const ushort AdapterControlVdpAccessSh2 = 0x8000;
     private const ushort DreqControlRomToVramDma = 0x0001;
     private const ushort DreqControlDma = 0x0002;
-    private const ushort DreqControlCpuWrite = 0x0004;
+    private const ushort DreqControlActive = 0x0004;
     private const ushort Sh2InterruptMaskPwm = 0x0001;
     private const ushort Sh2InterruptMaskCommand = 0x0002;
     private const ushort Sh2InterruptMaskHorizontal = 0x0004;
@@ -256,6 +256,7 @@ public sealed class ThirtyTwoXDevice
     private int _lastCompositeWrittenPixels;
     private int _dreqFifoWriteCount;
     private int _dreqDmaWordTransferCount;
+    private ushort _sideEffectPreviousSystemRegisterWord;
     private ushort _lastBitmapModeWrite;
     private ushort _lastFrameBufferControlWrite;
     private double _pwmLeftLevel;
@@ -1659,6 +1660,8 @@ public sealed class ThirtyTwoXDevice
         }
 
         RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
+        ushort aligned = (ushort)(index & ~1);
+        _sideEffectPreviousSystemRegisterWord = ReadBigEndianWord(_systemRegisters, aligned);
         RetirePostStartSignatureOnReadyTokenHostClear((ushort)index, 1, value);
         if (!ConsumePostStartHostClearProtection((ushort)index, value))
         {
@@ -1668,7 +1671,6 @@ public sealed class ThirtyTwoXDevice
         MarkM68kCommunicationHostByte((ushort)index, value);
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace("M68K", (ushort)index, value));
         TraceSystemRegisterAccess("M68K", "W8", (ushort)index, value);
-        ushort aligned = (ushort)(index & ~1);
         if (aligned != ThirtyTwoXHardwareProfile.DreqFifoOffset)
         {
             ApplySystemRegisterSideEffects(aligned, allowAdapterControl: true);
@@ -1685,6 +1687,7 @@ public sealed class ThirtyTwoXDevice
         int index = offset & (SystemRegisterBytes - 1);
         ushort aligned = (ushort)(index & ~1);
         bool hadBootRomSignature = HasPendingBootRomSignatureWrite(aligned);
+        _sideEffectPreviousSystemRegisterWord = ReadBigEndianWord(_systemRegisters, aligned);
         CancelBootRomHandshakeOnHostDataWrite(aligned, value);
         RetireObservedPostStartSignatureOnHostWrite(aligned);
         byte high = (byte)(value >> 8);
@@ -3051,6 +3054,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         byte previousValue = _systemRegisters[index];
+        _sideEffectPreviousSystemRegisterWord = ReadBigEndianWord(_systemRegisters, (ushort)(index & ~1));
         bool protectedHostByte = TryProtectM68kPendingHostByteFromSh2Clear((ushort)index, value);
         if (!protectedHostByte)
         {
@@ -3102,6 +3106,7 @@ public sealed class ThirtyTwoXDevice
         byte previousHigh = _systemRegisters[highIndex];
         byte previousLow = _systemRegisters[lowIndex];
         ushort previousWord = (ushort)((previousHigh << 8) | previousLow);
+        _sideEffectPreviousSystemRegisterWord = previousWord;
         byte high = (byte)(value >> 8);
         byte low = (byte)value;
         if (!TryProtectM68kPendingHostByteFromSh2Clear(aligned, high))
@@ -3196,7 +3201,7 @@ public sealed class ThirtyTwoXDevice
 
                 break;
             case ThirtyTwoXHardwareProfile.DreqControlOffset:
-                WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(value & (DreqControlCpuWrite | DreqControlDma | DreqControlRomToVramDma)));
+                WriteDreqControl(value, _sideEffectPreviousSystemRegisterWord);
                 break;
             case ThirtyTwoXHardwareProfile.DreqLengthOffset:
                 WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, (ushort)(value & 0xFFFC));
@@ -4984,7 +4989,7 @@ public sealed class ThirtyTwoXDevice
     private ushort BuildDreqControlStatus(bool sh2View)
     {
         ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
-        ushort status = (ushort)(control & (DreqControlRomToVramDma | DreqControlDma | DreqControlCpuWrite));
+        ushort status = (ushort)(control & (DreqControlRomToVramDma | DreqControlDma | DreqControlActive));
         if (_dreqFifo.Count >= DreqFifoCapacity)
         {
             status |= sh2View ? (ushort)0x8000 : (ushort)0x0080;
@@ -5002,7 +5007,7 @@ public sealed class ThirtyTwoXDevice
     {
         TryRunDreqDma();
         ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
-        if ((control & (DreqControlCpuWrite | DreqControlRomToVramDma)) == 0)
+        if ((control & DreqControlActive) == 0)
         {
             return;
         }
@@ -5021,7 +5026,7 @@ public sealed class ThirtyTwoXDevice
             WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, length);
             if (length == 0)
             {
-                WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(control & ~DreqControlCpuWrite));
+                WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(control & ~DreqControlActive));
             }
         }
 
@@ -5042,6 +5047,17 @@ public sealed class ThirtyTwoXDevice
     {
         ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset);
         WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, (ushort)(control & ~DreqControlRomToVramDma));
+    }
+
+    private void WriteDreqControl(ushort value, ushort oldControl)
+    {
+        ushort newControl = (ushort)(value & (DreqControlActive | DreqControlDma | DreqControlRomToVramDma));
+        if ((oldControl & DreqControlActive) != 0 && (newControl & DreqControlActive) == 0)
+        {
+            _dreqFifo.Clear();
+        }
+
+        WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqControlOffset, newControl);
     }
 
     private ushort PeekDreqFifo()
