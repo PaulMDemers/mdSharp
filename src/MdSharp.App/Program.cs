@@ -1667,7 +1667,7 @@ RunSingleRom(args[0], args.Length > 1 && int.TryParse(args[1], out int parsed) ?
 void RunSingleRom(string path, int instructionBudget)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(path);
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
 
     Console.WriteLine($"Loaded: {Path.GetFileName(path)}");
@@ -2468,7 +2468,7 @@ void RenderInputMovie(string romPath, string moviePath, string outputPath, int f
     }
 
     movie.RestoreInitialSaveRam(cartridge);
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
 
     int completedFrames = 0;
@@ -2674,7 +2674,7 @@ void TraceThirtyTwoXSh2(string romPath, int instructionLimit, string cpuName, ui
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
@@ -2713,7 +2713,7 @@ void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int in
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     if (!string.IsNullOrWhiteSpace(statePath))
     {
@@ -2939,7 +2939,7 @@ void TraceThirtyTwoXInterrupts(string romPath, string outputCsv, int frames, int
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -3082,7 +3082,7 @@ void TraceThirtyTwoXFillLoops(string romPath, string outputCsv, int frames, int 
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -3195,7 +3195,7 @@ void TraceThirtyTwoXRunlengthList(string romPath, string outputCsv, int frames, 
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -3347,7 +3347,7 @@ void TraceThirtyTwoXRunlengthRechain(string romPath, string outputCsv, int frame
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -3582,7 +3582,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     if (!string.IsNullOrWhiteSpace(statePath))
     {
@@ -3751,7 +3751,7 @@ void TraceThirtyTwoXCommunication(string romPath, string outputCsv, int frames, 
         (offsetStart, offsetEnd) = (offsetEnd, offsetStart);
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     if (!string.IsNullOrWhiteSpace(statePath))
     {
@@ -3835,7 +3835,7 @@ void TraceThirtyTwoXDiagnostic(string romPath, string outputCsv, int frames, int
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -4039,7 +4039,7 @@ void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int i
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -4168,7 +4168,7 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4212,7 +4212,7 @@ void InspectThirtyTwoXState(string romPath, string statePath, int frames, int in
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     SaveStateSerializer.Load(machine, statePath);
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
@@ -4256,7 +4256,7 @@ void ProfileThirtyTwoXHotPcs(string romPath, string outputCsv, int frames, int i
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Dictionary<ulong, long> samples = [];
@@ -4330,7 +4330,7 @@ void DumpThirtyTwoXSdram(string romPath, string outputPath, int frames, int inst
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4353,7 +4353,7 @@ void InspectThirtyTwoXCache(string romPath, int frames, int instructionsPerFrame
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4376,7 +4376,7 @@ void SummarizeThirtyTwoXFrameBuffers(string romPath, int frames, int instruction
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4563,7 +4563,7 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4670,7 +4670,7 @@ void DumpThirtyTwoXNodeRecords(string romPath, int frames, int instructionsPerFr
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     for (int frame = 0; frame < frames; frame++)
@@ -4754,7 +4754,7 @@ void TraceThirtyTwoX(string romPath, string outputCsv, int frames, int instructi
         return;
     }
 
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
@@ -6179,7 +6179,7 @@ static double TicksToMs(long ticks)
 void ProfileM68kAllocations(string romPath, int frames, int instructionsPerFrame, int top)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     machine.MainCpu.ClearAllocationProfile();
     machine.MainCpu.AllocationProfilingEnabled = true;
@@ -11572,7 +11572,7 @@ void TraceM68kMemoryReads(string romPath, string outputPath, int frames, int ins
 void InspectMachine(string romPath, int frames, int instructionsPerFrame, uint address, int bytes)
 {
     CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
-    MegaDrive machine = new(cartridge, IsPalRegion(cartridge));
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
     machine.Reset();
     for (int frame = 0; frame < frames; frame++)
     {
