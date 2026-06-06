@@ -273,6 +273,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (_thirtyTwoX is not null && TryWriteThirtyTwoXByte(address, value))
         {
             AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            TraceMemoryWriteByte(address, value);
             MaybeSeedThirtyTwoXSdkCountryBlock();
             return;
         }
@@ -347,6 +348,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (_thirtyTwoX is not null && TryWriteThirtyTwoXByte(address, value))
         {
             AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            TraceMemoryWriteByte(address, value);
             MaybeSeedThirtyTwoXSdkCountryBlock();
             return;
         }
@@ -355,6 +357,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             AddM68kWaitCycles(VdpPortM68kWaitCycles);
             WriteVdpByte(address, value);
+            TraceMemoryWriteByte(address, value);
             return;
         }
 
@@ -547,6 +550,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (_thirtyTwoX is not null && TryWriteThirtyTwoXWord(address, value))
         {
             AddM68kWaitCycles(CartridgeHardwareM68kWaitCycles);
+            TraceMemoryWriteWord(address, value);
             MaybeSeedThirtyTwoXSdkCountryBlock();
             return;
         }
@@ -1542,6 +1546,23 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             _thirtyTwoX?.NotifyM68kVdpControlLongWrite((ushort)(value >> 16), (ushort)value);
         }
+    }
+
+    private void TraceMemoryWriteByte(uint address, byte value)
+    {
+        MemoryWriteObserver?.Invoke(new MemoryWrite(CurrentM68kPc, address & 0x00FF_FFFF, value));
+    }
+
+    private void TraceMemoryWriteWord(uint address, ushort value)
+    {
+        if (MemoryWriteObserver is null)
+        {
+            return;
+        }
+
+        uint normalized = address & 0x00FF_FFFF;
+        TraceMemoryWriteByte(normalized, (byte)(value >> 8));
+        TraceMemoryWriteByte(normalized + 1, (byte)value);
     }
 
     private void AddVdpDataPortWait()
