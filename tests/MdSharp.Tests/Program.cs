@@ -69,7 +69,7 @@ Run("32X SH-2 division unit", ThirtyTwoXSh2DivisionUnit);
 Run("32X PWM interrupts advance with executed SH-2 cycles", ThirtyTwoXPwmInterruptsAdvanceWithExecutedSh2Cycles);
 Run("32X 68000 bus shell", ThirtyTwoXM68kBusShell);
 Run("32X 68000 vector ROM mapping", ThirtyTwoXM68kVectorRomMapping);
-Run("32X 68000 VBlank uses adapter level 5", ThirtyTwoXM68kVBlankUsesAdapterLevel5);
+Run("32X 68000 VBlank uses Genesis level 6", ThirtyTwoXM68kVBlankUsesGenesisLevel6);
 Run("32X SH-2 boot ROM ready marker", ThirtyTwoXSh2BootRomReadyMarker);
 Run("32X SH-2 boot ROM maps optional BIOS images", ThirtyTwoXSh2BootRomMapsOptionalBiosImages);
 Run("32X SH-2 real BIOS boot uses reset vectors", ThirtyTwoXSh2RealBiosBootUsesResetVectors);
@@ -4688,7 +4688,7 @@ void ThirtyTwoXM68kVectorRomMapping()
     AssertEqual((ushort)0xDEAD, machine.Bus.ReadWord(0x0000_02B4));
 }
 
-void ThirtyTwoXM68kVBlankUsesAdapterLevel5()
+void ThirtyTwoXM68kVBlankUsesGenesisLevel6()
 {
     byte[] rom = new byte[0x400000];
     WriteAscii(rom, 0x100, "SEGA 32X");
@@ -4731,8 +4731,8 @@ void ThirtyTwoXM68kVBlankUsesAdapterLevel5()
 
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop before 32X VBlank");
     machine.RunFrame(20_000);
-    AssertEqual(5u, machine.MainCpu.D[5]);
-    AssertEqual(0u, machine.MainCpu.D[6]);
+    AssertEqual(0u, machine.MainCpu.D[5]);
+    AssertEqual(6u, machine.MainCpu.D[6]);
 }
 
 void ThirtyTwoXSh2BootRomReadyMarker()
