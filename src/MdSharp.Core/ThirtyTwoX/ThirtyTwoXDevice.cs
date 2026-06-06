@@ -1167,6 +1167,13 @@ public sealed class ThirtyTwoXDevice
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
+
+            if ((nextOpcode & 0xF0FF) == 0x4000 &&
+                cpu.TryFastForwardShllRotclDtBfsAddLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
         }
 
         long before = cpu.Cycles;
