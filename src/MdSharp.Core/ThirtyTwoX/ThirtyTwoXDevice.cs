@@ -6422,8 +6422,21 @@ public sealed class ThirtyTwoXDevice
     private void MarkM68kCommunicationStaleWord(ushort offset, ushort previousValue, ushort value)
     {
         if (!TryGetCommunicationByteIndex(offset, out int index) ||
-            (index & 1) != 0 ||
-            previousValue == 0 ||
+            (index & 1) != 0)
+        {
+            return;
+        }
+
+        if (index == 8 &&
+            previousValue != 0 &&
+            value == 0)
+        {
+            _m68kCommunicationStaleWords[index >> 1] = previousValue;
+            _m68kCommunicationStaleWordValid[index >> 1] = true;
+            return;
+        }
+
+        if (previousValue == 0 ||
             value == 0 ||
             previousValue == value)
         {

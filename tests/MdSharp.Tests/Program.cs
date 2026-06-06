@@ -513,6 +513,12 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(staleCommDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0054, cpuIndex: 1);
     AssertEqual((ushort)0x50D4, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
     AssertEqual((ushort)0x0054, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
+    ThirtyTwoXDevice postBootTokenClearDevice = new();
+    postBootTokenClearDevice.Reset();
+    WriteSh2WordForTest(postBootTokenClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x534C, cpuIndex: 1);
+    WriteSh2WordForTest(postBootTokenClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0000, cpuIndex: 0);
+    AssertEqual((ushort)0x534C, postBootTokenClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
+    AssertEqual((ushort)0x0000, postBootTokenClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
     ThirtyTwoXDevice lowerCommandClearDevice = new();
     lowerCommandClearDevice.Reset();
     lowerCommandClearDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0xFF);
