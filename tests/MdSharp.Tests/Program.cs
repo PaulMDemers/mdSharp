@@ -2197,6 +2197,18 @@ void ThirtyTwoXSh2WordTstBtPollLoopFastForward()
 
     bus.WriteWord(FlagAddress, 1);
     AssertTrue(!cpu.TryFastForwardWordTstBtPollLoop(300, out _), "nonzero TST poll value should fall back to normal execution");
+
+    bus.WriteInstructionWord(LoopPc + 2, 0x2168); // TST R6,R1
+    bus.WriteWord(FlagAddress, 0x7FFF);
+    cpu.Reset(LoopPc);
+    cpu.R[2] = FlagAddress;
+    cpu.R[6] = 0x8000;
+    AssertTrue(cpu.TryFastForwardWordTstBtPollLoop(300, out _), "MOV.W/TST mask/BT zero poll should fast-forward");
+    AssertEqual(0x00007FFFu, cpu.R[1]);
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(FlagAddress, 0x8000);
+    AssertTrue(!cpu.TryFastForwardWordTstBtPollLoop(300, out _), "set masked TST poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
@@ -2220,6 +2232,19 @@ void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0000);
     AssertTrue(!cpu.TryFastForwardWordTstBfPollLoop(300, out _), "zero poll value should fall back to normal execution");
+
+    bus.WriteInstructionWord(LoopPc + 0, 0x6311); // MOV.W @R1,R3
+    bus.WriteInstructionWord(LoopPc + 2, 0x2368); // TST R6,R3
+    bus.WriteWord(0x2000_4020, 0x8000);
+    cpu.Reset(LoopPc);
+    cpu.R[1] = 0x2000_4020;
+    cpu.R[6] = 0x8000;
+    AssertTrue(cpu.TryFastForwardWordTstBfPollLoop(300, out _), "MOV.W/TST mask/BF nonzero poll should fast-forward");
+    AssertEqual(0xFFFF8000u, cpu.R[3]);
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(0x2000_4020, 0x7FFF);
+    AssertTrue(!cpu.TryFastForwardWordTstBfPollLoop(300, out _), "clear masked TST poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward()

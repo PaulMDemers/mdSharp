@@ -3748,19 +3748,25 @@ public sealed class Sh2Cpu
         int loadSource = (loadOpcode >> 4) & 0x0F;
         int testSource = (testOpcode >> 4) & 0x0F;
         int testDestination = (testOpcode >> 8) & 0x0F;
-        if (testSource != loadDestination ||
-            testDestination != loadDestination ||
-            !peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
+        if (testSource != loadDestination &&
+            testDestination != loadDestination)
         {
             return false;
         }
 
-        if (wordValue != 0)
+        int maskRegister = testSource == loadDestination ? testDestination : testSource;
+        if (!peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
         {
             return false;
         }
 
-        R[loadDestination] = 0;
+        uint loadedValue = (uint)(short)wordValue;
+        if ((loadedValue & R[maskRegister]) != 0)
+        {
+            return false;
+        }
+
+        R[loadDestination] = loadedValue;
         SetT(true);
         PC = loopPc;
         cycles = maxCycles;
@@ -3959,15 +3965,8 @@ public sealed class Sh2Cpu
             return false;
         }
 
-        uint loopPc = PC;
-        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
-            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode))
-        {
-            return false;
-        }
-
-        if ((loadOpcode & 0xF00F) != 0x6001 ||
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
             (testOpcode & 0xF00F) != 0x2008 ||
             (branchOpcode & 0xFF00) != 0x8B00)
         {
@@ -3978,27 +3977,31 @@ public sealed class Sh2Cpu
         int loadSource = (loadOpcode >> 4) & 0x0F;
         int testLeft = (testOpcode >> 8) & 0x0F;
         int testRight = (testOpcode >> 4) & 0x0F;
-        if (loadDestination != 0 ||
-            testLeft != 0 ||
-            testRight != 0)
+        if (testLeft != loadDestination &&
+            testRight != loadDestination)
         {
             return false;
         }
 
-        int displacement = (sbyte)branchOpcode;
-        uint target = loopPc + 8 + (uint)(displacement * 2);
-        if (target != loopPc)
+        int maskRegister = testLeft == loadDestination ? testRight : testLeft;
+
+        if (BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
         {
             return false;
         }
 
-        if (!peekBus.TryPeekWord(R[loadSource], out ushort wordValue) ||
-            wordValue == 0)
+        if (!peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
         {
             return false;
         }
 
-        R[0] = (uint)(short)wordValue;
+        uint loadedValue = (uint)(short)wordValue;
+        if ((loadedValue & R[maskRegister]) == 0)
+        {
+            return false;
+        }
+
+        R[loadDestination] = loadedValue;
         SetT(false);
         PC = loopPc;
         cycles = maxCycles;
