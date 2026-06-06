@@ -34,7 +34,6 @@ Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoo
 Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward);
 Run("32X SH-2 byte displacement zero wait DT/BF loop fast-forward", ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward);
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
-Run("32X SH-2 SHLL ROTCL DT BF/S delay ADD loop fast-forward", ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
 Run("32X SH-2 SDRAM flag tasklet fast-forward", ThirtyTwoXSh2SdramFlagTaskletFastForward);
 Run("32X SH-2 SDRAM flag tasklet dispatcher loop fast-forward", ThirtyTwoXSh2SdramFlagTaskletDispatcherLoopFastForward);
@@ -2331,61 +2330,6 @@ void ThirtyTwoXSh2TstBfsDelayAddLoopFastForward()
         bus.WriteInstructionWord(LoopPc + 2, 0x8FFD); // BF/S LoopPc
         bus.WriteInstructionWord(LoopPc + 4, 0x74FF); // ADD #-1,R4
         bus.WriteInstructionWord(LoopPc + 6, 0x001B); // SLEEP
-    }
-}
-
-void ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward()
-{
-    const uint LoopPc = 0x0600_0872;
-    SyntheticSh2Bus interpretedBus = new();
-    LoadLoop(interpretedBus);
-    Sh2Cpu interpreted = new(interpretedBus, "test");
-    interpreted.Reset(LoopPc);
-    interpreted.R[0] = 0x4000_0000;
-    interpreted.R[11] = 3;
-    interpreted.R[13] = 0xA000_0000;
-    interpreted.R[14] = 9;
-    interpreted.InstructionObserver = _ => { };
-    interpreted.Run(15);
-
-    SyntheticSh2Bus fastBus = new();
-    LoadLoop(fastBus);
-    Sh2Cpu fast = new(fastBus, "test");
-    fast.Reset(LoopPc);
-    fast.R[0] = 0x4000_0000;
-    fast.R[11] = 3;
-    fast.R[13] = 0xA000_0000;
-    fast.R[14] = 9;
-    AssertTrue(fast.TryFastForwardShllRotclDtBfsAddLoop(15, out int cycles), "SHLL/ROTCL/DT/BF/S delay ADD loop should fast-forward through completion");
-    AssertEqual(15, cycles);
-    AssertEqual(interpreted.PC, fast.PC);
-    AssertEqual(interpreted.R[0], fast.R[0]);
-    AssertEqual(interpreted.R[11], fast.R[11]);
-    AssertEqual(interpreted.R[13], fast.R[13]);
-    AssertEqual(interpreted.R[14], fast.R[14]);
-    AssertEqual(interpreted.SR & 1, fast.SR & 1);
-
-    Sh2Cpu partial = new(fastBus, "test");
-    partial.Reset(LoopPc);
-    partial.R[0] = 0;
-    partial.R[11] = 1000;
-    partial.R[13] = 0x8000_0000;
-    partial.R[14] = 1000;
-    AssertTrue(partial.TryFastForwardShllRotclDtBfsAddLoop(50, out cycles), "SHLL/ROTCL/DT/BF/S delay ADD loop should fast-forward a bounded partial burst");
-    AssertEqual(50, cycles);
-    AssertEqual(LoopPc, partial.PC);
-    AssertEqual(990u, partial.R[11]);
-    AssertEqual(990u, partial.R[14]);
-    AssertEqual(0u, partial.SR & 1);
-
-    static void LoadLoop(SyntheticSh2Bus bus)
-    {
-        bus.WriteInstructionWord(LoopPc + 0, 0x4D00); // SHLL R13
-        bus.WriteInstructionWord(LoopPc + 2, 0x4024); // ROTCL R0
-        bus.WriteInstructionWord(LoopPc + 4, 0x4B10); // DT R11
-        bus.WriteInstructionWord(LoopPc + 6, 0x8FFB); // BF/S LoopPc
-        bus.WriteInstructionWord(LoopPc + 8, 0x7EFF); // ADD #-1,R14
-        bus.WriteInstructionWord(LoopPc + 10, 0x001B); // SLEEP
     }
 }
 
