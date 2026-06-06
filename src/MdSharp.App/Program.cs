@@ -5176,35 +5176,86 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                 string initialStatus = status;
                 int initialFrames = completedFrames;
                 int adaptiveTargetFrames = Math.Max(completedFrames, 900);
-                int adaptiveInstructionBudget = Math.Max(instructionsPerFrame, 50_000);
-                for (; completedFrames < adaptiveTargetFrames; completedFrames++)
+                int adaptiveInstructionBudget = Math.Max(instructionsPerFrame, 800_000);
+
+                if (adaptiveInstructionBudget > instructionsPerFrame)
                 {
-                    if (caseTimeLimitSeconds > 0.0 && stopwatch.Elapsed.TotalSeconds >= caseTimeLimitSeconds)
+                    MegaDrive adaptiveMachine = CreateMachineFromCartridge(CartridgeImage.FromFile(romPath));
+                    adaptiveMachine.Reset();
+                    ThirtyTwoXDevice adaptiveDevice = adaptiveMachine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+                    byte[] adaptiveRgb = new byte[rgb.Length];
+                    int adaptiveFrames = 0;
+                    int adaptiveNonBackground = 0;
+                    int adaptiveMaxNonBackground = 0;
+                    string adaptiveStatus = initialStatus;
+                    for (; adaptiveFrames < adaptiveTargetFrames; adaptiveFrames++)
                     {
-                        detail = $"case time cap during adaptive resample after {completedFrames:N0} frame(s)";
-                        break;
+                        if (caseTimeLimitSeconds > 0.0 && stopwatch.Elapsed.TotalSeconds >= caseTimeLimitSeconds)
+                        {
+                            detail = $"case time cap during restarted adaptive resample after {adaptiveFrames:N0} frame(s)";
+                            break;
+                        }
+
+                        if (stopwatch.Elapsed.TotalSeconds >= adaptiveTimeLimitSeconds)
+                        {
+                            detail = $"adaptive resample time cap after restarted {adaptiveFrames:N0} frame(s)";
+                            break;
+                        }
+
+                        adaptiveMachine.RunFrameCycles(adaptiveInstructionBudget);
+                        adaptiveMachine.RenderFrameRgbInto(adaptiveRgb);
+                        adaptiveNonBackground = CountNonBackgroundPixels(adaptiveMachine.Vdp, adaptiveRgb);
+                        adaptiveMaxNonBackground = Math.Max(adaptiveMaxNonBackground, adaptiveNonBackground);
+                        adaptiveStatus = ClassifyThirtyTwoXSweep(adaptiveMachine, adaptiveDevice, adaptiveNonBackground, adaptiveMaxNonBackground);
+                        if (adaptiveFrames >= 44 && IsVisibleThirtyTwoXStatus(adaptiveStatus))
+                        {
+                            adaptiveFrames++;
+                            break;
+                        }
                     }
 
-                    if (stopwatch.Elapsed.TotalSeconds >= adaptiveTimeLimitSeconds)
+                    if (adaptiveStatus != initialStatus || IsVisibleThirtyTwoXStatus(adaptiveStatus))
                     {
-                        detail = $"adaptive resample time cap after {completedFrames:N0} frame(s)";
-                        break;
+                        machine = adaptiveMachine;
+                        device = adaptiveDevice;
+                        rgb = adaptiveRgb;
+                        completedFrames = adaptiveFrames;
+                        nonBackground = adaptiveNonBackground;
+                        maxNonBackground = adaptiveMaxNonBackground;
+                        status = adaptiveStatus;
                     }
-
-                    machine.RunFrameCycles(adaptiveInstructionBudget);
-                    machine.RenderFrameRgbInto(rgb);
-                    nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
-                    maxNonBackground = Math.Max(maxNonBackground, nonBackground);
-                    status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
-                    if (IsVisibleThirtyTwoXStatus(status))
+                }
+                else
+                {
+                    for (; completedFrames < adaptiveTargetFrames; completedFrames++)
                     {
-                        break;
+                        if (caseTimeLimitSeconds > 0.0 && stopwatch.Elapsed.TotalSeconds >= caseTimeLimitSeconds)
+                        {
+                            detail = $"case time cap during adaptive resample after {completedFrames:N0} frame(s)";
+                            break;
+                        }
+
+                        if (stopwatch.Elapsed.TotalSeconds >= adaptiveTimeLimitSeconds)
+                        {
+                            detail = $"adaptive resample time cap after {completedFrames:N0} frame(s)";
+                            break;
+                        }
+
+                        machine.RunFrameCycles(adaptiveInstructionBudget);
+                        machine.RenderFrameRgbInto(rgb);
+                        nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+                        maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+                        status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+                        if (IsVisibleThirtyTwoXStatus(status))
+                        {
+                            break;
+                        }
                     }
                 }
 
                 if (status != initialStatus)
                 {
-                    detail = $"adaptive resample: {initialStatus} at {initialFrames:N0} frame(s), {status} at {completedFrames:N0} frame(s)";
+                    detail = $"adaptive resample: {initialStatus} at {initialFrames:N0} frame(s), {status} at {completedFrames:N0} frame(s) with {adaptiveInstructionBudget:N0} instructions/frame";
                 }
             }
         }

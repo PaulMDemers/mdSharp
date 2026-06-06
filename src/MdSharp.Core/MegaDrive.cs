@@ -238,7 +238,8 @@ public sealed class MegaDrive
             Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
             ServicePendingM68kInterrupts();
 
-            if (MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
+            if (Bus.ThirtyTwoX is null &&
+                MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
                 RunThirtyTwoXForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider);
                 consumed += fastCycles;
