@@ -57,6 +57,7 @@ Run("32X user header loads initial program", ThirtyTwoXUserHeaderLoadsInitialPro
 Run("32X adapter control and communication ports", ThirtyTwoXAdapterControlAndCommunicationPorts);
 Run("32X packed pixels use full palette index", ThirtyTwoXPackedPixelsUseFullPaletteIndex);
 Run("32X cached framebuffer bytes map before cartridge ROM", ThirtyTwoXCachedFrameBufferBytesMapBeforeCartridgeRom);
+Run("32X fixed cartridge cache tags use SH-2 address", ThirtyTwoXFixedCartridgeCacheTagsUseSh2Address);
 Run("32X packed palette zero is transparent", ThirtyTwoXPackedPaletteZeroIsTransparent);
 Run("32X communication byte read/write edge", ThirtyTwoXCommunicationByteReadWriteEdge);
 Run("32X 68000 system handshakes sync SH-2", ThirtyTwoXM68kSystemHandshakesSyncSh2);
@@ -4162,6 +4163,19 @@ void ThirtyTwoXCachedFrameBufferBytesMapBeforeCartridgeRom()
 
     AssertEqual((byte)0xC7, device.ReadFrameBufferByte(0x10));
     AssertEqual((byte)0xC7, ReadSh2ByteForTest(device, cachedFrameBufferAddress));
+}
+
+void ThirtyTwoXFixedCartridgeCacheTagsUseSh2Address()
+{
+    byte[] rom = new byte[0x100];
+    rom[0x20] = 0x5A;
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+
+    WriteSh2ByteForTest(device, 0xC000_0020, 0xAA);
+    WriteSh2LongForTest(device, 0x6000_0024, 0x0000_0000);
+
+    AssertEqual((byte)0x5A, ReadSh2ByteForTest(device, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x20));
 }
 
 void ThirtyTwoXPackedPaletteZeroIsTransparent()

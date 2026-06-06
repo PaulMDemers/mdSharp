@@ -6852,16 +6852,17 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart and <
             ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart + ThirtyTwoXHardwareProfile.M68kCartridgeBankedBytes)
         {
-            cacheOffset = address - ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart;
-            romOffset = ((uint)M68kCartridgeBank * ThirtyTwoXHardwareProfile.M68kCartridgeBankedBytes) + cacheOffset;
+            cacheOffset = address;
+            romOffset = ((uint)M68kCartridgeBank * ThirtyTwoXHardwareProfile.M68kCartridgeBankedBytes) +
+                (address - ThirtyTwoXHardwareProfile.Sh2CartridgeBankedCachedStart);
             return true;
         }
 
         if (address is >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart and <
             ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x0200_0000)
         {
-            cacheOffset = address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart;
-            romOffset = cacheOffset;
+            cacheOffset = address;
+            romOffset = address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart;
             return true;
         }
 
