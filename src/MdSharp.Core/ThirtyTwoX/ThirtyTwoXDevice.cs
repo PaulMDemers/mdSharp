@@ -298,6 +298,7 @@ public sealed class ThirtyTwoXDevice
     private bool _bootRomChecksumPublished;
     private bool _bootRomChecksumHostCleared;
     private bool _bootRomSixtyEightUpPending;
+    private bool _m68kVdpControlMailboxHighPending;
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
 
@@ -509,6 +510,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomChecksumPublished = false;
         _bootRomChecksumHostCleared = false;
         _bootRomSixtyEightUpPending = false;
+        _m68kVdpControlMailboxHighPending = false;
         _adapterEnabled = false;
         _sh2ResetEnabled = true;
         _sh2ResetReleased = false;
@@ -1500,6 +1502,112 @@ public sealed class ThirtyTwoXDevice
         return (int)((waitMasterCycles + 6) / 7);
     }
 
+    public void NotifyM68kVdpControlWrite(ushort value)
+    {
+        if (!CanPublishM68kVdpControlMailbox())
+        {
+            return;
+        }
+
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (_m68kVdpControlMailboxHighPending)
+        {
+            _m68kVdpControlMailboxHighPending = false;
+            if (value != 0 &&
+                ReadBigEndianWord(_systemRegisters, comm + 2) == 0)
+            {
+                WriteBigEndianWord(_systemRegisters, comm + 2, value);
+                ClearM68kCommunicationTrackingForWord(2);
+            }
+        }
+
+        if ((value & 0xC000) != 0x4000)
+        {
+            return;
+        }
+
+        if (ReadBigEndianWord(_systemRegisters, comm + 12) != 0 ||
+            ReadBigEndianWord(_systemRegisters, comm + 14) != 0)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 12, (ushort)(value & 0xC000));
+        _m68kVdpControlMailboxHighPending = true;
+        ClearM68kCommunicationTrackingForWord(12);
+    }
+
+    public void NotifyM68kVdpControlLongWrite(ushort high, ushort low)
+    {
+        if (!CanPublishM68kVdpControlMailbox() ||
+            (high & 0xC000) != 0x4000)
+        {
+            return;
+        }
+
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (ReadBigEndianWord(_systemRegisters, comm + 12) == 0 &&
+            ReadBigEndianWord(_systemRegisters, comm + 14) == 0)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 12, (ushort)(high & 0xC000));
+            ClearM68kCommunicationTrackingForWord(12);
+        }
+
+        ushort lowToken = low == 0 ? (ushort)1 : low;
+        if (ReadBigEndianWord(_systemRegisters, comm + 2) == 0)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 2, lowToken);
+            ClearM68kCommunicationTrackingForWord(2);
+        }
+
+        _m68kVdpControlMailboxHighPending = false;
+    }
+
+    private bool CanPublishM68kVdpControlMailbox()
+    {
+        return _adapterEnabled &&
+            _sh2ResetReleased &&
+            !_bootRomHandshakePending &&
+            !_bootRomLaunchPending;
+    }
+
+    private void ClearM68kCommunicationTrackingForWord(int relativeOffset)
+    {
+        if ((uint)relativeOffset >= 16u)
+        {
+            return;
+        }
+
+        int evenOffset = relativeOffset & ~1;
+        _m68kCommunicationStaleWordValid[evenOffset >> 1] = false;
+        _m68kCommunicationStaleValid[evenOffset] = false;
+        _m68kCommunicationStaleValid[evenOffset + 1] = false;
+        _m68kCommunicationPendingHostBytes[evenOffset] = false;
+        _m68kCommunicationPendingHostBytes[evenOffset + 1] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[evenOffset] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[evenOffset + 1] = false;
+    }
+
+    private void TryAdvanceM68kVdpControlMailboxPhase(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (offset != comm + 14 ||
+            value > 1)
+        {
+            return;
+        }
+
+        ushort phase = ReadBigEndianWord(_systemRegisters, comm + 12);
+        if (phase != 0x4000 &&
+            phase != 1)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 12, value);
+        ClearM68kCommunicationTrackingForWord(12);
+    }
+
     public uint MapM68kCartridgeAddress(uint address)
     {
         if (address is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < ThirtyTwoXHardwareProfile.M68kCartridgeBankedStart)
@@ -2410,6 +2518,19 @@ public sealed class ThirtyTwoXDevice
             return bootRomValue;
         }
 
+        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out _))
+        {
+            AddSh2WaitCycles(cpuIndex, Sh2FrameBufferReadWaitCycles);
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "DENY-R8", frameBufferOffset, 0xFFFF);
+                return 0xFF;
+            }
+
+            AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
+            return ReadFrameBufferByteCore(frameBufferOffset);
+        }
+
         if (TryMapSh2CachedCartridgeAddress(address, out uint cacheOffset, out uint romOffset))
         {
             byte value = IsSh2DataCacheEnabled(cpuIndex)
@@ -2426,19 +2547,6 @@ public sealed class ThirtyTwoXDevice
             byte value = ReadCartridgeByte(romOffset);
             TraceSh2MemoryAccess(cpuIndex, "R8", address, value);
             return value;
-        }
-
-        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out _))
-        {
-            AddSh2WaitCycles(cpuIndex, Sh2FrameBufferReadWaitCycles);
-            if (IsSh2FrameBufferAccessDenied())
-            {
-                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "DENY-R8", frameBufferOffset, 0xFFFF);
-                return 0xFF;
-            }
-
-            AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
-            return ReadFrameBufferByteCore(frameBufferOffset);
         }
 
         if (IsSh2DmaRegisterAddress(address))
@@ -2859,6 +2967,20 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
+        {
+            AddSh2WaitCycles(cpuIndex, Sh2FrameBufferWriteWaitCycles);
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer ? "DENY-OW8" : "DENY-W8", frameBufferOffset, value);
+                return;
+            }
+
+            AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
+            WriteFrameBufferByteCore(frameBufferOffset, value, cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer, transparentZero: overwriteFrameBuffer, enforceAccessWindow: false);
+            return;
+        }
+
         if (TryMapSh2CachedCartridgeAddress(address, out uint cacheOffset, out uint romOffset))
         {
             if (IsSh2CacheEnabled(cpuIndex))
@@ -2875,20 +2997,6 @@ public sealed class ThirtyTwoXDevice
             AddSh2WaitCycles(cpuIndex, IsSh2RomBlockedByRv() ? Sh2CartridgeRvBlockedWaitCycles : Sh2CartridgeByteWaitCycles);
             ClaimSh2CartridgeBus(1);
             TraceSh2MemoryAccess(cpuIndex, "W8", address, value);
-            return;
-        }
-
-        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
-        {
-            AddSh2WaitCycles(cpuIndex, Sh2FrameBufferWriteWaitCycles);
-            if (IsSh2FrameBufferAccessDenied())
-            {
-                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer ? "DENY-OW8" : "DENY-W8", frameBufferOffset, value);
-                return;
-            }
-
-            AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
-            WriteFrameBufferByteCore(frameBufferOffset, value, cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer, transparentZero: overwriteFrameBuffer, enforceAccessWindow: false);
             return;
         }
 
@@ -3195,6 +3303,7 @@ public sealed class ThirtyTwoXDevice
         MarkM68kCommunicationStaleWord(aligned, previousWord, value);
         MarkM68kCommunicationStaleByte(aligned, previousHigh, high);
         MarkM68kCommunicationStaleByte((ushort)(aligned + 1), previousLow, low);
+        TryAdvanceM68kVdpControlMailboxPhase(aligned, value);
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, aligned, high));
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)(aligned + 1), low));
         TraceSystemRegisterAccess(source, "W16", aligned, value);

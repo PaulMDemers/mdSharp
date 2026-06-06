@@ -56,6 +56,7 @@ Run("32X SH-2 arithmetic flags", ThirtyTwoXSh2ArithmeticFlags);
 Run("32X user header loads initial program", ThirtyTwoXUserHeaderLoadsInitialProgram);
 Run("32X adapter control and communication ports", ThirtyTwoXAdapterControlAndCommunicationPorts);
 Run("32X packed pixels use full palette index", ThirtyTwoXPackedPixelsUseFullPaletteIndex);
+Run("32X cached framebuffer bytes map before cartridge ROM", ThirtyTwoXCachedFrameBufferBytesMapBeforeCartridgeRom);
 Run("32X packed palette zero is transparent", ThirtyTwoXPackedPaletteZeroIsTransparent);
 Run("32X communication byte read/write edge", ThirtyTwoXCommunicationByteReadWriteEdge);
 Run("32X 68000 system handshakes sync SH-2", ThirtyTwoXM68kSystemHandshakesSyncSh2);
@@ -4019,6 +4020,67 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     sixtyEightUpGuardDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14, 0x0000);
     AssertEqual((ushort)0x0000, sixtyEightUpGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14));
 
+    ThirtyTwoXDevice vdpControlReadyDevice = new();
+    vdpControlReadyDevice.Reset();
+    vdpControlReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    vdpControlReadyDevice.RestoreState(vdpControlReadyDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    vdpControlReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
+    vdpControlReadyDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0010);
+    AssertEqual((ushort)0x4000, vdpControlReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual((ushort)0x0010, vdpControlReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice vdpControlZeroLowDevice = new();
+    vdpControlZeroLowDevice.Reset();
+    vdpControlZeroLowDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    vdpControlZeroLowDevice.RestoreState(vdpControlZeroLowDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    vdpControlZeroLowDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
+    vdpControlZeroLowDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0000);
+    AssertEqual((ushort)0x4000, vdpControlZeroLowDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual((ushort)0x0001, vdpControlZeroLowDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+    WriteSh2WordForTest(
+        vdpControlZeroLowDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        0x0001);
+    AssertEqual((ushort)0x0001, vdpControlZeroLowDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    WriteSh2WordForTest(
+        vdpControlZeroLowDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        0x0000);
+    AssertEqual((ushort)0x0000, vdpControlZeroLowDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+
+    ThirtyTwoXDevice vdpControlWordReadyDevice = new();
+    vdpControlWordReadyDevice.Reset();
+    vdpControlWordReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    vdpControlWordReadyDevice.RestoreState(vdpControlWordReadyDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    vdpControlWordReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
+    vdpControlWordReadyDevice.NotifyM68kVdpControlWrite(0x4000);
+    vdpControlWordReadyDevice.NotifyM68kVdpControlWrite(0x0010);
+    AssertEqual((ushort)0x4000, vdpControlWordReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual((ushort)0x0010, vdpControlWordReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice vdpControlGuardDevice = new();
+    vdpControlGuardDevice.Reset();
+    vdpControlGuardDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    ushort guardedLowWord = vdpControlGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2);
+    vdpControlGuardDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0010);
+    AssertEqual((ushort)0x0000, vdpControlGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual(guardedLowWord, vdpControlGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
     byte[] maskRom = new byte[0x100];
     WriteWord(maskRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
     WriteWord(maskRom, 0x02, 0xE10F); // MOV #$0F,R1
@@ -4085,6 +4147,21 @@ void ThirtyTwoXPackedPixelsUseFullPaletteIndex()
     AssertEqual((byte)0x00, frame[1]);
     AssertEqual((byte)0x00, frame[2]);
     AssertTrue(device.LastCompositeWrittenPixels > 0, "packed-pixel composite should use all eight palette index bits");
+}
+
+void ThirtyTwoXCachedFrameBufferBytesMapBeforeCartridgeRom()
+{
+    byte[] rom = new byte[0x400];
+    rom[0x10] = 0x5A;
+    ThirtyTwoXDevice device = new(rom);
+    device.Reset();
+    device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8000);
+
+    uint cachedFrameBufferAddress = ThirtyTwoXHardwareProfile.Sh2FrameBufferCachedStart + 0x10;
+    WriteSh2ByteForTest(device, cachedFrameBufferAddress, 0xC7);
+
+    AssertEqual((byte)0xC7, device.ReadFrameBufferByte(0x10));
+    AssertEqual((byte)0xC7, ReadSh2ByteForTest(device, cachedFrameBufferAddress));
 }
 
 void ThirtyTwoXPackedPaletteZeroIsTransparent()

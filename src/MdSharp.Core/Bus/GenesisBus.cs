@@ -593,6 +593,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return;
         }
 
+        NotifyThirtyTwoXM68kVdpControlLongWrite(address, value);
         WriteWord(address, (ushort)(value >> 16));
         WriteWord(address + 2, (ushort)value);
     }
@@ -1522,6 +1523,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             case 0x04:
             case 0x06:
                 Vdp.WriteControlPort(value);
+                _thirtyTwoX?.NotifyM68kVdpControlWrite(value);
                 TryRunDma();
                 break;
             case 0x10:
@@ -1531,6 +1533,14 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
                 Psg.Write((byte)value, CurrentMasterCycle);
                 AudioObserver?.Invoke(new AudioAccess(CurrentMasterCycle, CurrentM68kPc, AudioAccessSource.M68k, AudioChip.Psg, AudioAccessKind.Data, 0, 0, (byte)value));
                 break;
+        }
+    }
+
+    private void NotifyThirtyTwoXM68kVdpControlLongWrite(uint address, uint value)
+    {
+        if ((address & 0x00FF_FFFEu) == 0x00C0_0004u)
+        {
+            _thirtyTwoX?.NotifyM68kVdpControlLongWrite((ushort)(value >> 16), (ushort)value);
         }
     }
 
