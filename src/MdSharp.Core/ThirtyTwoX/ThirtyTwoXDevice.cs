@@ -118,6 +118,7 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2FrameBufferWordFillLoopMaxBurstIterations = 32768;
     private const int Sh2LongStoreFillLoopCycles = 4;
     private const int Sh2LongStoreFillLoopMaxBurstIterations = 2048;
+    private const int Sh2BraSelfIdleLoopTimerSensitiveBurstCycles = 32;
     private const int DreqBackpressureSh2Cycles = 64;
     private const int Sh2CartridgeByteWaitCycles = 6;
     private const int Sh2CachedCartridgeLineFillWaitCycles = 16;
@@ -809,6 +810,16 @@ public sealed class ThirtyTwoXDevice
 
         if (canProbeFastPath)
         {
+            int braIdleBudget = IsPwmTimerActive()
+                ? Math.Min(cycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)
+                : cycleBudget;
+            if (nextOpcode == 0xAFFE &&
+                cpu.TryFastForwardBraSelfNopIdleLoop(braIdleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x2001)
             {
                 int fillLoopBudget = Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations);
@@ -1061,6 +1072,12 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (cpu.TryFastForwardMovLiteralWordTstBtPollLoop(cycleBudget, out fastCycles))
+                {
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
                 {
                     AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -1072,6 +1089,15 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardMovLiteralLongTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x6001 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardMovLiteralWordTstBtPollLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
@@ -4943,6 +4969,12 @@ public sealed class ThirtyTwoXDevice
         }
 
         RequestPendingInterrupts();
+    }
+
+    private bool IsPwmTimerActive()
+    {
+        ushort control = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.PwmControlOffset);
+        return (control & PwmRoutingEnabledMask) != 0;
     }
 
     private static int DecodePwmTimerInterval(ushort control)
