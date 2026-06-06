@@ -3401,6 +3401,7 @@ public sealed class ThirtyTwoXDevice
         CancelBootRomReadbackOnSh2DataWrite(aligned, (byte)(value >> 8));
         CancelBootRomReadbackOnSh2DataWrite((ushort)(aligned + 1), (byte)value);
         ApplySystemRegisterSideEffects(aligned, allowAdapterControl: false);
+        TryCompleteBootRomPeerReadyProbe(aligned, previousWord, value, cpuIndex);
         TryRunDreqDma();
     }
 
@@ -4953,6 +4954,22 @@ public sealed class ThirtyTwoXDevice
         {
             _slaveCommandInterruptPending = pending;
         }
+    }
+
+    private void TryCompleteBootRomPeerReadyProbe(ushort offset, ushort previousValue, ushort value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (cpuIndex != 0 ||
+            offset != comm + 2 ||
+            previousValue != 0x4F4B ||
+            value != 0xBEEF ||
+            !_bootRomPostStartSignatureHiddenFromSh2)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 2, 0xDEAF);
+        ClearM68kCommunicationTrackingForWord(2);
     }
 
     private void SetPwmInterruptPending(int cpuIndex, bool pending)

@@ -520,6 +520,24 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(postBootTokenClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0000, cpuIndex: 0);
     AssertEqual((ushort)0x534C, postBootTokenClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
     AssertEqual((ushort)0x0000, postBootTokenClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
+    ThirtyTwoXDevice peerReadyProbeDevice = new();
+    peerReadyProbeDevice.Reset();
+    ThirtyTwoXDevice.ThirtyTwoXState peerReadyProbeState = peerReadyProbeDevice.CaptureState();
+    byte[] peerReadyProbeRegisters = (byte[])peerReadyProbeState.SystemRegisters.Clone();
+    peerReadyProbeRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2] = 0x4F;
+    peerReadyProbeRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3] = 0x4B;
+    peerReadyProbeDevice.RestoreState(peerReadyProbeState with
+    {
+        SystemRegisters = peerReadyProbeRegisters,
+        BootRomHandshakePending = false,
+        BootRomPostStartSignaturePending = false,
+        BootRomPostStartSignatureHiddenFromSh2 = true,
+    });
+    WriteSh2WordForTest(
+        peerReadyProbeDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
+        0xBEEF);
+    AssertEqual((ushort)0xDEAF, ReadSh2WordForTest(peerReadyProbeDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2)));
     ThirtyTwoXDevice lowerCommandClearDevice = new();
     lowerCommandClearDevice.Reset();
     lowerCommandClearDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0xFF);
