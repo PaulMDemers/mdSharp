@@ -22,6 +22,7 @@ Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticC
 Run("32X SH-2 BRA self idle loop fast-forward", ThirtyTwoXSh2BraSelfIdleLoopFastForward);
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
+Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -2042,6 +2043,51 @@ void ThirtyTwoXSh2NopDtBfDelayLoopFastForward()
     AssertTrue(device.MasterSh2.Halted, "SH-2 should execute the instruction after the collapsed NOP delay loop");
 }
 
+void ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward()
+{
+    const uint LoopPc = 0x0600_1000;
+    const uint Destination = 0x2400_0200;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x2202); // MOV.L R0,@R2
+    bus.WriteInstructionWord(LoopPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 4, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 6, 0x4110); // DT R1
+    bus.WriteInstructionWord(LoopPc + 8, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 10, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 12, 0x8FF8); // BF/S loop
+    bus.WriteInstructionWord(LoopPc + 14, 0x7204); // ADD #4,R2
+    bus.WriteInstructionWord(LoopPc + 16, 0x001B); // SLEEP
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = 0xA5A5_5A5A;
+    cpu.R[1] = 8;
+    cpu.R[2] = Destination;
+
+    AssertTrue(cpu.TryFastForwardMovLNopDtBfSAddLoop(80, bus.TryWriteLong, 10, out int partialCycles), "partial MOV.L/NOP/DT/BF/S/ADD loop should fast-forward");
+    AssertEqual(80, partialCycles);
+    AssertEqual(0u, cpu.R[1]);
+    AssertEqual(Destination + 32, cpu.R[2]);
+    AssertEqual(LoopPc + 16, cpu.PC);
+    for (uint i = 0; i < 8; i++)
+    {
+        AssertEqual(0xA5A5_5A5Au, bus.ReadLong(Destination + (i * 4)));
+    }
+
+    Sh2Cpu partialCpu = new(bus, "test-partial");
+    partialCpu.Reset(LoopPc);
+    partialCpu.R[0] = 0x1122_3344;
+    partialCpu.R[1] = 20;
+    partialCpu.R[2] = Destination + 0x100;
+
+    AssertTrue(partialCpu.TryFastForwardMovLNopDtBfSAddLoop(50, bus.TryWriteLong, 10, out int chunkCycles), "bounded MOV.L/NOP/DT/BF/S/ADD loop should stop on budget");
+    AssertEqual(50, chunkCycles);
+    AssertEqual(15u, partialCpu.R[1]);
+    AssertEqual(Destination + 0x114, partialCpu.R[2]);
+    AssertEqual(LoopPc, partialCpu.PC);
+    AssertEqual(0x1122_3344u, bus.ReadLong(Destination + 0x110));
+}
+
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
 {
     const uint LoopPc = 0x0600_0100;
@@ -2401,7 +2447,7 @@ void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
     cpu.R[2] = 1000;
     AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should fast-forward from the loop branch");
     AssertEqual(LoopPc, cpu.PC);
-    AssertTrue(cpu.R[2] < 1000);
+    AssertTrue(cpu.R[2] < 1000, "branch-entry byte wait loop should consume at least one countdown iteration");
 
     cpu.R[2] = 2;
     AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should finish when DT reaches zero");
@@ -2435,9 +2481,9 @@ void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
     nested.R[1] = InnerByteAddress - 1;
     nested.R[2] = 1000;
     AssertTrue(nested.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(4096, out int nestedCycles), "outer word zero plus byte displacement wait should fast-forward from the inner loop branch");
-    AssertTrue(nestedCycles > 0);
+    AssertTrue(nestedCycles > 0, "nested byte wait loop should report consumed cycles");
     AssertEqual(OuterPc, nested.PC);
-    AssertTrue(nested.R[2] < 1000);
+    AssertTrue(nested.R[2] < 1000, "nested byte wait loop should consume at least one countdown iteration");
 
     nestedBus.WriteWord(OuterFlagAddress, 0x0001);
     AssertTrue(!nested.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(4096, out _), "nonzero outer word should fall back to the interpreter");

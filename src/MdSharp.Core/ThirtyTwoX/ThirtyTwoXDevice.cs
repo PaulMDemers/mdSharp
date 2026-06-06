@@ -118,6 +118,8 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2FrameBufferWordFillLoopMaxBurstIterations = 32768;
     private const int Sh2LongStoreFillLoopCycles = 4;
     private const int Sh2LongStoreFillLoopMaxBurstIterations = 2048;
+    private const int Sh2LongStoreDelayFillLoopCycles = 20;
+    private const int Sh2LongStoreDelayFillLoopMaxBurstIterations = 4096;
     private const int Sh2BraSelfIdleLoopTimerSensitiveBurstCycles = 32;
     private const int DreqBackpressureSh2Cycles = 64;
     private const int Sh2CartridgeByteWaitCycles = 6;
@@ -845,6 +847,17 @@ public sealed class ThirtyTwoXDevice
                         longStoreBudget,
                         _sh2LongWriters[cpuIndex],
                         Sh2LongStoreFillLoopCycles,
+                        out fastCycles))
+                {
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
+                int delayStoreBudget = Math.Min(cycleBudget, Sh2LongStoreDelayFillLoopCycles * Sh2LongStoreDelayFillLoopMaxBurstIterations);
+                if (cpu.TryFastForwardMovLNopDtBfSAddLoop(
+                        delayStoreBudget,
+                        _sh2LongWriters[cpuIndex],
+                        Sh2LongStoreDelayFillLoopCycles,
                         out fastCycles))
                 {
                     AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -4017,7 +4030,20 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        _m68kVdpControlMailboxArmed = offset == comm + 12 && value == 0x0002;
+        if (offset == comm + 12 && value == 0x0002)
+        {
+            _m68kVdpControlMailboxArmed = true;
+        }
+        else if (offset == comm + 12 && value != 0)
+        {
+            _m68kVdpControlMailboxArmed = false;
+            _m68kVdpControlMailboxHighPending = false;
+            if (!_bootRomHandshakePending && !_bootRomPostStartSignaturePending)
+            {
+                ClearBootRomCommunicationSignature();
+                ClearCommunicationStaleRange(0, BootRomCommunicationSignature.Length);
+            }
+        }
 
         ushort highCommand = offset == comm + 12 ? value : ReadBigEndianWord(_systemRegisters, comm + 12);
         ushort lowCommand = offset == comm + 14 ? value : ReadBigEndianWord(_systemRegisters, comm + 14);

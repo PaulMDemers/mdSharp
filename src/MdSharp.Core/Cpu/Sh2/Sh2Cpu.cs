@@ -593,6 +593,148 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint storePc = PC;
+        if (!peekBus.TryPeekWord(storePc, out ushort storeOpcode) ||
+            (storeOpcode & 0xF00F) != 0x2002)
+        {
+            return false;
+        }
+
+        uint pc = storePc + 2;
+        int leadingNops = 0;
+        while (leadingNops < 16)
+        {
+            if (!peekBus.TryPeekWord(pc, out ushort possibleNop))
+            {
+                return false;
+            }
+
+            if (possibleNop != 0x0009)
+            {
+                break;
+            }
+
+            leadingNops++;
+            pc += 2;
+        }
+
+        if (leadingNops == 0 ||
+            !peekBus.TryPeekWord(pc, out ushort dtOpcode) ||
+            (dtOpcode & 0xF0FF) != 0x4010)
+        {
+            return false;
+        }
+
+        uint branchPc = pc + 2;
+        int trailingNops = 0;
+        while (trailingNops < 16)
+        {
+            if (!peekBus.TryPeekWord(branchPc, out ushort possibleNop))
+            {
+                return false;
+            }
+
+            if (possibleNop != 0x0009)
+            {
+                break;
+            }
+
+            trailingNops++;
+            branchPc += 2;
+        }
+
+        if (!peekBus.TryPeekWord(branchPc, out ushort branchOpcode) ||
+            (branchOpcode & 0xFF00) != 0x8F00 ||
+            !peekBus.TryPeekWord(branchPc + 2, out ushort addOpcode) ||
+            (addOpcode & 0xF000) != 0x7000)
+        {
+            return false;
+        }
+
+        int addressRegister = (storeOpcode >> 8) & 0x0F;
+        int sourceRegister = (storeOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        int addRegister = (addOpcode >> 8) & 0x0F;
+        int addImmediate = (sbyte)(byte)addOpcode;
+        if (addRegister != addressRegister || addImmediate != 4)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = branchPc + 4 + (uint)(displacement * 2);
+        if (target != storePc)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[addressRegister];
+        uint value = R[sourceRegister];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeLong(address, value))
+            {
+                break;
+            }
+
+            completed++;
+            address += 4;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[addressRegister] += completed * 4;
+        R[countRegister] = count - completed;
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = addOpcode;
+        LastOpcodePc = branchPc + 2;
+
+        if (completed == count)
+        {
+            SetT(true);
+            PC = branchPc + 4;
+        }
+        else
+        {
+            SetT(false);
+            PC = storePc;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(
         int maxCycles,
         Func<uint, ushort?> readWord,
@@ -3966,7 +4108,8 @@ public sealed class Sh2Cpu
         }
 
         uint loadedValue = (uint)(short)wordValue;
-        if ((loadedValue & R[maskRegister]) != 0)
+        uint maskValue = maskRegister == loadDestination ? loadedValue : R[maskRegister];
+        if ((loadedValue & maskValue) != 0)
         {
             return false;
         }
@@ -4201,7 +4344,8 @@ public sealed class Sh2Cpu
         }
 
         uint loadedValue = (uint)(short)wordValue;
-        if ((loadedValue & R[maskRegister]) == 0)
+        uint maskValue = maskRegister == loadDestination ? loadedValue : R[maskRegister];
+        if ((loadedValue & maskValue) == 0)
         {
             return false;
         }
