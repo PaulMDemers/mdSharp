@@ -1110,6 +1110,24 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((((nextOpcode & 0xF00F) == 0x6001) ||
+                    (nextOpcode & 0xFF00) == 0x8800 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardWordCmpEqBfPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xF00F) == 0x6001) ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardWordTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (((nextOpcode & 0xFF00) == 0x8900 ||
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     ((nextOpcode & 0xFF00) >= 0x8500 && (nextOpcode & 0xFF00) <= 0x85F0)) &&

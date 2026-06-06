@@ -3675,6 +3675,101 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardWordCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            (compareOpcode & 0xFF00) != 0x8800 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        if (loadDestination != 0 ||
+            !peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = (uint)(short)wordValue == (uint)(sbyte)immediate;
+        if (equal)
+        {
+            return false;
+        }
+
+        R[loadDestination] = (uint)(short)wordValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
+    public bool TryFastForwardWordTstBtPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900 ||
+            BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int testSource = (testOpcode >> 4) & 0x0F;
+        int testDestination = (testOpcode >> 8) & 0x0F;
+        if (testSource != loadDestination ||
+            testDestination != loadDestination ||
+            !peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
+        {
+            return false;
+        }
+
+        if (wordValue != 0)
+        {
+            return false;
+        }
+
+        R[loadDestination] = 0;
+        SetT(true);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardWordDisplacementTstBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -5846,6 +5941,39 @@ public sealed class Sh2Cpu
     private static uint BranchByteTarget(uint branchPc, ushort branchOpcode)
     {
         return branchPc + 4 + (uint)(((sbyte)branchOpcode) * 2);
+    }
+
+    private bool TryFindThreeWordPollLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort firstOpcode,
+        out ushort secondOpcode,
+        out ushort branchOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out firstOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out secondOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out branchOpcode) &&
+                BranchByteTarget(candidate + 4, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        firstOpcode = 0;
+        secondOpcode = 0;
+        branchOpcode = 0;
+        return false;
     }
 
     private static uint BranchWordTarget(uint branchPc, ushort branchOpcode)

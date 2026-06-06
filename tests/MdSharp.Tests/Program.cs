@@ -27,8 +27,10 @@ Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovL
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
+Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoopFastForward);
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
 Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward);
@@ -2126,6 +2128,57 @@ void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardWordCmpEqBtPollLoop(300, out _), "non-matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_30D0;
+    const uint FlagAddress = 0x2000_402E;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8BFC); // BF loop while nonzero
+    bus.WriteWord(FlagAddress, 1);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 4);
+    cpu.R[1] = FlagAddress;
+    AssertTrue(cpu.TryFastForwardWordCmpEqBfPollLoop(300, out int cycles), "MOV.W/CMP/EQ/BF nonzero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteWord(FlagAddress, 0);
+    AssertTrue(!cpu.TryFastForwardWordCmpEqBfPollLoop(300, out _), "matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordTstBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_1620;
+    const uint FlagAddress = 0x2600_0802;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6121); // MOV.W @R2,R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x2118); // TST R1,R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop while zero
+    bus.WriteWord(FlagAddress, 0);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[2] = FlagAddress;
+    AssertTrue(cpu.TryFastForwardWordTstBtPollLoop(300, out int cycles), "MOV.W/TST/BT zero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[1]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.R[2] = FlagAddress;
+    AssertTrue(cpu.TryFastForwardWordTstBtPollLoop(300, out _), "MOV.W/TST/BT zero poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(FlagAddress, 1);
+    AssertTrue(!cpu.TryFastForwardWordTstBtPollLoop(300, out _), "nonzero TST poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
