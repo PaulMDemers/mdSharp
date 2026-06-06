@@ -112,6 +112,8 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2FrameBufferReadWaitCycles = 5;
     private const int Sh2FrameBufferWriteWaitCycles = 2;
     private const int Sh2FrameBufferBusyWaitCycles = 40;
+    private const int Sh2SdramReadWaitCycles = 12;
+    private const int Sh2SdramWriteWaitCycles = 2;
     private const int Sh2FrameBufferWordFillLoopCycles = 6;
     private const int Sh2FrameBufferWordFillLoopMaxBurstIterations = 32768;
     private const int Sh2LongStoreFillLoopCycles = 4;
@@ -2446,13 +2448,14 @@ public sealed class ThirtyTwoXDevice
         {
             byte value = IsSh2DataCacheEnabled(cpuIndex)
                 ? ReadSh2CachedSdramByte(address, cachedSdramOffset, cpuIndex)
-                : _sdram[cachedSdramOffset];
+                : ReadSh2SdramByteNoCache(cachedSdramOffset, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "RC8", address, value);
             return value;
         }
 
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
+            AddSh2WaitCycles(cpuIndex, Sh2SdramReadWaitCycles);
             byte value = _sdram[sdramOffset];
             TraceSh2MemoryAccess(cpuIndex, "R8", address, value);
             return value;
@@ -2896,6 +2899,7 @@ public sealed class ThirtyTwoXDevice
 
         if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
         {
+            AddSh2WaitCycles(cpuIndex, Sh2SdramWriteWaitCycles);
             _sdram[cachedSdramOffset] = value;
             UpdateSh2SdramCacheByte(cachedSdramOffset, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "WC8", address, value);
@@ -2904,6 +2908,7 @@ public sealed class ThirtyTwoXDevice
 
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
+            AddSh2WaitCycles(cpuIndex, Sh2SdramWriteWaitCycles);
             _sdram[sdramOffset] = value;
             TraceSh2MemoryAccess(cpuIndex, "W8", address, value);
             return;
@@ -6693,6 +6698,7 @@ public sealed class ThirtyTwoXDevice
             return _sh2CacheDataArrays[index][(lineIndex * Sh2CacheLineBytes) + (int)(address & 0x0F)];
         }
 
+        AddSh2WaitCycles(cpuIndex, Sh2SdramReadWaitCycles);
         lineIndex = SelectSh2CacheLine(index, entry);
         int lineBase = sdramOffset & ~(Sh2CacheLineBytes - 1);
         int destination = lineIndex * Sh2CacheLineBytes;
@@ -6704,6 +6710,12 @@ public sealed class ThirtyTwoXDevice
 
         _sh2CacheTags[index][lineIndex] = tag;
         return _sh2CacheDataArrays[index][destination + (int)(address & 0x0F)];
+    }
+
+    private byte ReadSh2SdramByteNoCache(int sdramOffset, int cpuIndex)
+    {
+        AddSh2WaitCycles(cpuIndex, Sh2SdramReadWaitCycles);
+        return _sdram[sdramOffset];
     }
 
     private void WriteSh2CachedCartridgeByte(uint cacheOffset, uint romOffset, byte value, int cpuIndex)
