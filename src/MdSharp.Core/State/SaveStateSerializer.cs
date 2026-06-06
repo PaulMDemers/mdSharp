@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 64;
+    private const int Version = 65;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -392,6 +392,7 @@ public static class SaveStateSerializer
         writer.Write(state.BootRomChecksumHostCleared);
         writer.Write(state.BootRomSixtyEightUpPending);
         writer.Write(state.BootRomSixtyEightUpReadyHiddenFromSh2);
+        writer.Write(state.M68kVdpControlMailboxArmed);
         WriteSh2(writer, state.MasterSh2);
         WriteSh2(writer, state.SlaveSh2);
     }
@@ -592,6 +593,12 @@ public static class SaveStateSerializer
             bootRomSixtyEightUpReadyHiddenFromSh2 = reader.ReadBoolean();
         }
 
+        bool m68kVdpControlMailboxArmed = false;
+        if (version >= 65)
+        {
+            m68kVdpControlMailboxArmed = reader.ReadBoolean();
+        }
+
         return new ThirtyTwoXDevice.ThirtyTwoXState(
             sdram,
             frameBuffer0,
@@ -675,6 +682,7 @@ public static class SaveStateSerializer
             bootRomChecksumHostCleared,
             bootRomSixtyEightUpPending,
             bootRomSixtyEightUpReadyHiddenFromSh2,
+            m68kVdpControlMailboxArmed,
             ReadSh2(reader, version),
             ReadSh2(reader, version));
     }

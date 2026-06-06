@@ -4162,6 +4162,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
         BootRomLaunchPending = false,
         BootRomPostStartSignaturePending = false,
     });
+    vdpControlReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0002);
+    vdpControlReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0000);
     vdpControlReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
     vdpControlReadyDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0010);
     AssertEqual((ushort)0x4000, vdpControlReadyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
@@ -4176,6 +4178,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
         BootRomLaunchPending = false,
         BootRomPostStartSignaturePending = false,
     });
+    vdpControlZeroLowDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0002);
+    vdpControlZeroLowDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0000);
     vdpControlZeroLowDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
     vdpControlZeroLowDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0000);
     AssertEqual((ushort)0x4000, vdpControlZeroLowDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
@@ -4200,6 +4204,8 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
         BootRomLaunchPending = false,
         BootRomPostStartSignaturePending = false,
     });
+    vdpControlWordReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0002);
+    vdpControlWordReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0000);
     vdpControlWordReadyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
     vdpControlWordReadyDevice.NotifyM68kVdpControlWrite(0x4000);
     vdpControlWordReadyDevice.NotifyM68kVdpControlWrite(0x0010);
@@ -4213,6 +4219,38 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     vdpControlGuardDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0010);
     AssertEqual((ushort)0x0000, vdpControlGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
     AssertEqual(guardedLowWord, vdpControlGuardDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice vdpControlUnarmedDevice = new();
+    vdpControlUnarmedDevice.Reset();
+    vdpControlUnarmedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    vdpControlUnarmedDevice.RestoreState(vdpControlUnarmedDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    vdpControlUnarmedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2, 0x0000);
+    vdpControlUnarmedDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0010);
+    AssertEqual((ushort)0x0000, vdpControlUnarmedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual((ushort)0x0000, vdpControlUnarmedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice retailUpperCommandDevice = new();
+    retailUpperCommandDevice.Reset();
+    retailUpperCommandDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    retailUpperCommandDevice.RestoreState(retailUpperCommandDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    retailUpperCommandDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12, 0x0011);
+    WriteSh2WordForTest(
+        retailUpperCommandDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12),
+        0x0000);
+    retailUpperCommandDevice.NotifyM68kVdpControlLongWrite(0x4000, 0x0082);
+    AssertEqual((ushort)0x0000, retailUpperCommandDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
+    AssertEqual((ushort)0x0000, retailUpperCommandDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
     byte[] maskRom = new byte[0x100];
     WriteWord(maskRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0

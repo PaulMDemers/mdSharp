@@ -303,6 +303,7 @@ public sealed class ThirtyTwoXDevice
     private bool _bootRomChecksumHostCleared;
     private bool _bootRomSixtyEightUpPending;
     private bool _bootRomSixtyEightUpReadyHiddenFromSh2;
+    private bool _m68kVdpControlMailboxArmed;
     private bool _m68kVdpControlMailboxHighPending;
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
@@ -516,6 +517,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomChecksumHostCleared = false;
         _bootRomSixtyEightUpPending = false;
         _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
+        _m68kVdpControlMailboxArmed = false;
         _m68kVdpControlMailboxHighPending = false;
         _adapterEnabled = false;
         _sh2ResetEnabled = true;
@@ -1568,6 +1570,7 @@ public sealed class ThirtyTwoXDevice
             {
                 WriteBigEndianWord(_systemRegisters, comm + 2, value);
                 ClearM68kCommunicationTrackingForWord(2);
+                _m68kVdpControlMailboxArmed = false;
             }
         }
 
@@ -1610,6 +1613,7 @@ public sealed class ThirtyTwoXDevice
             ClearM68kCommunicationTrackingForWord(2);
         }
 
+        _m68kVdpControlMailboxArmed = false;
         _m68kVdpControlMailboxHighPending = false;
     }
 
@@ -1618,7 +1622,8 @@ public sealed class ThirtyTwoXDevice
         return _adapterEnabled &&
             _sh2ResetReleased &&
             !_bootRomHandshakePending &&
-            !_bootRomLaunchPending;
+            !_bootRomLaunchPending &&
+            _m68kVdpControlMailboxArmed;
     }
 
     private void ClearM68kCommunicationTrackingForWord(int relativeOffset)
@@ -2359,6 +2364,7 @@ public sealed class ThirtyTwoXDevice
             _bootRomChecksumHostCleared,
             _bootRomSixtyEightUpPending,
             _bootRomSixtyEightUpReadyHiddenFromSh2,
+            _m68kVdpControlMailboxArmed,
             MasterSh2.CaptureState(),
             SlaveSh2.CaptureState());
     }
@@ -2475,6 +2481,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomChecksumHostCleared = state.BootRomChecksumHostCleared;
         _bootRomSixtyEightUpPending = state.BootRomSixtyEightUpPending;
         _bootRomSixtyEightUpReadyHiddenFromSh2 = state.BootRomSixtyEightUpReadyHiddenFromSh2;
+        _m68kVdpControlMailboxArmed = state.M68kVdpControlMailboxArmed;
         MasterSh2.RestoreState(state.MasterSh2);
         SlaveSh2.RestoreState(state.SlaveSh2);
     }
@@ -4008,6 +4015,8 @@ public sealed class ThirtyTwoXDevice
         {
             return;
         }
+
+        _m68kVdpControlMailboxArmed = offset == comm + 12 && value == 0x0002;
 
         ushort highCommand = offset == comm + 12 ? value : ReadBigEndianWord(_systemRegisters, comm + 12);
         ushort lowCommand = offset == comm + 14 ? value : ReadBigEndianWord(_systemRegisters, comm + 14);
@@ -7346,6 +7355,7 @@ public sealed class ThirtyTwoXDevice
         bool BootRomChecksumHostCleared,
         bool BootRomSixtyEightUpPending,
         bool BootRomSixtyEightUpReadyHiddenFromSh2,
+        bool M68kVdpControlMailboxArmed,
         Sh2Cpu.Sh2State MasterSh2,
         Sh2Cpu.Sh2State SlaveSh2);
 
