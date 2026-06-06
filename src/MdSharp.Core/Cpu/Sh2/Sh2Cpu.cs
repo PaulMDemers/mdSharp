@@ -114,9 +114,8 @@ public sealed class Sh2Cpu
 
     public bool TryFastForwardBraSelfNopIdleLoop(int maxCycles, out int cycles)
     {
-        const int CyclesPerIteration = 2;
         cycles = 0;
-        if (maxCycles < CyclesPerIteration ||
+        if (maxCycles < 2 ||
             Halted ||
             HasAcceptablePendingInterrupt ||
             DelaySlotActive ||
@@ -133,9 +132,50 @@ public sealed class Sh2Cpu
             !peekBus.TryPeekWord(loopPc + 2, out ushort delaySlotOpcode) ||
             delaySlotOpcode != 0x0009)
         {
-            return false;
+            bool atBranch = false;
+            if (peekBus.TryPeekWord(loopPc, out ushort firstNopOpcode) &&
+                firstNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc + 2, out branchOpcode) &&
+                (branchOpcode & 0xF000) == 0xA000 &&
+                BranchWordTarget(loopPc + 2, branchOpcode) == loopPc &&
+                peekBus.TryPeekWord(loopPc + 4, out delaySlotOpcode) &&
+                delaySlotOpcode == 0x0009)
+            {
+                atBranch = false;
+            }
+            else if (loopPc >= 2 &&
+                peekBus.TryPeekWord(loopPc - 2, out firstNopOpcode) &&
+                firstNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc, out branchOpcode) &&
+                (branchOpcode & 0xF000) == 0xA000 &&
+                BranchWordTarget(loopPc, branchOpcode) == loopPc - 2 &&
+                peekBus.TryPeekWord(loopPc + 2, out delaySlotOpcode) &&
+                delaySlotOpcode == 0x0009)
+            {
+                loopPc -= 2;
+                atBranch = true;
+            }
+            else
+            {
+                return false;
+            }
+
+            const int NopBranchNopCyclesPerIteration = 3;
+            int entryCycles = atBranch ? 2 : 0;
+            if (maxCycles < entryCycles + NopBranchNopCyclesPerIteration)
+            {
+                return false;
+            }
+
+            cycles = entryCycles + ((maxCycles - entryCycles) - ((maxCycles - entryCycles) % NopBranchNopCyclesPerIteration));
+            Cycles += cycles;
+            LastOpcode = delaySlotOpcode;
+            LastOpcodePc = loopPc + 4;
+            PC = loopPc;
+            return true;
         }
 
+        const int CyclesPerIteration = 2;
         cycles = maxCycles - (maxCycles % CyclesPerIteration);
         Cycles += cycles;
         LastOpcode = delaySlotOpcode;
@@ -3302,10 +3342,18 @@ public sealed class Sh2Cpu
                     if (PC < 6 ||
                         !TryReadByteDisplacementZeroWaitDtBfLoop(peekBus, PC - 6, out loadOpcode, out exitBranchOpcode, out dtOpcode, out loopBranchOpcode))
                     {
-                        return false;
-                    }
+                        if (PC < 8 ||
+                            !TryReadByteDisplacementZeroWaitDtBfLoop(peekBus, PC - 8, out loadOpcode, out exitBranchOpcode, out dtOpcode, out loopBranchOpcode))
+                        {
+                            return false;
+                        }
 
-                    loopPc = PC - 6;
+                        loopPc = PC - 8;
+                    }
+                    else
+                    {
+                        loopPc = PC - 6;
+                    }
                 }
                 else
                 {

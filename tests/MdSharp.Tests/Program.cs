@@ -1937,6 +1937,22 @@ void ThirtyTwoXSh2BraSelfIdleLoopFastForward()
     Sh2Cpu nonIdle = new(nonIdleBus, "test");
     nonIdle.Reset(LoopPc);
     AssertTrue(!nonIdle.TryFastForwardBraSelfNopIdleLoop(100, out _), "non-NOP delay slot should not fast-forward");
+
+    const uint NopBranchLoopPc = 0x0600_0300;
+    SyntheticSh2Bus nopBranchBus = new();
+    nopBranchBus.WriteInstructionWord(NopBranchLoopPc + 0, 0x0009); // NOP
+    nopBranchBus.WriteInstructionWord(NopBranchLoopPc + 2, 0xAFFD); // BRA back to first NOP
+    nopBranchBus.WriteInstructionWord(NopBranchLoopPc + 4, 0x0009); // NOP delay slot
+    Sh2Cpu nopBranch = new(nopBranchBus, "test");
+    nopBranch.Reset(NopBranchLoopPc);
+    AssertTrue(nopBranch.TryFastForwardBraSelfNopIdleLoop(101, out int nopBranchCycles), "NOP/BRA/NOP idle loop should fast-forward from the leading NOP");
+    AssertEqual(99, nopBranchCycles);
+    AssertEqual(NopBranchLoopPc, nopBranch.PC);
+
+    nopBranch.Reset(NopBranchLoopPc + 2);
+    AssertTrue(nopBranch.TryFastForwardBraSelfNopIdleLoop(101, out int branchEntryCycles), "NOP/BRA/NOP idle loop should fast-forward from the branch");
+    AssertEqual(101, branchEntryCycles);
+    AssertEqual(NopBranchLoopPc, nopBranch.PC);
 }
 
 void ThirtyTwoXSh2DtBfDelayLoopFastForward()
@@ -2379,6 +2395,13 @@ void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
     AssertEqual(318u, cpu.R[2]);
     AssertEqual(0u, cpu.R[0]);
     AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 8);
+    cpu.R[1] = ByteAddress - 1;
+    cpu.R[2] = 1000;
+    AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should fast-forward from the loop branch");
+    AssertEqual(LoopPc, cpu.PC);
+    AssertTrue(cpu.R[2] < 1000);
 
     cpu.R[2] = 2;
     AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should finish when DT reaches zero");

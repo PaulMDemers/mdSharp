@@ -817,7 +817,7 @@ public sealed class ThirtyTwoXDevice
             int braIdleBudget = IsPwmTimerActive()
                 ? Math.Min(cycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)
                 : cycleBudget;
-            if (nextOpcode == 0xAFFE &&
+            if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0xA000) &&
                 cpu.TryFastForwardBraSelfNopIdleLoop(braIdleBudget, out fastCycles))
             {
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
