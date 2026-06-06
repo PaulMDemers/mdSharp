@@ -31,6 +31,7 @@ Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPo
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
+Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
 Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoopFastForward);
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
@@ -2380,6 +2381,41 @@ void ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward()
 
     bus.WriteLong(0x2000_4020, 0x0000_0001);
     AssertTrue(!cpu.TryFastForwardLongTstBtPaddedPollLoop(300, out _), "nonzero padded long poll should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward()
+{
+    const uint LoopPc = 0x0204_DF30;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x3200); // CMP/EQ R0,R2
+    bus.WriteInstructionWord(LoopPc + 2, 0x6012); // MOV.L @R1,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8DFC); // BT/S loop
+    bus.WriteInstructionWord(LoopPc + 6, 0x2039); // AND R3,R0
+    bus.WriteLong(0x0600_1170, 0x0000_0002);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = 0x0000_0002;
+    cpu.R[1] = 0x0600_1170;
+    cpu.R[2] = 0x0000_0002;
+    cpu.R[3] = 0x0000_0003;
+    AssertTrue(cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(300, out int cycles), "masked long change poll should fast-forward while the masked value is unchanged");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_0002u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.R[0] = 0x0000_0002;
+    cpu.R[1] = 0x0600_1170;
+    cpu.R[2] = 0x0000_0002;
+    cpu.R[3] = 0x0000_0003;
+    AssertTrue(cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(300, out _), "masked long change poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_0002u, cpu.R[0]);
+
+    bus.WriteLong(0x0600_1170, 0x0000_0001);
+    AssertTrue(!cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(300, out _), "changed masked long value should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2ByteTstBfPollLoopFastForward()

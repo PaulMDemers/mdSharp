@@ -4282,6 +4282,74 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardLongMaskedChangeBtSDelayPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadLongMaskedChangeBtSDelayPollPattern(peekBus, loopPc, out ushort compareOpcode, out ushort loadOpcode, out ushort branchOpcode, out ushort andOpcode))
+        {
+            if (PC < 2 || !TryReadLongMaskedChangeBtSDelayPollPattern(peekBus, PC - 2, out compareOpcode, out loadOpcode, out branchOpcode, out andOpcode))
+            {
+                if (PC < 4 || !TryReadLongMaskedChangeBtSDelayPollPattern(peekBus, PC - 4, out compareOpcode, out loadOpcode, out branchOpcode, out andOpcode))
+                {
+                    if (PC < 6 || !TryReadLongMaskedChangeBtSDelayPollPattern(peekBus, PC - 6, out compareOpcode, out loadOpcode, out branchOpcode, out andOpcode))
+                    {
+                        return false;
+                    }
+
+                    loopPc = PC - 6;
+                }
+                else
+                {
+                    loopPc = PC - 4;
+                }
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        int compareLeft = (compareOpcode >> 8) & 0x0F;
+        int compareRight = (compareOpcode >> 4) & 0x0F;
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int andDestination = (andOpcode >> 8) & 0x0F;
+        int andSource = (andOpcode >> 4) & 0x0F;
+        if (loadDestination != compareRight ||
+            andDestination != loadDestination ||
+            !TryPeekLong(peekBus, R[loadSource], out uint longValue))
+        {
+            return false;
+        }
+
+        uint maskedValue = longValue & R[andSource];
+        if (maskedValue != R[compareLeft])
+        {
+            return false;
+        }
+
+        R[loadDestination] = maskedValue;
+        SetT(true);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     private static bool TryReadLongTstBtPaddedPattern(ISh2PeekBus peekBus, uint pc, out ushort loadOpcode, out ushort branchOpcode)
     {
         loadOpcode = 0;
@@ -4298,6 +4366,33 @@ public sealed class Sh2Cpu
             nopOpcode == 0x0009 &&
             (testOpcode & 0xF00F) == 0x2008 &&
             (branchOpcode & 0xFF00) == 0x8900;
+    }
+
+    private static bool TryReadLongMaskedChangeBtSDelayPollPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort compareOpcode,
+        out ushort loadOpcode,
+        out ushort branchOpcode,
+        out ushort andOpcode)
+    {
+        compareOpcode = 0;
+        loadOpcode = 0;
+        branchOpcode = 0;
+        andOpcode = 0;
+        if (!peekBus.TryPeekWord(pc, out compareOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out loadOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out branchOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out andOpcode))
+        {
+            return false;
+        }
+
+        return (compareOpcode & 0xF00F) == 0x3000 &&
+            (loadOpcode & 0xF00F) == 0x6002 &&
+            (branchOpcode & 0xFF00) == 0x8D00 &&
+            (andOpcode & 0xF00F) == 0x2009 &&
+            BranchByteTarget(pc + 4, branchOpcode) == pc;
     }
 
     public bool TryFastForwardWordTstBfPollLoop(int maxCycles, out int cycles)
