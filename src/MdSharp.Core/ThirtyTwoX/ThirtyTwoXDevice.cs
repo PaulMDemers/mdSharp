@@ -124,6 +124,7 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2CartridgeRvBlockedWaitCycles = 64;
     private const int CartridgeRomBusMasterCyclesPerByte = 12;
     private const int Sh2CommunicationSyncStepLimit = 32768;
+    private const int Sh2CommunicationSyncCycleBudget = 64;
     private const byte Sh2FrtTierInputCaptureEnable = 0x80;
     private const byte Sh2FrtTierOutputCompareAEnable = 0x08;
     private const byte Sh2FrtTierOverflowEnable = 0x02;
@@ -3344,7 +3345,7 @@ public sealed class ThirtyTwoXDevice
                     break;
                 }
 
-                StepSh2Cpu(1 - cpuIndex);
+                StepSh2Cpu(1 - cpuIndex, Sh2CommunicationSyncCycleBudget);
                 steps++;
             }
         }

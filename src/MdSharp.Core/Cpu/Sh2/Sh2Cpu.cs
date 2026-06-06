@@ -665,7 +665,6 @@ public sealed class Sh2Cpu
         cycles = 0;
         const int TakenIterationCycles = 6;
         const int FinalIterationCycles = 4;
-        const int MinimumBurstCycles = TakenIterationCycles * 4096;
         if (maxCycles <= 0 ||
             Halted ||
             HasAcceptablePendingInterrupt ||
@@ -722,7 +721,7 @@ public sealed class Sh2Cpu
             return false;
         }
 
-        int effectiveMaxCycles = Math.Max(maxCycles, MinimumBurstCycles);
+        int effectiveMaxCycles = maxCycles;
         uint maxIterations = (uint)(effectiveMaxCycles / TakenIterationCycles);
         if (maxIterations == 0 && effectiveMaxCycles >= FinalIterationCycles)
         {
@@ -1712,7 +1711,6 @@ public sealed class Sh2Cpu
         cycles = 0;
         const int FirstHalfCycles = 5;
         const int FullLoopCycles = 10;
-        const int MinimumBurstCycles = FullLoopCycles * 1024;
         if (maxCycles <= 0 ||
             Halted ||
             HasAcceptablePendingInterrupt ||
@@ -1784,7 +1782,7 @@ public sealed class Sh2Cpu
         }
 
         uint exitPc = loopPc + 20;
-        int effectiveMaxCycles = Math.Max(maxCycles, MinimumBurstCycles);
+        int effectiveMaxCycles = maxCycles;
         int consumed = 0;
         uint threshold = R[0];
         if (startAtFirstCompare)

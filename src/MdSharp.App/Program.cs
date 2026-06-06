@@ -4081,7 +4081,17 @@ void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int i
             trace.R5,
             trace.R6,
             trace.R7,
-            trace.R15);
+            trace.R8,
+            trace.R9,
+            trace.R10,
+            trace.R11,
+            trace.R12,
+            trace.R13,
+            trace.R14,
+            trace.R15,
+            trace.Pr,
+            trace.Gbr,
+            trace.Vbr);
         sequence++;
         rowCount = Math.Min(rowCount + 1, rows.Length);
     }
@@ -4108,7 +4118,7 @@ void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int i
     device.SlaveSh2.InstructionObserver = null;
 
     using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
-    writer.WriteLine("frame,sequence,cpu,pc,opcode,nextPc,sr,r0,r1,r2,r3,r4,r5,r6,r7,r15");
+    writer.WriteLine("frame,sequence,cpu,pc,opcode,nextPc,sr,r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,pr,gbr,vbr");
     int first = sequence - rowCount;
     for (int i = 0; i < rowCount; i++)
     {
@@ -4130,7 +4140,17 @@ void TraceThirtyTwoXSh2Fault(string romPath, string outputCsv, int frames, int i
             $"${row.R5:X8}",
             $"${row.R6:X8}",
             $"${row.R7:X8}",
-            $"${row.R15:X8}"));
+            $"${row.R8:X8}",
+            $"${row.R9:X8}",
+            $"${row.R10:X8}",
+            $"${row.R11:X8}",
+            $"${row.R12:X8}",
+            $"${row.R13:X8}",
+            $"${row.R14:X8}",
+            $"${row.R15:X8}",
+            $"${row.Pr:X8}",
+            $"${row.Gbr:X8}",
+            $"${row.Vbr:X8}"));
     }
 
     Console.WriteLine($"Fault: {(faultSeen ? faultDetail : "not observed")}");
@@ -14611,7 +14631,17 @@ file readonly record struct Sh2FaultTraceRow(
     uint R5,
     uint R6,
     uint R7,
-    uint R15);
+    uint R8,
+    uint R9,
+    uint R10,
+    uint R11,
+    uint R12,
+    uint R13,
+    uint R14,
+    uint R15,
+    uint Pr,
+    uint Gbr,
+    uint Vbr);
 
 file sealed record FillLoopKey(int Frame, string Cpu, uint LoopPc, string Target);
 
