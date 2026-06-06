@@ -302,6 +302,7 @@ public sealed class ThirtyTwoXDevice
     private bool _bootRomChecksumPublished;
     private bool _bootRomChecksumHostCleared;
     private bool _bootRomSixtyEightUpPending;
+    private bool _bootRomSixtyEightUpReadyHiddenFromSh2;
     private bool _m68kVdpControlMailboxHighPending;
     private bool _sh2CommunicationSyncActive;
     private bool _runningSh2Dma;
@@ -514,6 +515,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomChecksumPublished = false;
         _bootRomChecksumHostCleared = false;
         _bootRomSixtyEightUpPending = false;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
         _m68kVdpControlMailboxHighPending = false;
         _adapterEnabled = false;
         _sh2ResetEnabled = true;
@@ -1932,6 +1934,7 @@ public sealed class ThirtyTwoXDevice
         UpdateBootRomHandshakeAfterM68kWrite(aligned, hadBootRomSignature);
         TrackBootRomChecksumHostClear(aligned, value);
         PublishBootRomChecksumAfterHostClear(aligned);
+        RetireBootRomSixtyEightUpReadyOnHostWrite(aligned, value);
         PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
     }
 
@@ -2355,6 +2358,7 @@ public sealed class ThirtyTwoXDevice
             _bootRomChecksumPublished,
             _bootRomChecksumHostCleared,
             _bootRomSixtyEightUpPending,
+            _bootRomSixtyEightUpReadyHiddenFromSh2,
             MasterSh2.CaptureState(),
             SlaveSh2.CaptureState());
     }
@@ -2470,6 +2474,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomChecksumPublished = state.BootRomChecksumPublished;
         _bootRomChecksumHostCleared = state.BootRomChecksumHostCleared;
         _bootRomSixtyEightUpPending = state.BootRomSixtyEightUpPending;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = state.BootRomSixtyEightUpReadyHiddenFromSh2;
         MasterSh2.RestoreState(state.MasterSh2);
         SlaveSh2.RestoreState(state.SlaveSh2);
     }
@@ -3210,6 +3215,13 @@ public sealed class ThirtyTwoXDevice
             return 0;
         }
 
+        if (IsBootRomSixtyEightUpHiddenFromSh2(offset, 1))
+        {
+            TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R8", offset, 0);
+            SyncOtherSh2ForCommunicationAccess(offset, cpuIndex);
+            return 0;
+        }
+
         byte registerValue = ReadSystemRegisterByteCore(offset, sh2View: true);
         TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R8", offset, registerValue);
         ApplyDeferredSh2CommunicationClearAfterRead(offset, registerValue);
@@ -3231,6 +3243,11 @@ public sealed class ThirtyTwoXDevice
             return 0;
         }
 
+        if (IsBootRomSixtyEightUpHiddenFromSh2(offset, 1))
+        {
+            return 0;
+        }
+
         return ReadSystemRegisterByteCore(offset, sh2View: true);
     }
 
@@ -3240,6 +3257,8 @@ public sealed class ThirtyTwoXDevice
         ushort value = aligned == ThirtyTwoXHardwareProfile.AdapterControlOffset
             ? BuildSh2InterruptMask(cpuIndex)
             : IsPostStartSignatureHiddenFromSh2(aligned, 2)
+                ? (ushort)0
+            : IsBootRomSixtyEightUpHiddenFromSh2(aligned, 2)
                 ? (ushort)0
             : ReadSystemRegisterWordCore(aligned, popDreqFifo: true, sh2View: true);
         TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R16", aligned, value);
@@ -3895,6 +3914,7 @@ public sealed class ThirtyTwoXDevice
             _bootRomPostStartSignatureHiddenFromSh2 = false;
             _bootRomPostStartSignatureReadMask = 0;
             _bootRomPostStartHostClearProtectMask = 0;
+            _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
         }
     }
 
@@ -3927,6 +3947,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomPostStartSignatureHiddenFromSh2 = false;
         _bootRomPostStartSignatureReadMask = 0;
         _bootRomPostStartHostClearProtectMask = 0;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
     }
 
     private bool HasCartridgeHeaderChecksum()
@@ -3994,6 +4015,7 @@ public sealed class ThirtyTwoXDevice
             lowCommand == 0x5550)
         {
             _bootRomSixtyEightUpPending = true;
+            _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
         }
     }
 
@@ -4020,6 +4042,61 @@ public sealed class ThirtyTwoXDevice
         _m68kCommunicationDeferredSh2ClearBytes[14] = false;
         _m68kCommunicationDeferredSh2ClearBytes[15] = false;
         _bootRomSixtyEightUpPending = false;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = true;
+    }
+
+    private void RetireBootRomSixtyEightUpReadyOnHostWrite(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (!_bootRomSixtyEightUpReadyHiddenFromSh2 ||
+            offset != comm + 14 ||
+            value != 0)
+        {
+            return;
+        }
+
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
+    }
+
+    private bool IsBootRomSixtyEightUpHiddenFromSh2(ushort offset, int bytes)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        int relative = (offset & (SystemRegisterBytes - 1)) - comm;
+        if (relative < 12 || relative + bytes > 16)
+        {
+            return false;
+        }
+
+        if (_bootRomSixtyEightUpPending)
+        {
+            return MatchesCommunicationRange(relative, bytes, [0x36, 0x38, 0x55, 0x50], baseRelative: 12);
+        }
+
+        if (_bootRomSixtyEightUpReadyHiddenFromSh2)
+        {
+            return MatchesCommunicationRange(relative, bytes, [0x4F, 0x4B], baseRelative: 14);
+        }
+
+        return false;
+    }
+
+    private bool MatchesCommunicationRange(int relative, int bytes, ReadOnlySpan<byte> expected, int baseRelative)
+    {
+        int start = relative - baseRelative;
+        if (start < 0 || start + bytes > expected.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < bytes; i++)
+        {
+            if (_systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative + i] != expected[start + i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void UpdateBootRomHandshakeAfterM68kWrite(ushort offset, bool hadBootRomSignature)
@@ -7268,6 +7345,7 @@ public sealed class ThirtyTwoXDevice
         bool BootRomChecksumPublished,
         bool BootRomChecksumHostCleared,
         bool BootRomSixtyEightUpPending,
+        bool BootRomSixtyEightUpReadyHiddenFromSh2,
         Sh2Cpu.Sh2State MasterSh2,
         Sh2Cpu.Sh2State SlaveSh2);
 

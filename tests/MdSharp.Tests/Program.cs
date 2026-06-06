@@ -529,6 +529,18 @@ void ThirtyTwoXDeviceShell()
     upperCommandClearDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0xFFFF);
     WriteSh2WordForTest(upperCommandClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0, cpuIndex: 0);
     AssertEqual((ushort)0x0000, upperCommandClearDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    ThirtyTwoXDevice sixtyEightUpDevice = new();
+    sixtyEightUpDevice.Reset();
+    sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x3638);
+    sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x5550);
+    AssertEqual((ushort)0x5550, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x0000);
+    sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0000);
+    AssertEqual((ushort)0x4F4B, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0000);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
