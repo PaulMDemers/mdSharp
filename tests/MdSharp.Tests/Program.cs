@@ -2414,6 +2414,33 @@ void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
     cpu.R[2] = 1000;
     bus.WriteByte(ByteAddress, 0x80);
     AssertTrue(!cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "nonzero wait byte should fall back to the interpreter");
+
+    const uint OuterPc = 0x0600_159C;
+    const uint InnerPc = 0x0600_15B8;
+    const uint OuterFlagAddress = 0x0600_1798;
+    const uint InnerByteAddress = 0x0600_1789;
+    SyntheticSh2Bus nestedBus = new();
+    nestedBus.WriteInstructionWord(OuterPc + 0, 0x90FC); // MOV.W @($1F8,PC),R0
+    nestedBus.WriteInstructionWord(OuterPc + 2, 0x2008); // TST R0,R0
+    nestedBus.WriteInstructionWord(OuterPc + 4, 0x890A); // BT inner wait
+    nestedBus.WriteWord(OuterFlagAddress, 0x0000);
+    nestedBus.WriteInstructionWord(InnerPc + 0, 0x8411); // MOV.B @(1,R1),R0
+    nestedBus.WriteInstructionWord(InnerPc + 2, 0x2008); // TST R0,R0
+    nestedBus.WriteInstructionWord(InnerPc + 4, 0x8B16); // BF exit
+    nestedBus.WriteInstructionWord(InnerPc + 6, 0x4210); // DT R2
+    nestedBus.WriteInstructionWord(InnerPc + 8, 0x8BEC); // BF outer gate
+    nestedBus.WriteByte(InnerByteAddress, 0x00);
+    Sh2Cpu nested = new(nestedBus, "test");
+    nested.Reset(InnerPc + 8);
+    nested.R[1] = InnerByteAddress - 1;
+    nested.R[2] = 1000;
+    AssertTrue(nested.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(4096, out int nestedCycles), "outer word zero plus byte displacement wait should fast-forward from the inner loop branch");
+    AssertTrue(nestedCycles > 0);
+    AssertEqual(OuterPc, nested.PC);
+    AssertTrue(nested.R[2] < 1000);
+
+    nestedBus.WriteWord(OuterFlagAddress, 0x0001);
+    AssertTrue(!nested.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(4096, out _), "nonzero outer word should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2TstBfsDelayAddLoopFastForward()

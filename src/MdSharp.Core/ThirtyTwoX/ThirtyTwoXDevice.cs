@@ -950,7 +950,8 @@ public sealed class ThirtyTwoXDevice
             if (IsLikelyByteDisplacementZeroWaitDtBfLoop(cpuIndex, cpu.PC, nextOpcode))
             {
                 ByteDisplacementZeroWaitFastPathAttempts++;
-                if (cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(cycleBudget, out fastCycles))
+                if (cpu.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(cycleBudget, out fastCycles) ||
+                    cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(cycleBudget, out fastCycles))
                 {
                     ByteDisplacementZeroWaitFastPathHits++;
                     AdvanceSh2InternalTimers(cpuIndex, fastCycles);

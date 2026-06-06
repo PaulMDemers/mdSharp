@@ -3400,6 +3400,76 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(int maxCycles, out int cycles)
+    {
+        const int CyclesPerIteration = 9;
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindByteDisplacementZeroWaitDtBfLoop(peekBus, PC, out uint byteLoopPc, out ushort loadOpcode, out ushort exitBranchOpcode, out ushort dtOpcode, out ushort loopBranchOpcode))
+        {
+            return false;
+        }
+
+        uint outerPc = BranchByteTarget(byteLoopPc + 8, loopBranchOpcode);
+        if (outerPc >= byteLoopPc ||
+            !TryReadOuterWordZeroGate(peekBus, outerPc, byteLoopPc, out ushort outerLoadOpcode, out ushort outerBranchOpcode))
+        {
+            return false;
+        }
+
+        int outerLoadDestination = (outerLoadOpcode >> 8) & 0x0F;
+        uint outerAddress = ((outerPc + 4) & 0xFFFF_FFFCu) + (uint)((outerLoadOpcode & 0xFF) * 2);
+        if (!peekBus.TryPeekWord(outerAddress, out ushort outerWord) ||
+            outerWord != 0)
+        {
+            return false;
+        }
+
+        int baseRegister = (loadOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        uint address = R[baseRegister] + (uint)(loadOpcode & 0x0F);
+        if (!peekBus.TryPeekByte(address, out byte value) ||
+            value != 0)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(Math.Min(maxCycles, MaxBurstCycles) / CyclesPerIteration);
+        if (maxIterations == 0)
+        {
+            return false;
+        }
+
+        uint iterations = Math.Min(count, maxIterations);
+        R[outerLoadDestination] = 0;
+        R[0] = 0;
+        R[countRegister] = count - iterations;
+        bool completedLoop = iterations == count;
+        SetT(completedLoop);
+        cycles = checked((int)(iterations * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = completedLoop ? loopBranchOpcode : dtOpcode;
+        LastOpcodePc = completedLoop ? byteLoopPc + 8 : byteLoopPc + 6;
+        PC = completedLoop ? byteLoopPc + 10 : outerPc;
+        return true;
+    }
+
     private static bool TryReadSdramFlagTaskletDispatcher(
         ISh2PeekBus peekBus,
         uint loopPc,
@@ -3554,6 +3624,93 @@ public sealed class Sh2Cpu
         uint loopTarget = loopPc + 12 + (uint)(loopDisplacement * 2);
         return exitTarget != loopPc &&
             loopTarget == loopPc;
+    }
+
+    private static bool TryFindByteDisplacementZeroWaitDtBfLoop(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out uint loopPc,
+        out ushort loadOpcode,
+        out ushort exitBranchOpcode,
+        out ushort dtOpcode,
+        out ushort loopBranchOpcode)
+    {
+        ReadOnlySpan<int> offsets = [0, -2, -4, -6, -8];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = (uint)(pc + offset);
+            if (TryReadByteDisplacementZeroWaitDtBfLoopWithoutLoopTarget(peekBus, candidate, out loadOpcode, out exitBranchOpcode, out dtOpcode, out loopBranchOpcode))
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        loadOpcode = 0;
+        exitBranchOpcode = 0;
+        dtOpcode = 0;
+        loopBranchOpcode = 0;
+        return false;
+    }
+
+    private static bool TryReadByteDisplacementZeroWaitDtBfLoopWithoutLoopTarget(
+        ISh2PeekBus peekBus,
+        uint loopPc,
+        out ushort loadOpcode,
+        out ushort exitBranchOpcode,
+        out ushort dtOpcode,
+        out ushort loopBranchOpcode)
+    {
+        loadOpcode = 0;
+        exitBranchOpcode = 0;
+        dtOpcode = 0;
+        loopBranchOpcode = 0;
+        if (!peekBus.TryPeekWord(loopPc, out loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out exitBranchOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out dtOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out loopBranchOpcode))
+        {
+            return false;
+        }
+
+        if ((loadOpcode & 0xFF00) < 0x8400 ||
+            (loadOpcode & 0xFF00) > 0x84F0 ||
+            testOpcode != 0x2008 ||
+            (exitBranchOpcode & 0xFF00) != 0x8B00 ||
+            (dtOpcode & 0xF0FF) != 0x4010 ||
+            (loopBranchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        uint exitTarget = BranchByteTarget(loopPc + 4, exitBranchOpcode);
+        return exitTarget != loopPc;
+    }
+
+    private static bool TryReadOuterWordZeroGate(ISh2PeekBus peekBus, uint outerPc, uint targetPc, out ushort loadOpcode, out ushort branchOpcode)
+    {
+        loadOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(outerPc, out loadOpcode) ||
+            !peekBus.TryPeekWord(outerPc + 2, out ushort testOpcode) ||
+            !peekBus.TryPeekWord(outerPc + 4, out branchOpcode))
+        {
+            return false;
+        }
+
+        return (loadOpcode & 0xF000) == 0x9000 &&
+            (testOpcode & 0xF00F) == 0x2008 &&
+            ((testOpcode >> 8) & 0x0F) == ((loadOpcode >> 8) & 0x0F) &&
+            ((testOpcode >> 4) & 0x0F) == ((loadOpcode >> 8) & 0x0F) &&
+            (branchOpcode & 0xFF00) == 0x8900 &&
+            BranchByteTarget(outerPc + 4, branchOpcode) == targetPc;
     }
 
     private static bool TryReadLiteralByteDisplacementTstRegisterBtPollLoop(
