@@ -573,7 +573,6 @@ void ThirtyTwoXDeviceShell()
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
-    const uint dualWorkerDestinationAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x200;
     dualWorkerSemaphoreDevice.MasterSh2.R[13] = dualWorkerWrapperAddress;
     WriteSh2WordForTest(dualWorkerSemaphoreDevice, dualWorkerWrapperAddress + 0x00, 0xDA05);
     WriteSh2WordForTest(dualWorkerSemaphoreDevice, dualWorkerWrapperAddress + 0x02, 0xDB04);

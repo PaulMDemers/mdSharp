@@ -242,6 +242,8 @@ public sealed class ThirtyTwoXDevice
     private readonly Func<uint, ushort, bool>[] _sh2FrameBufferWordWriters = new Func<uint, ushort, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, ushort?>[] _sh2WordReaders = new Func<uint, ushort?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, ushort, bool>[] _sh2WordWriters = new Func<uint, ushort, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly Func<uint, ushort?>[] _sh2FastCopyWordReaders = new Func<uint, ushort?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly Func<uint, ushort, bool>[] _sh2FastCopyWordWriters = new Func<uint, ushort, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, uint, bool>[] _sh2LongWriters = new Func<uint, uint, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, uint?>[] _sh2LongReaders = new Func<uint, uint?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly byte[] _sh2DmaRequestSelect = new byte[2];
@@ -356,6 +358,10 @@ public sealed class ThirtyTwoXDevice
             WriteSh2Word(address, value, 1);
             return true;
         };
+        _sh2FastCopyWordReaders[0] = address => TryReadSh2WordForFastCopy(address, 0, out ushort value) ? value : null;
+        _sh2FastCopyWordReaders[1] = address => TryReadSh2WordForFastCopy(address, 1, out ushort value) ? value : null;
+        _sh2FastCopyWordWriters[0] = (address, value) => TryWriteSh2WordForFastCopy(address, value, 0);
+        _sh2FastCopyWordWriters[1] = (address, value) => TryWriteSh2WordForFastCopy(address, value, 1);
         _sh2LongWriters[0] = (address, value) => TryWriteSh2LongFast(address, value, 0);
         _sh2LongWriters[1] = (address, value) => TryWriteSh2LongFast(address, value, 1);
         _sh2LongReaders[0] = address => TryReadSh2LongNoAllocate(address, 0);
@@ -1498,8 +1504,8 @@ public sealed class ThirtyTwoXDevice
         MovWordStridedCopyFastPathAttempts++;
         if (!cpu.TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
                 cycleBudget,
-                _sh2WordReaders[cpuIndex],
-                _sh2WordWriters[cpuIndex],
+                _sh2FastCopyWordReaders[cpuIndex],
+                _sh2FastCopyWordWriters[cpuIndex],
                 out cycles))
         {
             return false;
@@ -1508,6 +1514,94 @@ public sealed class ThirtyTwoXDevice
         MovWordStridedCopyFastPathHits++;
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryReadSh2WordForFastCopy(uint address, int cpuIndex, out ushort value)
+    {
+        if (TryPeekSh2Word(address, cpuIndex, out value))
+        {
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart and < ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80 ||
+            IsSh2DmaRegisterAddress(address) ||
+            IsSh2DivisionUnitRegisterAddress(address) ||
+            IsSh2PeripheralRegisterAddress(address))
+        {
+            value = 0;
+            return false;
+        }
+
+        value = 0xFFFF;
+        return true;
+    }
+
+    private bool TryWriteSh2WordForFastCopy(uint address, ushort value, int cpuIndex)
+    {
+        if (TryMapSh2OverflowSdramMirrorAddress(address, out int overflowSdramOffset))
+        {
+            _sdram[overflowSdramOffset] = (byte)(value >> 8);
+            _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
+            return true;
+        }
+
+        if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
+        {
+            WriteBigEndianWord(_sdram, cachedSdramOffset, value);
+            UpdateSh2SdramCacheByte(cachedSdramOffset, (byte)(value >> 8), cpuIndex);
+            UpdateSh2SdramCacheByte((cachedSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), (byte)value, cpuIndex);
+            return true;
+        }
+
+        if (TryMapSh2SdramAddress(address, out int sdramOffset))
+        {
+            WriteBigEndianWord(_sdram, sdramOffset, value);
+            return true;
+        }
+
+        if (TryMapSh2CachedCartridgeAddress(address, out uint cacheOffset, out uint romOffset))
+        {
+            if (IsSh2CacheEnabled(cpuIndex))
+            {
+                WriteSh2CachedCartridgeByte(cacheOffset, romOffset, (byte)(value >> 8), cpuIndex);
+                WriteSh2CachedCartridgeByte(cacheOffset + 1, romOffset + 1, (byte)value, cpuIndex);
+            }
+
+            return true;
+        }
+
+        if (TryMapSh2UncachedBankedCartridgeAddress(address, out _) ||
+            address >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
+        {
+            return true;
+        }
+
+        if (TrySignalSh2InputCapture(address, value, cpuIndex))
+        {
+            return true;
+        }
+
+        if (IsSh2DivisionUnitRegisterAddress(address) ||
+            IsSh2PeripheralRegisterAddress(address) ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart and < ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2SystemRegisterCachedStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80 ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) ||
+            address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) ||
+            TryMapSh2FrameBufferAddress(address, out _, out _) ||
+            IsSh2DmaRegisterAddress(address) ||
+            TryMapSh2CachePurgeAddress(address) ||
+            TryMapSh2CacheAddressArrayAddress(address, out _))
+        {
+            WriteSh2Word(address, value, cpuIndex);
+            return true;
+        }
+
         return true;
     }
 
