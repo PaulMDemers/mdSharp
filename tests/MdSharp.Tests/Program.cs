@@ -506,6 +506,12 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(maskedCommandDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0002);
     AssertEqual(8, maskedCommandDevice.MasterSh2.PendingInterruptLevel);
     AssertEqual(68, maskedCommandDevice.MasterSh2.PendingInterruptVectorNumber);
+    ThirtyTwoXDevice byteMaskAccessDevice = new();
+    byteMaskAccessDevice.Reset();
+    WriteSh2ByteForTest(byteMaskAccessDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x80);
+    WriteSh2ByteForTest(byteMaskAccessDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset) + 1, 0x08);
+    AssertTrue(byteMaskAccessDevice.VdpAccessGrantedToSh2, "low-byte SH-2 interrupt mask writes should preserve VDP ownership granted by the high byte");
+    AssertEqual((ushort)0x8008, ReadSh2WordForTest(byteMaskAccessDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset)));
     ThirtyTwoXDevice byteCommandDevice = new();
     byteCommandDevice.Reset();
     byteCommandDevice.WriteSystemRegisterByte((ushort)(ThirtyTwoXHardwareProfile.InterruptControlOffset + 1), 0x02);

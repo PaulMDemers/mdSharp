@@ -3337,6 +3337,11 @@ public sealed class ThirtyTwoXDevice
         if ((index & ~1) == ThirtyTwoXHardwareProfile.AdapterControlOffset)
         {
             ushort mask = cpuIndex == 0 ? _masterInterruptMask : _slaveInterruptMask;
+            if (_vdpAccessGrantedToSh2)
+            {
+                mask |= AdapterControlVdpAccessSh2;
+            }
+
             mask = (index & 1) == 0
                 ? (ushort)((mask & 0x00FF) | (value << 8))
                 : (ushort)((mask & 0xFF00) | value);
