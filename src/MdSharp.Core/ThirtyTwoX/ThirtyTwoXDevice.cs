@@ -3309,6 +3309,11 @@ public sealed class ThirtyTwoXDevice
             return true;
         }
 
+        if (TryPeekSh2PeripheralByte(address, cpuIndex, out value))
+        {
+            return true;
+        }
+
         if (IsSh2DmaRegisterAddress(address) ||
             IsSh2DivisionUnitRegisterAddress(address) ||
             IsSh2PeripheralRegisterAddress(address))
@@ -3331,6 +3336,27 @@ public sealed class ThirtyTwoXDevice
 
         value = 0;
         return false;
+    }
+
+    private bool TryPeekSh2PeripheralByte(uint address, int cpuIndex, out byte value)
+    {
+        value = 0;
+        if (!IsSh2PeripheralRegisterAddress(address))
+        {
+            return false;
+        }
+
+        if (address == Sh2WatchdogRegisterStart ||
+            address == Sh2WatchdogCounterAddress ||
+            address == Sh2WatchdogResetControlAddress ||
+            address is >= Sh2FreeRunningCounterStart and < Sh2FreeRunningCounterStart + 2 ||
+            address is >= Sh2FrtOutputCompareRegisterStart and < Sh2FrtOutputCompareRegisterStart + 2)
+        {
+            return false;
+        }
+
+        value = _sh2PeripheralRegisters[cpuIndex & 1][(int)(address - Sh2PeripheralRegisterStart)];
+        return true;
     }
 
     private bool TryReadSh2BootRomByte(uint address, int cpuIndex, out byte value)

@@ -47,6 +47,7 @@ Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoo
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
 Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward);
+Run("32X SH-2 peripheral byte TST immediate poll fast-forwards in device", ThirtyTwoXSh2PeripheralByteTstImmediatePollFastForward);
 Run("32X SH-2 byte displacement zero wait DT/BF loop fast-forward", ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward);
 Run("32X SH-2 TST BF/S delay ADD loop fast-forward", ThirtyTwoXSh2TstBfsDelayAddLoopFastForward);
 Run("32X SH-2 two-stage word poll ring fast-forward", ThirtyTwoXSh2TwoStageWordPollRingFastForward);
@@ -3218,6 +3219,34 @@ void ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward()
 
     bus.WriteByte(0x2000_4024, 0x40);
     AssertTrue(!cpu.TryFastForwardByteDisplacementTstImmediateBtPollLoop(300, out _), "set bit should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2PeripheralByteTstImmediatePollFastForward()
+{
+    const uint MasterPc = 0x0600_0000;
+    const uint SlavePc = 0x0600_1000;
+    ThirtyTwoXDevice device = new();
+    WriteSh2WordForTest(device, MasterPc, 0x001B, cpuIndex: 0); // SLEEP
+    WriteSh2WordForTest(device, SlavePc + 0, 0x8444, cpuIndex: 1); // MOV.B @(4,R4),R0
+    WriteSh2WordForTest(device, SlavePc + 2, 0xC840, cpuIndex: 1); // TST #$40,R0
+    WriteSh2WordForTest(device, SlavePc + 4, 0x89FC, cpuIndex: 1); // BT loop
+    device.ResetSh2(MasterPc, SlavePc);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+    });
+    device.SlaveSh2.R[4] = 0xFFFF_FE00;
+    WriteSh2ByteForTest(device, 0xFFFF_FE04, 0x00, cpuIndex: 1);
+
+    int steps = device.RunSh2Cycles(512);
+    AssertTrue(steps > 0, "32X peripheral poll fixture should run SH-2 cycles");
+    AssertTrue(device.Sh2FastPathHits > 0, "peripheral byte TST immediate poll should fast-forward through the device scheduler");
+    AssertEqual(SlavePc, device.SlaveSh2.PC);
+    AssertEqual(1u, device.SlaveSh2.SR & 1);
 }
 
 void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
