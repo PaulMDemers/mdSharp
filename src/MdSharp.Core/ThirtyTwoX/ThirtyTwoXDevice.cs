@@ -913,6 +913,21 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
+            if (((nextOpcode & 0xF00F) == 0x2001 ||
+                    (nextOpcode & 0xF0FF) == 0x4010 ||
+                    (nextOpcode & 0xFF00) == 0x8F00 ||
+                    (nextOpcode & 0xF000) == 0x7000) &&
+                cpu.TryFastForwardMovWStoreDtBfSAddLoop(
+                    Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations),
+                    _sh2WordWriters[cpuIndex],
+                    Sh2FrameBufferWordFillLoopCycles,
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x2002)
             {
                 int longStoreBudget = Math.Min(cycleBudget, Sh2LongStoreFillLoopCycles * Sh2LongStoreFillLoopMaxBurstIterations);

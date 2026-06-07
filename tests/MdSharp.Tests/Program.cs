@@ -25,6 +25,7 @@ Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForw
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
 Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
+Run("32X SH-2 MOV.W DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovWStoreDtBfSAddLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
 Run("32X SH-2 byte fill indexed CMP/GE loop fast-forward", ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
@@ -2259,6 +2260,69 @@ void ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward()
     AssertEqual(Destination + 0x114, partialCpu.R[2]);
     AssertEqual(LoopPc, partialCpu.PC);
     AssertEqual(0x1122_3344u, bus.ReadLong(Destination + 0x110));
+}
+
+void ThirtyTwoXSh2MovWStoreDtBfSAddLoopFastForward()
+{
+    const uint StoreFirstLoopPc = 0x0600_0814;
+    const uint StoreFirstDestination = 0x2000_4200;
+    SyntheticSh2Bus storeFirstBus = new();
+    storeFirstBus.WriteInstructionWord(StoreFirstLoopPc + 0, 0x2101); // MOV.W R0,@R1
+    storeFirstBus.WriteInstructionWord(StoreFirstLoopPc + 2, 0x4210); // DT R2
+    storeFirstBus.WriteInstructionWord(StoreFirstLoopPc + 4, 0x8FFC); // BF/S loop
+    storeFirstBus.WriteInstructionWord(StoreFirstLoopPc + 6, 0x7102); // ADD #2,R1
+
+    Sh2Cpu storeFirst = new(storeFirstBus, "test");
+    storeFirst.Reset(StoreFirstLoopPc + 4);
+    storeFirst.R[0] = 0x0000_1357;
+    storeFirst.R[1] = StoreFirstDestination;
+    storeFirst.R[2] = 3;
+    AssertTrue(
+        storeFirst.TryFastForwardMovWStoreDtBfSAddLoop(18, storeFirstBus.TryWriteWord, 6, out int storeFirstCycles),
+        "store/DT/BF/S/add word fill loop should fast-forward from branch");
+    AssertEqual(18, storeFirstCycles);
+    AssertEqual(StoreFirstLoopPc + 8, storeFirst.PC);
+    AssertEqual(StoreFirstDestination + 6, storeFirst.R[1]);
+    AssertEqual(0u, storeFirst.R[2]);
+    AssertEqual(1u, storeFirst.SR & 1);
+    AssertEqual(0x1357, storeFirstBus.ReadWord(StoreFirstDestination + 0));
+    AssertEqual(0x1357, storeFirstBus.ReadWord(StoreFirstDestination + 2));
+    AssertEqual(0x1357, storeFirstBus.ReadWord(StoreFirstDestination + 4));
+
+    const uint DtFirstLoopPc = 0x0600_0E3A;
+    const uint DtFirstDestination = 0x0600_8000;
+    SyntheticSh2Bus dtFirstBus = new();
+    dtFirstBus.WriteInstructionWord(DtFirstLoopPc + 0, 0x4310); // DT R3
+    dtFirstBus.WriteInstructionWord(DtFirstLoopPc + 2, 0x2201); // MOV.W R0,@R2
+    dtFirstBus.WriteInstructionWord(DtFirstLoopPc + 4, 0x8FFC); // BF/S loop
+    dtFirstBus.WriteInstructionWord(DtFirstLoopPc + 6, 0x7202); // ADD #2,R2
+
+    Sh2Cpu dtFirst = new(dtFirstBus, "test");
+    dtFirst.Reset(DtFirstLoopPc);
+    dtFirst.R[0] = 0x0000_2468;
+    dtFirst.R[2] = DtFirstDestination;
+    dtFirst.R[3] = 4;
+    AssertTrue(
+        dtFirst.TryFastForwardMovWStoreDtBfSAddLoop(12, dtFirstBus.TryWriteWord, 6, out int partialCycles),
+        "DT/store/BF/S/add word fill loop should stop on budget");
+    AssertEqual(12, partialCycles);
+    AssertEqual(DtFirstLoopPc, dtFirst.PC);
+    AssertEqual(DtFirstDestination + 4, dtFirst.R[2]);
+    AssertEqual(2u, dtFirst.R[3]);
+    AssertEqual(0u, dtFirst.SR & 1);
+    AssertEqual(0x2468, dtFirstBus.ReadWord(DtFirstDestination + 0));
+    AssertEqual(0x2468, dtFirstBus.ReadWord(DtFirstDestination + 2));
+
+    AssertTrue(
+        dtFirst.TryFastForwardMovWStoreDtBfSAddLoop(12, dtFirstBus.TryWriteWord, 6, out int finalCycles),
+        "DT/store/BF/S/add word fill loop should finish on the next burst");
+    AssertEqual(12, finalCycles);
+    AssertEqual(DtFirstLoopPc + 8, dtFirst.PC);
+    AssertEqual(DtFirstDestination + 8, dtFirst.R[2]);
+    AssertEqual(0u, dtFirst.R[3]);
+    AssertEqual(1u, dtFirst.SR & 1);
+    AssertEqual(0x2468, dtFirstBus.ReadWord(DtFirstDestination + 4));
+    AssertEqual(0x2468, dtFirstBus.ReadWord(DtFirstDestination + 6));
 }
 
 void ThirtyTwoXSh2WordTableSearchLoopFastForward()

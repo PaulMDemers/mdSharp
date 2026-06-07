@@ -612,6 +612,140 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovWStoreDtBfSAddLoop(int maxCycles, Func<uint, ushort, bool> writeWord, int cyclesPerIteration, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        bool matched = false;
+        ushort storeOpcode = 0;
+        ushort dtOpcode = 0;
+        ushort branchOpcode = 0;
+        ushort addOpcode = 0;
+        ReadOnlySpan<int> offsets = [0, -2, -4, -6];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (!peekBus.TryPeekWord(candidate, out ushort firstOpcode) ||
+                !peekBus.TryPeekWord(candidate + 2, out ushort secondOpcode) ||
+                !peekBus.TryPeekWord(candidate + 4, out ushort thirdOpcode) ||
+                !peekBus.TryPeekWord(candidate + 6, out ushort fourthOpcode) ||
+                (thirdOpcode & 0xFF00) != 0x8F00 ||
+                BranchByteTarget(candidate + 4, thirdOpcode) != candidate)
+            {
+                continue;
+            }
+
+            if ((firstOpcode & 0xF00F) == 0x2001 &&
+                (secondOpcode & 0xF0FF) == 0x4010 &&
+                (fourthOpcode & 0xF000) == 0x7000)
+            {
+                loopPc = candidate;
+                storeOpcode = firstOpcode;
+                dtOpcode = secondOpcode;
+                branchOpcode = thirdOpcode;
+                addOpcode = fourthOpcode;
+                matched = true;
+                break;
+            }
+
+            if ((firstOpcode & 0xF0FF) == 0x4010 &&
+                (secondOpcode & 0xF00F) == 0x2001 &&
+                (fourthOpcode & 0xF000) == 0x7000)
+            {
+                loopPc = candidate;
+                dtOpcode = firstOpcode;
+                storeOpcode = secondOpcode;
+                branchOpcode = thirdOpcode;
+                addOpcode = fourthOpcode;
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched)
+        {
+            return false;
+        }
+
+        int addressRegister = (storeOpcode >> 8) & 0x0F;
+        int sourceRegister = (storeOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        int addRegister = (addOpcode >> 8) & 0x0F;
+        int addImmediate = (sbyte)(byte)addOpcode;
+        if (addRegister != addressRegister || addImmediate != 2)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[addressRegister];
+        ushort value = (ushort)R[sourceRegister];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, value))
+            {
+                break;
+            }
+
+            completed++;
+            address += 2;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[addressRegister] += completed * 2;
+        R[countRegister] = count - completed;
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+
+        if (completed == count)
+        {
+            SetT(true);
+            PC = loopPc + 8;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardMovLStoreAddDtBfLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;
