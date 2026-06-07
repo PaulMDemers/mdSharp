@@ -1124,6 +1124,212 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardByteLookupWordRowExpandLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        cycles = 0;
+        const int RowCycles = 127;
+        const int BytesPerRow = 8;
+        const int LoopBytes = 0x7E;
+        if (maxCycles < RowCycles ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        for (int i = 0; i < BytesPerRow; i++)
+        {
+            uint pc = loopPc + (uint)(i * 14);
+            if (!peekBus.TryPeekWord(pc, out ushort loadByte) ||
+                !peekBus.TryPeekWord(pc + 2, out ushort extendByte) ||
+                !peekBus.TryPeekWord(pc + 4, out ushort shiftLeft) ||
+                !peekBus.TryPeekWord(pc + 6, out ushort lookupWord) ||
+                !peekBus.TryPeekWord(pc + 8, out ushort orMask) ||
+                !peekBus.TryPeekWord(pc + 10, out ushort storeWord) ||
+                !peekBus.TryPeekWord(pc + 12, out ushort advanceDestination) ||
+                loadByte != 0x6084 ||
+                extendByte != 0x600C ||
+                shiftLeft != 0x4000 ||
+                lookupWord != 0x00CD ||
+                orMask != 0x20DB ||
+                storeWord != 0x2E01 ||
+                advanceDestination != 0x3E7C)
+            {
+                return false;
+            }
+        }
+
+        uint tailPc = loopPc + 112;
+        if (!peekBus.TryPeekWord(tailPc, out ushort addStride) ||
+            !peekBus.TryPeekWord(tailPc + 2, out ushort dtCounter) ||
+            !peekBus.TryPeekWord(tailPc + 4, out ushort exitBranch) ||
+            !peekBus.TryPeekWord(tailPc + 6, out ushort branchDelay) ||
+            !peekBus.TryPeekWord(tailPc + 8, out ushort loadLoopTarget) ||
+            !peekBus.TryPeekWord(tailPc + 10, out ushort jumpLoopTarget) ||
+            !peekBus.TryPeekWord(tailPc + 12, out ushort jumpDelay) ||
+            addStride != 0x3E6C ||
+            dtCounter != 0x4910 ||
+            exitBranch != 0x8D03 ||
+            branchDelay != 0x0009 ||
+            loadLoopTarget != 0xD005 ||
+            jumpLoopTarget != 0x402B ||
+            jumpDelay != 0x0009 ||
+            !TryPeekPcRelativeLong(peekBus, tailPc + 8, displacement: 0x05, out uint loopTarget) ||
+            loopTarget != loopPc)
+        {
+            return false;
+        }
+
+        uint maxRows = (uint)(maxCycles / RowCycles);
+        if (maxRows == 0)
+        {
+            return false;
+        }
+
+        uint completed = 0;
+        bool exhausted = false;
+        while (completed < maxRows)
+        {
+            for (int i = 0; i < BytesPerRow; i++)
+            {
+                byte? sourceByte = readByte(R[8]);
+                if (sourceByte is null)
+                {
+                    goto Done;
+                }
+
+                R[8]++;
+                R[0] = sourceByte.Value;
+                SetT(false);
+                R[0] <<= 1;
+                ushort? lookup = readWord(R[12] + R[0]);
+                if (lookup is null)
+                {
+                    goto Done;
+                }
+
+                R[0] = (uint)(short)lookup.Value;
+                R[0] |= R[13];
+                if (!writeWord(R[14], (ushort)R[0]))
+                {
+                    goto Done;
+                }
+
+                R[14] += R[7];
+            }
+
+            R[14] += R[6];
+            R[9]--;
+            SetT(R[9] == 0);
+            completed++;
+            if (IsTSet())
+            {
+                exhausted = true;
+                break;
+            }
+
+            R[0] = loopPc;
+        }
+
+Done:
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        cycles = checked((int)(completed * RowCycles));
+        Cycles += cycles;
+        LastOpcode = exhausted ? branchDelay : jumpDelay;
+        LastOpcodePc = exhausted ? tailPc + 6 : tailPc + 12;
+        PC = exhausted ? loopPc + LoopBytes : loopPc;
+        if (!exhausted)
+        {
+            SetT(false);
+            R[0] = loopPc;
+        }
+
+        return true;
+    }
+
+    public bool TryFastForwardByteLookupWordStoreStep(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        cycles = 0;
+        const int StepCycles = 25;
+        if (maxCycles < StepCycles ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint stepPc = PC;
+        if (!peekBus.TryPeekWord(stepPc, out ushort loadByte) ||
+            !peekBus.TryPeekWord(stepPc + 2, out ushort extendByte) ||
+            !peekBus.TryPeekWord(stepPc + 4, out ushort shiftLeft) ||
+            !peekBus.TryPeekWord(stepPc + 6, out ushort lookupWord) ||
+            !peekBus.TryPeekWord(stepPc + 8, out ushort orMask) ||
+            !peekBus.TryPeekWord(stepPc + 10, out ushort storeWord) ||
+            !peekBus.TryPeekWord(stepPc + 12, out ushort advanceDestination) ||
+            loadByte != 0x6084 ||
+            extendByte != 0x600C ||
+            shiftLeft != 0x4000 ||
+            lookupWord != 0x00CD ||
+            orMask != 0x20DB ||
+            storeWord != 0x2E01 ||
+            advanceDestination != 0x3E7C)
+        {
+            return false;
+        }
+
+        byte? sourceByte = readByte(R[8]);
+        if (sourceByte is null)
+        {
+            return false;
+        }
+
+        R[8]++;
+        R[0] = sourceByte.Value;
+        SetT(false);
+        R[0] <<= 1;
+        ushort? lookup = readWord(R[12] + R[0]);
+        if (lookup is null)
+        {
+            return false;
+        }
+
+        R[0] = (uint)(short)lookup.Value;
+        R[0] |= R[13];
+        if (!writeWord(R[14], (ushort)R[0]))
+        {
+            return false;
+        }
+
+        R[14] += R[7];
+        cycles = StepCycles;
+        Cycles += cycles;
+        LastOpcode = 0x3E7C;
+        LastOpcodePc = stepPc + 12;
+        PC = stepPc + 14;
+        return true;
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;

@@ -995,6 +995,32 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (nextOpcode == 0x6084 &&
+                cpu.TryFastForwardByteLookupWordRowExpandLoop(
+                    cycleBudget,
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (nextOpcode == 0x6084 &&
+                cpu.TryFastForwardByteLookupWordStoreStep(
+                    cycleBudget,
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (nextOpcode == 0xD42F || nextOpcode == 0x5046)
             {
                 EmptyDescriptorSpanFastPathAttempts++;

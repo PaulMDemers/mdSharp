@@ -27,6 +27,8 @@ Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoo
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
+Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
+Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookupWordStoreStepFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -2416,6 +2418,172 @@ void ThirtyTwoXSh2WordHighBitMaskTransformFastForward()
     AssertEqual((ushort)0x0001, partialBus.ReadWord(WordTable));
     AssertEqual((ushort)0x0002, partialBus.ReadWord(WordTable + 2));
     AssertEqual((byte)0x82, partialBus.ReadByte(ByteTable));
+}
+
+void ThirtyTwoXSh2ByteLookupWordRowExpandFastForward()
+{
+    const uint LoopPc = 0x0600_4000;
+    const uint Source = 0x0603_0000;
+    const uint Lookup = 0x0603_1000;
+    const uint Destination = 0x0600_0000;
+
+    static void WriteRowExpandRoutine(SyntheticSh2Bus bus, uint loopPc)
+    {
+        ushort[] group = [0x6084, 0x600C, 0x4000, 0x00CD, 0x20DB, 0x2E01, 0x3E7C];
+        uint pc = loopPc;
+        for (int i = 0; i < 8; i++)
+        {
+            foreach (ushort opcode in group)
+            {
+                bus.WriteInstructionWord(pc, opcode);
+                pc += 2;
+            }
+        }
+
+        ushort[] tail = [0x3E6C, 0x4910, 0x8D03, 0x0009, 0xD005, 0x402B, 0x0009];
+        foreach (ushort opcode in tail)
+        {
+            bus.WriteInstructionWord(pc, opcode);
+            pc += 2;
+        }
+
+        bus.WriteInstructionWord(loopPc + 0x7E, 0x001B);
+        bus.WriteLong(loopPc + 0x90, loopPc);
+    }
+
+    static void SeedRowExpandState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[6] = 0x1F0;
+        cpu.R[7] = 2;
+        cpu.R[8] = Source;
+        cpu.R[9] = 2;
+        cpu.R[12] = Lookup;
+        cpu.R[13] = 0x4000;
+        cpu.R[14] = Destination;
+    }
+
+    static void SeedRowExpandMemory(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            bus.WriteByte(Source + (uint)i, (byte)i);
+            bus.WriteWord(Lookup + (uint)(i * 2), (ushort)(0x1000 + i));
+        }
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRowExpandRoutine(interpretedBus, LoopPc);
+    SeedRowExpandMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedRowExpandState(interpreted);
+    interpreted.Run(512);
+    AssertTrue(interpreted.Halted, "interpreter row expand routine should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRowExpandRoutine(fastBus, LoopPc);
+    SeedRowExpandMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedRowExpandState(fast);
+    AssertTrue(
+        fast.TryFastForwardByteLookupWordRowExpandLoop(512, fastBus.TryReadByte, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+        "byte lookup word row expand should fast-forward");
+    AssertEqual(254, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast row expand routine should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 0x210; offset += 2)
+    {
+        AssertEqual(interpretedBus.ReadWord(Destination + offset), fastBus.ReadWord(Destination + offset));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteRowExpandRoutine(partialBus, LoopPc);
+    SeedRowExpandMemory(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedRowExpandState(partial);
+    AssertTrue(
+        partial.TryFastForwardByteLookupWordRowExpandLoop(127, partialBus.TryReadByte, partialBus.TryReadWord, partialBus.TryWriteWord, out int partialCycles),
+        "byte lookup word row expand should respect the cycle budget");
+    AssertEqual(127, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(Source + 8, partial.R[8]);
+    AssertEqual(1u, partial.R[9]);
+    AssertEqual(Destination + 0x200, partial.R[14]);
+    AssertEqual(LoopPc, partial.R[0]);
+    AssertEqual(0u, partial.SR & 1);
+    AssertEqual((ushort)0x5000, partialBus.ReadWord(Destination));
+    AssertEqual((ushort)0x5007, partialBus.ReadWord(Destination + 14));
+}
+
+void ThirtyTwoXSh2ByteLookupWordStoreStepFastForward()
+{
+    const uint StepPc = 0x0600_5000;
+    const uint Source = 0x0603_0000;
+    const uint Lookup = 0x0603_1000;
+    const uint Destination = 0x0600_0000;
+
+    ushort[] opcodes = [0x6084, 0x600C, 0x4000, 0x00CD, 0x20DB, 0x2E01, 0x3E7C, 0x001B];
+
+    static void SeedStepState(Sh2Cpu cpu)
+    {
+        cpu.Reset(StepPc);
+        cpu.R[7] = 2;
+        cpu.R[8] = Source;
+        cpu.R[12] = Lookup;
+        cpu.R[13] = 0x4000;
+        cpu.R[14] = Destination;
+    }
+
+    static void SeedStepMemory(SyntheticSh2Bus bus)
+    {
+        bus.WriteByte(Source, 0x03);
+        bus.WriteWord(Lookup + 6, 0x1234);
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        interpretedBus.WriteInstructionWord(StepPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    SeedStepMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedStepState(interpreted);
+    interpreted.Run(32);
+    AssertTrue(interpreted.Halted, "interpreter row expand step should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        fastBus.WriteInstructionWord(StepPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    SeedStepMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedStepState(fast);
+    AssertTrue(
+        fast.TryFastForwardByteLookupWordStoreStep(25, fastBus.TryReadByte, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+        "byte lookup word store step should fast-forward");
+    AssertEqual(25, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast row expand step should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    AssertEqual(interpretedBus.ReadWord(Destination), fastBus.ReadWord(Destination));
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
