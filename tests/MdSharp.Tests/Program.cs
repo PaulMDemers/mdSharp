@@ -18,6 +18,7 @@ Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
 Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
 Run("32X SH-2 FRT counter writes and flags", ThirtyTwoXSh2FrtCounterWritesAndFlags);
+Run("32X SH-2 SCI byte transfer", ThirtyTwoXSh2SciByteTransfer);
 Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticCode);
 Run("32X SH-2 BRA self idle loop fast-forward", ThirtyTwoXSh2BraSelfIdleLoopFastForward);
 Run("32X SH-2 ADD BRA NOP delay loop fast-forward", ThirtyTwoXSh2AddBraNopDelayLoopFastForward);
@@ -1633,6 +1634,30 @@ void ThirtyTwoXSh2FrtCounterWritesAndFlags()
     AssertTrue((compareBFtcsr & 0x04) != 0, "FRT should set OCFB when FRC crosses OCRB");
     AssertEqual(7, compareBDevice.MasterSh2.PendingInterruptLevel);
     AssertEqual(0x22, compareBDevice.MasterSh2.PendingInterruptVectorNumber);
+}
+
+void ThirtyTwoXSh2SciByteTransfer()
+{
+    byte[] rom = new byte[0x100];
+    ThirtyTwoXDevice device = new(rom);
+    device.ResetSh2(0, 0);
+    device.RestoreState(device.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+    });
+
+    AssertEqual((byte)0x84, ReadSh2ByteForTest(device, 0xFFFF_FE04, cpuIndex: 0));
+    AssertEqual((byte)0x84, ReadSh2ByteForTest(device, 0xFFFF_FE04, cpuIndex: 1));
+
+    WriteSh2ByteForTest(device, 0xFFFF_FE03, 0x5A, cpuIndex: 0);
+    AssertEqual((byte)0x84, ReadSh2ByteForTest(device, 0xFFFF_FE04, cpuIndex: 0));
+    AssertEqual((byte)0xC4, ReadSh2ByteForTest(device, 0xFFFF_FE04, cpuIndex: 1));
+    AssertEqual((byte)0x5A, ReadSh2ByteForTest(device, 0xFFFF_FE05, cpuIndex: 1));
+
+    WriteSh2ByteForTest(device, 0xFFFF_FE04, 0x80, cpuIndex: 1);
+    AssertEqual((byte)0x84, ReadSh2ByteForTest(device, 0xFFFF_FE04, cpuIndex: 1));
 }
 
 void ThirtyTwoXSh2CoreExecutesSyntheticCode()

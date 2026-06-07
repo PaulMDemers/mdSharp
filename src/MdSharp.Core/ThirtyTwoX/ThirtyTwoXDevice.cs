@@ -26,6 +26,9 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2FrtControlRegisterAddress = 0xFFFF_FE16;
     private const uint Sh2FrtControlStatusRegisterAddress = 0xFFFF_FE11;
     private const uint Sh2FrtInputCaptureRegisterStart = 0xFFFF_FE18;
+    private const uint Sh2SciTransmitDataRegisterAddress = 0xFFFF_FE03;
+    private const uint Sh2SciStatusRegisterAddress = 0xFFFF_FE04;
+    private const uint Sh2SciReceiveDataRegisterAddress = 0xFFFF_FE05;
     private const uint Sh2WatchdogRegisterStart = 0xFFFF_FE80;
     private const uint Sh2WatchdogCounterAddress = 0xFFFF_FE81;
     private const uint Sh2WatchdogResetControlAddress = 0xFFFF_FE83;
@@ -67,6 +70,9 @@ public sealed class ThirtyTwoXDevice
     private const ushort Sh2DmaOperationEnable = 0x0001;
     private const uint Sh2DmaAutoRequestMode = 0x0200;
     private const byte Sh2DmaRequestSelectDreq = 0x00;
+    private const byte Sh2SciStatusTransmitDataEmpty = 0x80;
+    private const byte Sh2SciStatusReceiveDataFull = 0x40;
+    private const byte Sh2SciStatusTransmitEnd = 0x04;
     private const int Sh2DmaSource0Offset = 0x00;
     private const int Sh2DmaDestination0Offset = 0x04;
     private const int Sh2DmaTransferCount0Offset = 0x08;
@@ -664,6 +670,8 @@ public sealed class ThirtyTwoXDevice
         uint slave = _userHeader.IsValid ? NormalizeSh2ProgramAddress(_userHeader.SlaveStart) : ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart;
         MasterSh2.Reset(master);
         SlaveSh2.Reset(slave);
+        MasterSh2.SetGbr(Sh2SciStatusRegisterAddress);
+        SlaveSh2.SetGbr(Sh2SciStatusRegisterAddress);
         ResetSh2FrtBaseCycles();
         if (_userHeader.IsValid)
         {
@@ -6391,6 +6399,23 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (address == Sh2SciTransmitDataRegisterAddress)
+        {
+            registers[index] = value;
+            TransferSh2SciByte(cpuIndex, value);
+            TraceSh2MemoryAccess(cpuIndex, "WP8", address, value);
+            return;
+        }
+
+        if (address == Sh2SciStatusRegisterAddress)
+        {
+            registers[index] = (byte)((registers[index] & value & (Sh2SciStatusTransmitDataEmpty | Sh2SciStatusReceiveDataFull | Sh2SciStatusTransmitEnd)) |
+                Sh2SciStatusTransmitDataEmpty |
+                Sh2SciStatusTransmitEnd);
+            TraceSh2MemoryAccess(cpuIndex, "WP8", address, registers[index]);
+            return;
+        }
+
         if (address == Sh2FrtRegisterStart + 1)
         {
             registers[index] = (byte)((registers[index] & value & Sh2FrtFtcsrWritableMask) | (value & 0x01));
@@ -6442,6 +6467,21 @@ public sealed class ThirtyTwoXDevice
 
         WriteSh2PeripheralByte(address, (byte)(value >> 8), cpuIndex);
         WriteSh2PeripheralByte(address + 1, (byte)value, cpuIndex);
+    }
+
+    private void TransferSh2SciByte(int sourceCpuIndex, byte value)
+    {
+        int source = sourceCpuIndex & 1;
+        int target = source ^ 1;
+        byte[] sourceRegisters = _sh2PeripheralRegisters[source];
+        byte[] targetRegisters = _sh2PeripheralRegisters[target];
+        int sourceStatusIndex = (int)(Sh2SciStatusRegisterAddress - Sh2PeripheralRegisterStart);
+        int targetStatusIndex = sourceStatusIndex;
+        int targetReceiveIndex = (int)(Sh2SciReceiveDataRegisterAddress - Sh2PeripheralRegisterStart);
+
+        sourceRegisters[sourceStatusIndex] |= Sh2SciStatusTransmitDataEmpty | Sh2SciStatusTransmitEnd;
+        targetRegisters[targetReceiveIndex] = value;
+        targetRegisters[targetStatusIndex] |= Sh2SciStatusReceiveDataFull;
     }
 
     private void WriteSh2WatchdogWord(ushort value, int cpuIndex)
@@ -6754,6 +6794,7 @@ public sealed class ThirtyTwoXDevice
             registers[(int)((Sh2FrtRegisterStart + 4) - Sh2PeripheralRegisterStart)] = 0xFF;
             registers[(int)((Sh2FrtRegisterStart + 5) - Sh2PeripheralRegisterStart)] = 0xFF;
             registers[(int)((Sh2FrtRegisterStart + 7) - Sh2PeripheralRegisterStart)] = 0xE0;
+            registers[(int)(Sh2SciStatusRegisterAddress - Sh2PeripheralRegisterStart)] = Sh2SciStatusTransmitDataEmpty | Sh2SciStatusTransmitEnd;
             _sh2FrtOutputCompareB[cpu] = 0xFFFF;
             registers[(int)(Sh2CacheControlRegisterAddress - Sh2PeripheralRegisterStart)] = 0x01;
             registers[(int)(Sh2WatchdogRegisterStart - Sh2PeripheralRegisterStart)] = Sh2WatchdogControlInitial;
