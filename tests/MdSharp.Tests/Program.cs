@@ -26,6 +26,7 @@ Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopF
 Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
+Run("32X SH-2 byte fill indexed CMP/GE loop fast-forward", ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
@@ -2320,6 +2321,76 @@ void ThirtyTwoXSh2WordTableSearchLoopFastForward()
     AssertEqual(2u, partial.R[0]);
     AssertEqual(2u, partial.R[1]);
     AssertEqual(0u, partial.SR & 1);
+}
+
+void ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward()
+{
+    const uint LoopPc = 0x0600_7000;
+    const uint Base = 0x0603_3000;
+
+    static void WriteLoop(SyntheticSh2Bus bus, uint loopPc)
+    {
+        ushort[] opcodes = [0x613F, 0x316C, 0x2170, 0x7301, 0x613F, 0x3123, 0x8BF8, 0x001B];
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(loopPc + (uint)(i * 2), opcodes[i]);
+        }
+    }
+
+    static void SeedState(Sh2Cpu cpu, uint loopPc, uint baseAddress)
+    {
+        cpu.Reset(loopPc);
+        cpu.R[2] = 4;
+        cpu.R[3] = 0;
+        cpu.R[6] = baseAddress;
+        cpu.R[7] = 0x5A;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteLoop(interpretedBus, LoopPc);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedState(interpreted, LoopPc, Base);
+    interpreted.Run(128);
+    AssertTrue(interpreted.Halted, "interpreter byte fill loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteLoop(fastBus, LoopPc);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedState(fast, LoopPc, Base);
+    AssertTrue(
+        fast.TryFastForwardByteFillIndexedCmpGeLoop(64, fastBus.TryWriteByte, out int cycles),
+        "byte fill indexed CMP/GE loop should fast-forward");
+    AssertEqual(36, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast byte fill loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 4; offset++)
+    {
+        AssertEqual(interpretedBus.ReadByte(Base + offset), fastBus.ReadByte(Base + offset));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteLoop(partialBus, LoopPc);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedState(partial, LoopPc, Base);
+    AssertTrue(
+        partial.TryFastForwardByteFillIndexedCmpGeLoop(18, partialBus.TryWriteByte, out int partialCycles),
+        "byte fill indexed CMP/GE loop should respect the cycle budget");
+    AssertEqual(18, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(2u, partial.R[3]);
+    AssertEqual(2u, partial.R[1]);
+    AssertEqual(0u, partial.SR & 1);
+    AssertEqual((byte)0x5A, partialBus.ReadByte(Base));
+    AssertEqual((byte)0x5A, partialBus.ReadByte(Base + 1));
+    AssertEqual((byte)0x00, partialBus.ReadByte(Base + 2));
 }
 
 void ThirtyTwoXSh2WordHighBitMaskTransformFastForward()

@@ -1284,6 +1284,76 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardByteFillIndexedCmpGeLoop(
+        int maxCycles,
+        Func<uint, byte, bool> writeByte,
+        out int cycles)
+    {
+        cycles = 0;
+        const int CyclesPerIteration = 9;
+        const int LoopBytes = 14;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        ReadOnlySpan<ushort> expected = [0x613F, 0x316C, 0x2170, 0x7301, 0x613F, 0x3123, 0x8BF8];
+        for (int i = 0; i < expected.Length; i++)
+        {
+            if (!peekBus.TryPeekWord(loopPc + (uint)(i * 2), out ushort opcode) ||
+                opcode != expected[i])
+            {
+                return false;
+            }
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint completed = 0;
+        bool exhausted = false;
+        while (completed < maxIterations)
+        {
+            R[1] = (uint)(short)(ushort)R[3];
+            R[1] += R[6];
+            if (!writeByte(R[1], (byte)R[7]))
+            {
+                break;
+            }
+
+            R[3]++;
+            R[1] = (uint)(short)(ushort)R[3];
+            SetT((int)R[1] >= (int)R[2]);
+            completed++;
+            if (IsTSet())
+            {
+                exhausted = true;
+                break;
+            }
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8BF8;
+        LastOpcodePc = loopPc + 12;
+        PC = exhausted ? loopPc + LoopBytes : loopPc;
+        if (!exhausted)
+        {
+            SetT(false);
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardByteLookupWordRowExpandLoop(
         int maxCycles,
         Func<uint, byte?> readByte,
