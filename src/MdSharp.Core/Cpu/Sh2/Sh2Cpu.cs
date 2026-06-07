@@ -4527,6 +4527,95 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrLongMaskedOrCompareBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, loopPc, out ushort loadOpcode, out ushort copyOpcode, out ushort andOpcode, out ushort orOpcode, out ushort compareOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 || !TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, PC - 2, out loadOpcode, out copyOpcode, out andOpcode, out orOpcode, out compareOpcode, out branchOpcode))
+            {
+                if (PC < 4 || !TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, PC - 4, out loadOpcode, out copyOpcode, out andOpcode, out orOpcode, out compareOpcode, out branchOpcode))
+                {
+                    if (PC < 6 || !TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, PC - 6, out loadOpcode, out copyOpcode, out andOpcode, out orOpcode, out compareOpcode, out branchOpcode))
+                    {
+                        if (PC < 8 || !TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, PC - 8, out loadOpcode, out copyOpcode, out andOpcode, out orOpcode, out compareOpcode, out branchOpcode))
+                        {
+                            if (PC < 10 || !TryReadGbrLongMaskedOrCompareBfPollPattern(peekBus, PC - 10, out loadOpcode, out copyOpcode, out andOpcode, out orOpcode, out compareOpcode, out branchOpcode))
+                            {
+                                return false;
+                            }
+
+                            loopPc = PC - 10;
+                        }
+                        else
+                        {
+                            loopPc = PC - 8;
+                        }
+                    }
+                    else
+                    {
+                        loopPc = PC - 6;
+                    }
+                }
+                else
+                {
+                    loopPc = PC - 4;
+                }
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        int copyDestination = (copyOpcode >> 8) & 0x0F;
+        int copySource = (copyOpcode >> 4) & 0x0F;
+        int andDestination = (andOpcode >> 8) & 0x0F;
+        int andSource = (andOpcode >> 4) & 0x0F;
+        int compareLeft = (compareOpcode >> 8) & 0x0F;
+        int compareRight = (compareOpcode >> 4) & 0x0F;
+        if (copySource != 0 ||
+            andDestination != 0 ||
+            compareLeft != 0)
+        {
+            return false;
+        }
+
+        uint address = GBR + (uint)((loadOpcode & 0xFF) * 4);
+        if (!TryPeekLong(peekBus, address, out uint rawValue))
+        {
+            return false;
+        }
+
+        uint computedValue = (rawValue & R[andSource]) | (byte)orOpcode;
+        if (computedValue == R[compareRight])
+        {
+            return false;
+        }
+
+        R[0] = computedValue;
+        R[copyDestination] = rawValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 10;
+        return true;
+    }
+
     public bool TryFastForwardWordIncrementGbrZeroBtPollLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
     {
         const int MaxBurstCycles = 4096;
@@ -4699,6 +4788,41 @@ public sealed class Sh2Cpu
             (guardLoadOpcode & 0xFF00) == 0xC500 &&
             (compareOpcode & 0xFF00) == 0x8800 &&
             (branchOpcode & 0xFF00) == 0x8900 &&
+            BranchByteTarget(pc + 10, branchOpcode) == pc;
+    }
+
+    private static bool TryReadGbrLongMaskedOrCompareBfPollPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort loadOpcode,
+        out ushort copyOpcode,
+        out ushort andOpcode,
+        out ushort orOpcode,
+        out ushort compareOpcode,
+        out ushort branchOpcode)
+    {
+        loadOpcode = 0;
+        copyOpcode = 0;
+        andOpcode = 0;
+        orOpcode = 0;
+        compareOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(pc, out loadOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out copyOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out andOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out orOpcode) ||
+            !peekBus.TryPeekWord(pc + 8, out compareOpcode) ||
+            !peekBus.TryPeekWord(pc + 10, out branchOpcode))
+        {
+            return false;
+        }
+
+        return (loadOpcode & 0xFF00) == 0xC600 &&
+            (copyOpcode & 0xF00F) == 0x6003 &&
+            (andOpcode & 0xF00F) == 0x2009 &&
+            (orOpcode & 0xFF00) == 0xCB00 &&
+            (compareOpcode & 0xF00F) == 0x3000 &&
+            (branchOpcode & 0xFF00) == 0x8B00 &&
             BranchByteTarget(pc + 10, branchOpcode) == pc;
     }
 

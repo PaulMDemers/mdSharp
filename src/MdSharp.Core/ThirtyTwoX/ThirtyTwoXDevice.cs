@@ -415,6 +415,8 @@ public sealed class ThirtyTwoXDevice
     public int TwoStageWordZeroPollRingFastPathHits { get; private set; }
     public int StableWordPairPollFastPathAttempts { get; private set; }
     public int StableWordPairPollFastPathHits { get; private set; }
+    public int GbrLongMaskedOrComparePollFastPathAttempts { get; private set; }
+    public int GbrLongMaskedOrComparePollFastPathHits { get; private set; }
     public long Sh2RunCycleCalls { get; private set; }
     public long Sh2RunCycleBudgetTotal { get; private set; }
     public int Sh2RunCycleBudgetMin { get; private set; }
@@ -1228,6 +1230,17 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((((nextOpcode & 0xFF00) == 0xC600) ||
+                    ((nextOpcode & 0xF00F) == 0x6003) ||
+                    ((nextOpcode & 0xF00F) == 0x2009) ||
+                    ((nextOpcode & 0xFF00) == 0xCB00) ||
+                    ((nextOpcode & 0xF00F) == 0x3000) ||
+                    ((nextOpcode & 0xFF00) == 0x8B00)) &&
+                TryFastForwardGbrLongMaskedOrComparePoll(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
+                return fastCycles;
+            }
+
             if ((((nextOpcode & 0xF00F) == 0x6001) ||
                     ((nextOpcode & 0xF00F) == 0x3000) ||
                     ((nextOpcode & 0xFF00) == 0x8900)) &&
@@ -1568,6 +1581,21 @@ public sealed class ThirtyTwoXDevice
         }
 
         StableWordPairPollFastPathHits++;
+        RecordSh2FastPath(cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardGbrLongMaskedOrComparePoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        GbrLongMaskedOrComparePollFastPathAttempts++;
+        int pollBudget = Math.Min(Math.Max(cycleBudget, 512), 4096);
+        if (!cpu.TryFastForwardGbrLongMaskedOrCompareBfPollLoop(pollBudget, out cycles))
+        {
+            return false;
+        }
+
+        GbrLongMaskedOrComparePollFastPathHits++;
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;

@@ -34,6 +34,7 @@ Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPo
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
 Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
+Run("32X SH-2 GBR long masked OR compare BF poll loop fast-forward", ThirtyTwoXSh2GbrLongMaskedOrCompareBfPollLoopFastForward);
 Run("32X SH-2 word increment GBR zero BT poll loop fast-forward", ThirtyTwoXSh2WordIncrementGbrZeroBtPollLoopFastForward);
 Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoopFastForward);
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
@@ -2526,6 +2527,34 @@ void ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward()
 
     bus.WriteLong(0x0600_1170, 0x0000_0001);
     AssertTrue(!cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(300, out _), "changed masked long value should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2GbrLongMaskedOrCompareBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_03FC;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC608); // MOV.L @(32,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x6303); // MOV R0,R3
+    bus.WriteInstructionWord(LoopPc + 4, 0x2019); // AND R1,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0xCB20); // OR #32,R0
+    bus.WriteInstructionWord(LoopPc + 8, 0x3020); // CMP/EQ R2,R0
+    bus.WriteInstructionWord(LoopPc + 10, 0x8BF9); // BF loop
+    bus.WriteLong(0x2000_4020, 0x0000_0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 10);
+    cpu.SetGbr(0x2000_4000);
+    cpu.R[1] = 0xFFFF_FF00;
+    cpu.R[2] = 0x4D41_4320;
+    AssertTrue(cpu.TryFastForwardGbrLongMaskedOrCompareBfPollLoop(1024, out int cycles), "GBR long masked OR compare BF poll should fast-forward while the signature is absent");
+    AssertEqual(1024, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_0020u, cpu.R[0]);
+    AssertEqual(0x0000_0000u, cpu.R[3]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteLong(0x2000_4020, 0x4D41_4300);
+    AssertTrue(!cpu.TryFastForwardGbrLongMaskedOrCompareBfPollLoop(1024, out _), "matching masked OR signature should fall back so the loop can exit");
 }
 
 void ThirtyTwoXSh2WordIncrementGbrZeroBtPollLoopFastForward()
