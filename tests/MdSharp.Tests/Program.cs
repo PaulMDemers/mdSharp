@@ -2005,6 +2005,28 @@ void ThirtyTwoXSh2BraSelfIdleLoopFastForward()
     AssertTrue(nopBranch.TryFastForwardBraSelfNopIdleLoop(101, out int branchEntryCycles), "NOP/BRA/NOP idle loop should fast-forward from the branch");
     AssertEqual(101, branchEntryCycles);
     AssertEqual(NopBranchLoopPc, nopBranch.PC);
+
+    const uint TwoNopBranchLoopPc = 0x0600_0400;
+    SyntheticSh2Bus twoNopBranchBus = new();
+    twoNopBranchBus.WriteInstructionWord(TwoNopBranchLoopPc + 0, 0x0009); // NOP
+    twoNopBranchBus.WriteInstructionWord(TwoNopBranchLoopPc + 2, 0x0009); // NOP
+    twoNopBranchBus.WriteInstructionWord(TwoNopBranchLoopPc + 4, 0xAFFC); // BRA back to first NOP
+    twoNopBranchBus.WriteInstructionWord(TwoNopBranchLoopPc + 6, 0x0009); // NOP delay slot
+    Sh2Cpu twoNopBranch = new(twoNopBranchBus, "test");
+    twoNopBranch.Reset(TwoNopBranchLoopPc);
+    AssertTrue(twoNopBranch.TryFastForwardBraSelfNopIdleLoop(103, out int twoNopCycles), "NOP/NOP/BRA/NOP idle loop should fast-forward from the first NOP");
+    AssertEqual(100, twoNopCycles);
+    AssertEqual(TwoNopBranchLoopPc, twoNopBranch.PC);
+
+    twoNopBranch.Reset(TwoNopBranchLoopPc + 2);
+    AssertTrue(twoNopBranch.TryFastForwardBraSelfNopIdleLoop(103, out int secondNopCycles), "NOP/NOP/BRA/NOP idle loop should fast-forward from the second NOP");
+    AssertEqual(101, secondNopCycles);
+    AssertEqual(TwoNopBranchLoopPc, twoNopBranch.PC);
+
+    twoNopBranch.Reset(TwoNopBranchLoopPc + 4);
+    AssertTrue(twoNopBranch.TryFastForwardBraSelfNopIdleLoop(103, out int twoNopBranchCycles), "NOP/NOP/BRA/NOP idle loop should fast-forward from the branch");
+    AssertEqual(103, twoNopBranchCycles);
+    AssertEqual(TwoNopBranchLoopPc, twoNopBranch.PC);
 }
 
 void ThirtyTwoXSh2AddBraNopDelayLoopFastForward()

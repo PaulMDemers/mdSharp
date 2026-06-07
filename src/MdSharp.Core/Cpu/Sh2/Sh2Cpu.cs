@@ -140,6 +140,82 @@ public sealed class Sh2Cpu
             bool atBranch = false;
             if (peekBus.TryPeekWord(loopPc, out ushort firstNopOpcode) &&
                 firstNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc + 2, out ushort secondNopOpcode) &&
+                secondNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc + 4, out branchOpcode) &&
+                (branchOpcode & 0xF000) == 0xA000 &&
+                BranchWordTarget(loopPc + 4, branchOpcode) == loopPc &&
+                peekBus.TryPeekWord(loopPc + 6, out delaySlotOpcode) &&
+                delaySlotOpcode == 0x0009)
+            {
+                const int TwoNopBranchNopCyclesPerIteration = 4;
+                if (maxCycles < TwoNopBranchNopCyclesPerIteration)
+                {
+                    return false;
+                }
+
+                cycles = maxCycles - (maxCycles % TwoNopBranchNopCyclesPerIteration);
+                Cycles += cycles;
+                LastOpcode = delaySlotOpcode;
+                LastOpcodePc = loopPc + 6;
+                PC = loopPc;
+                return true;
+            }
+
+            if (loopPc >= 2 &&
+                peekBus.TryPeekWord(loopPc - 2, out firstNopOpcode) &&
+                firstNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc, out secondNopOpcode) &&
+                secondNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc + 2, out branchOpcode) &&
+                (branchOpcode & 0xF000) == 0xA000 &&
+                BranchWordTarget(loopPc + 2, branchOpcode) == loopPc - 2 &&
+                peekBus.TryPeekWord(loopPc + 4, out delaySlotOpcode) &&
+                delaySlotOpcode == 0x0009)
+            {
+                loopPc -= 2;
+                const int TwoNopBranchNopCyclesPerIteration = 4;
+                if (maxCycles < 1 + TwoNopBranchNopCyclesPerIteration)
+                {
+                    return false;
+                }
+
+                cycles = 1 + ((maxCycles - 1) - ((maxCycles - 1) % TwoNopBranchNopCyclesPerIteration));
+                Cycles += cycles;
+                LastOpcode = delaySlotOpcode;
+                LastOpcodePc = loopPc + 6;
+                PC = loopPc;
+                return true;
+            }
+
+            if (loopPc >= 4 &&
+                peekBus.TryPeekWord(loopPc - 4, out firstNopOpcode) &&
+                firstNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc - 2, out secondNopOpcode) &&
+                secondNopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(loopPc, out branchOpcode) &&
+                (branchOpcode & 0xF000) == 0xA000 &&
+                BranchWordTarget(loopPc, branchOpcode) == loopPc - 4 &&
+                peekBus.TryPeekWord(loopPc + 2, out delaySlotOpcode) &&
+                delaySlotOpcode == 0x0009)
+            {
+                loopPc -= 4;
+                const int TwoNopBranchNopCyclesPerIteration = 4;
+                if (maxCycles < 3 + TwoNopBranchNopCyclesPerIteration)
+                {
+                    return false;
+                }
+
+                cycles = 3 + ((maxCycles - 3) - ((maxCycles - 3) % TwoNopBranchNopCyclesPerIteration));
+                Cycles += cycles;
+                LastOpcode = delaySlotOpcode;
+                LastOpcodePc = loopPc + 6;
+                PC = loopPc;
+                return true;
+            }
+
+            if (peekBus.TryPeekWord(loopPc, out firstNopOpcode) &&
+                firstNopOpcode == 0x0009 &&
                 peekBus.TryPeekWord(loopPc + 2, out branchOpcode) &&
                 (branchOpcode & 0xF000) == 0xA000 &&
                 BranchWordTarget(loopPc + 2, branchOpcode) == loopPc &&
