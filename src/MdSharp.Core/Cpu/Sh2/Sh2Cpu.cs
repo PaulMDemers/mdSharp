@@ -746,6 +746,100 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovWStoreAddRegisterDtBfLoop(int maxCycles, Func<uint, ushort, bool> writeWord, int cyclesPerIteration, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFiveWordLoop(peekBus, [0, -2, -4, -6, -8], out uint loopPc, out ushort storeOpcode, out ushort addAddressOpcode, out ushort addValueOpcode, out ushort dtOpcode, out ushort branchOpcode) ||
+            (storeOpcode & 0xF00F) != 0x2001 ||
+            (addAddressOpcode & 0xF000) != 0x7000 ||
+            (addValueOpcode & 0xF00F) != 0x300C ||
+            (dtOpcode & 0xF0FF) != 0x4010 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int addressRegister = (storeOpcode >> 8) & 0x0F;
+        int valueRegister = (storeOpcode >> 4) & 0x0F;
+        int addAddressRegister = (addAddressOpcode >> 8) & 0x0F;
+        int addImmediate = (sbyte)(byte)addAddressOpcode;
+        int addValueDestination = (addValueOpcode >> 8) & 0x0F;
+        int stepRegister = (addValueOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        if (addAddressRegister != addressRegister ||
+            addImmediate != 2 ||
+            addValueDestination != valueRegister)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[addressRegister];
+        uint value = R[valueRegister];
+        uint step = R[stepRegister];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, (ushort)value))
+            {
+                break;
+            }
+
+            completed++;
+            address += 2;
+            value += step;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[addressRegister] += completed * 2;
+        R[valueRegister] += step * completed;
+        R[countRegister] = count - completed;
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 8;
+
+        if (completed == count)
+        {
+            SetT(true);
+            PC = loopPc + 10;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardMovLStoreAddDtBfLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;
@@ -8014,6 +8108,45 @@ Done:
         loopPc = 0;
         firstOpcode = 0;
         secondOpcode = 0;
+        branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindFiveWordLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort firstOpcode,
+        out ushort secondOpcode,
+        out ushort thirdOpcode,
+        out ushort fourthOpcode,
+        out ushort branchOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out firstOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out secondOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out thirdOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out fourthOpcode) &&
+                peekBus.TryPeekWord(candidate + 8, out branchOpcode) &&
+                BranchByteTarget(candidate + 8, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        firstOpcode = 0;
+        secondOpcode = 0;
+        thirdOpcode = 0;
+        fourthOpcode = 0;
         branchOpcode = 0;
         return false;
     }
