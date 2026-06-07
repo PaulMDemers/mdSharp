@@ -4609,7 +4609,7 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
                     int runLength = (span >> 8) + 1;
                     int paletteIndex = span & 0x00FF;
                     ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
-                    if (color != 0)
+                    if (paletteIndex != 0 && color != 0)
                     {
                         int runEnd = Math.Min(Vdp.ScreenWidth - 1, summaryX + runLength - 1);
                         firstColoredX = firstColoredX < 0 ? summaryX : firstColoredX;
@@ -5138,13 +5138,13 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                 if (device is not null && completedFrames >= 44)
                 {
                     string liveStatus = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
-                    bool shouldStop = IsDirectVisibleThirtyTwoXStatus(liveStatus) ||
-                        (stopOnVisible && IsVisibleThirtyTwoXStatus(liveStatus));
+                    bool shouldStop = IsConfirmedVisibleThirtyTwoXStatus(liveStatus) ||
+                        (stopOnVisible && IsThirtyTwoXSweepEarlyStopStatus(liveStatus));
                     if (shouldStop)
                     {
                         completedFrames++;
                         status = liveStatus;
-                        detail = IsDirectVisibleThirtyTwoXStatus(liveStatus)
+                        detail = IsConfirmedVisibleThirtyTwoXStatus(liveStatus)
                             ? $"early visible 32X classification after {completedFrames:N0} frame(s)"
                             : $"early visible classification after {completedFrames:N0} frame(s)";
                         break;
@@ -5207,7 +5207,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                         adaptiveNonBackground = CountNonBackgroundPixels(adaptiveMachine.Vdp, adaptiveRgb);
                         adaptiveMaxNonBackground = Math.Max(adaptiveMaxNonBackground, adaptiveNonBackground);
                         adaptiveStatus = ClassifyThirtyTwoXSweep(adaptiveMachine, adaptiveDevice, adaptiveNonBackground, adaptiveMaxNonBackground);
-                        if (adaptiveFrames >= 44 && IsVisibleThirtyTwoXStatus(adaptiveStatus))
+                        if (adaptiveFrames >= 44 && IsConfirmedVisibleThirtyTwoXStatus(adaptiveStatus))
                         {
                             adaptiveFrames++;
                             break;
@@ -5246,7 +5246,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                         nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
                         maxNonBackground = Math.Max(maxNonBackground, nonBackground);
                         status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
-                        if (IsVisibleThirtyTwoXStatus(status))
+                        if (IsConfirmedVisibleThirtyTwoXStatus(status))
                         {
                             break;
                         }
@@ -5521,6 +5521,21 @@ bool IsVisibleThirtyTwoXStatus(string status)
 bool IsDirectVisibleThirtyTwoXStatus(string status)
 {
     return status.StartsWith("visible-32x", StringComparison.Ordinal);
+}
+
+bool IsConfirmedVisibleThirtyTwoXStatus(string status)
+{
+    return IsDirectVisibleThirtyTwoXStatus(status) &&
+        !status.StartsWith("visible-32x-fallback", StringComparison.Ordinal);
+}
+
+bool IsThirtyTwoXSweepEarlyStopStatus(string status)
+{
+    // 32X titles often show a valid Mega Drive boot/title layer long before their
+    // SH-2 driven framebuffer is ready. Treat --stop-on-visible as confirmed
+    // 32X visibility so slow-starting games are not marked done on MD-only pixels
+    // or blank-mode diagnostic fallback data.
+    return IsConfirmedVisibleThirtyTwoXStatus(status);
 }
 
 bool IsLikelyThirtyTwoXRom(string path)
