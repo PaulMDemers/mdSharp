@@ -1568,6 +1568,48 @@ public sealed class ThirtyTwoXDevice
             ReadSh2CachedSdramByte(address + 3, offset + 3, cpuIndex));
     }
 
+    private ushort ReadSh2InstructionWord(uint address, int cpuIndex)
+    {
+        if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
+        {
+            if (IsSh2InstructionCacheEnabled(cpuIndex))
+            {
+                return (ushort)((ReadSh2CachedSdramByte(address, cachedSdramOffset, cpuIndex) << 8) |
+                    ReadSh2CachedSdramByte(address + 1, cachedSdramOffset + 1, cpuIndex));
+            }
+
+            return ReadSh2Word(address, cpuIndex);
+        }
+
+        if (TryMapSh2SdramAddress(address, out _))
+        {
+            return ReadSh2Word(address, cpuIndex);
+        }
+
+        if (TryMapSh2CachedCartridgeAddress(address, out uint cacheOffset, out uint romOffset))
+        {
+            if (IsSh2InstructionCacheEnabled(cpuIndex))
+            {
+                return (ushort)((ReadSh2CachedCartridgeByte(cacheOffset, romOffset, cpuIndex) << 8) |
+                    ReadSh2CachedCartridgeByte(cacheOffset + 1, romOffset + 1, cpuIndex));
+            }
+
+            return ReadSh2Word(address, cpuIndex);
+        }
+
+        if (TryMapSh2UncachedBankedCartridgeAddress(address, out _))
+        {
+            return ReadSh2Word(address, cpuIndex);
+        }
+
+        if (address >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
+        {
+            return ReadSh2Word(address, cpuIndex);
+        }
+
+        return ReadSh2Word(address, cpuIndex);
+    }
+
     private uint ReadSh2CachedCartridgeLong(uint address, uint romOffset, int cpuIndex)
     {
         return (uint)((ReadSh2CachedCartridgeByte(address, romOffset, cpuIndex) << 24) |
@@ -7132,6 +7174,12 @@ public sealed class ThirtyTwoXDevice
         return (ccr & 0x05) == 0x01;
     }
 
+    private bool IsSh2InstructionCacheEnabled(int cpuIndex)
+    {
+        byte ccr = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2CacheControlRegisterAddress - Sh2PeripheralRegisterStart)];
+        return (ccr & 0x03) == 0x01;
+    }
+
     private void PurgeSh2CacheLine(int cpuIndex, uint address)
     {
         int index = cpuIndex & 1;
@@ -7538,7 +7586,7 @@ public sealed class ThirtyTwoXDevice
         Sh2Cpu.Sh2State MasterSh2,
         Sh2Cpu.Sh2State SlaveSh2);
 
-    private sealed class Sh2MemoryBus : ISh2Bus, ISh2WaitStateBus, ISh2PeekBus
+    private sealed class Sh2MemoryBus : ISh2Bus, ISh2InstructionBus, ISh2WaitStateBus, ISh2PeekBus
     {
         private readonly ThirtyTwoXDevice _device;
         private readonly int _cpuIndex;
@@ -7552,6 +7600,7 @@ public sealed class ThirtyTwoXDevice
         public byte ReadByte(uint address) => _device.ReadSh2Byte(address, _cpuIndex);
         public ushort ReadWord(uint address) => _device.ReadSh2Word(address, _cpuIndex);
         public uint ReadLong(uint address) => _device.ReadSh2Long(address, _cpuIndex);
+        public ushort ReadInstructionWord(uint address) => _device.ReadSh2InstructionWord(address, _cpuIndex);
         public void WriteByte(uint address, byte value) => _device.WriteSh2Byte(address, value, _cpuIndex);
         public void WriteWord(uint address, ushort value) => _device.WriteSh2Word(address, value, _cpuIndex);
         public void WriteLong(uint address, uint value) => _device.WriteSh2Long(address, value, _cpuIndex);

@@ -5104,7 +5104,9 @@ public sealed class Sh2Cpu
         }
 
         pc = PC;
-        ushort opcode = _bus.ReadWord(pc);
+        ushort opcode = _bus is ISh2InstructionBus instructionBus
+            ? instructionBus.ReadInstructionWord(pc)
+            : _bus.ReadWord(pc);
         PC += 2;
         LastOpcode = opcode;
         LastOpcodePc = pc;

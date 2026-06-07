@@ -10,6 +10,11 @@ public interface ISh2Bus
     void WriteLong(uint address, uint value);
 }
 
+public interface ISh2InstructionBus
+{
+    ushort ReadInstructionWord(uint address);
+}
+
 public interface ISh2WaitStateBus
 {
     int ConsumeWaitCycles();
