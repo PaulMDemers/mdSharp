@@ -23,7 +23,9 @@ Run("32X SH-2 BRA self idle loop fast-forward", ThirtyTwoXSh2BraSelfIdleLoopFast
 Run("32X SH-2 ADD BRA NOP delay loop fast-forward", ThirtyTwoXSh2AddBraNopDelayLoopFastForward);
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
+Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
+Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -2169,6 +2171,44 @@ void ThirtyTwoXSh2NopDtBfDelayLoopFastForward()
     AssertTrue(device.MasterSh2.Halted, "SH-2 should execute the instruction after the collapsed NOP delay loop");
 }
 
+void ThirtyTwoXSh2MovLAddBfSDtLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x2102); // MOV.L R0,@R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x7104); // ADD #4,R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x8FFC); // BF/S loop
+    bus.WriteInstructionWord(LoopPc + 6, 0x4210); // DT R2
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = 0x1234_5678;
+    cpu.R[1] = 0x0603_0000;
+    cpu.R[2] = 5;
+    AssertTrue(cpu.TryFastForwardMovLStoreAddBfSDtLoop(12, bus.TryWriteLong, 4, out int partialCycles), "partial MOV.L/ADD/BF/S/DT loop should fast-forward");
+    AssertEqual(12, partialCycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0603_000Cu, cpu.R[1]);
+    AssertEqual(2u, cpu.R[2]);
+    AssertEqual(0u, cpu.SR & 1);
+    AssertEqual(0x1234_5678u, bus.ReadLong(0x0603_0000));
+    AssertEqual(0x1234_5678u, bus.ReadLong(0x0603_0008));
+
+    AssertTrue(cpu.TryFastForwardMovLStoreAddBfSDtLoop(16, bus.TryWriteLong, 4, out int finalCycles), "final MOV.L/ADD/BF/S/DT loop should fast-forward through exit");
+    AssertEqual(8, finalCycles);
+    AssertEqual(LoopPc + 8, cpu.PC);
+    AssertEqual(0x0603_0014u, cpu.R[1]);
+    AssertEqual(0u, cpu.R[2]);
+    AssertEqual(1u, cpu.SR & 1);
+    AssertEqual(0x1234_5678u, bus.ReadLong(0x0603_0010));
+
+    Sh2Cpu rejected = new(bus, "test");
+    rejected.Reset(LoopPc);
+    rejected.R[1] = 0xFFFF_0000;
+    rejected.R[2] = 1;
+    AssertTrue(!rejected.TryFastForwardMovLStoreAddBfSDtLoop(4, (address, value) => false, 4, out _), "loop should fall back when the writer rejects the destination");
+}
+
 void ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward()
 {
     const uint LoopPc = 0x0600_1000;
@@ -2212,6 +2252,70 @@ void ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward()
     AssertEqual(Destination + 0x114, partialCpu.R[2]);
     AssertEqual(LoopPc, partialCpu.PC);
     AssertEqual(0x1122_3344u, bus.ReadLong(Destination + 0x110));
+}
+
+void ThirtyTwoXSh2WordTableSearchLoopFastForward()
+{
+    const uint LoopPc = 0x0600_2000;
+    const uint Table = 0x0603_0000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x613F); // EXTS.W R3,R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x6013); // MOV R1,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x301C); // ADD R1,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x017D); // MOV.W @(R0,R7),R1
+    bus.WriteInstructionWord(LoopPc + 8, 0x611D); // EXTU.W R1,R1
+    bus.WriteInstructionWord(LoopPc + 10, 0x3140); // CMP/EQ R4,R1
+    bus.WriteInstructionWord(LoopPc + 12, 0x8903); // BT exit
+    bus.WriteInstructionWord(LoopPc + 14, 0x7301); // ADD #1,R3
+    bus.WriteInstructionWord(LoopPc + 16, 0x613F); // EXTS.W R3,R1
+    bus.WriteInstructionWord(LoopPc + 18, 0x3127); // CMP/GT R2,R1
+    bus.WriteInstructionWord(LoopPc + 20, 0x8BF4); // BF loop
+    bus.WriteWord(Table + 0, 0xFFFF);
+    bus.WriteWord(Table + 2, 0x0007);
+    bus.WriteWord(Table + 4, 0x0010);
+    bus.WriteWord(Table + 6, 0x0020);
+
+    Sh2Cpu found = new(bus, "test");
+    found.Reset(LoopPc);
+    found.R[2] = 3;
+    found.R[3] = 0;
+    found.R[4] = 0x0000_0010;
+    found.R[7] = Table;
+    AssertTrue(found.TryFastForwardWordTableSearchLoop(128, bus.TryReadWord, out int foundCycles), "word table search should fast-forward to a matching entry");
+    AssertEqual(33, foundCycles);
+    AssertEqual(LoopPc + 22, found.PC);
+    AssertEqual(2u, found.R[3]);
+    AssertEqual(4u, found.R[0]);
+    AssertEqual(0x0010u, found.R[1]);
+    AssertEqual(1u, found.SR & 1);
+
+    Sh2Cpu exhausted = new(bus, "test");
+    exhausted.Reset(LoopPc);
+    exhausted.R[2] = 3;
+    exhausted.R[3] = 0;
+    exhausted.R[4] = 0x0000_1234;
+    exhausted.R[7] = Table;
+    AssertTrue(exhausted.TryFastForwardWordTableSearchLoop(128, bus.TryReadWord, out int exhaustedCycles), "word table search should fast-forward through the not-found exit");
+    AssertEqual(44, exhaustedCycles);
+    AssertEqual(LoopPc + 22, exhausted.PC);
+    AssertEqual(4u, exhausted.R[3]);
+    AssertEqual(4u, exhausted.R[1]);
+    AssertEqual(6u, exhausted.R[0]);
+    AssertEqual(1u, exhausted.SR & 1);
+
+    Sh2Cpu partial = new(bus, "test");
+    partial.Reset(LoopPc);
+    partial.R[2] = 3;
+    partial.R[3] = 0;
+    partial.R[4] = 0x0000_1234;
+    partial.R[7] = Table;
+    AssertTrue(partial.TryFastForwardWordTableSearchLoop(22, bus.TryReadWord, out int partialCycles), "word table search should respect the cycle budget");
+    AssertEqual(22, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(2u, partial.R[3]);
+    AssertEqual(2u, partial.R[0]);
+    AssertEqual(2u, partial.R[1]);
+    AssertEqual(0u, partial.SR & 1);
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()

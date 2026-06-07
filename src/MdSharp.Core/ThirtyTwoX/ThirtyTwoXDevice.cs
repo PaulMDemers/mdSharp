@@ -921,6 +921,17 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (cpu.TryFastForwardMovLStoreAddBfSDtLoop(
+                        longStoreBudget,
+                        _sh2LongWriters[cpuIndex],
+                        Sh2LongStoreFillLoopCycles,
+                        out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 int delayStoreBudget = Math.Min(cycleBudget, Sh2LongStoreDelayFillLoopCycles * Sh2LongStoreDelayFillLoopMaxBurstIterations);
                 if (cpu.TryFastForwardMovLNopDtBfSAddLoop(
                         delayStoreBudget,
@@ -953,6 +964,14 @@ public sealed class ThirtyTwoXDevice
                     Math.Min(Math.Max(cycleBudget, Sh2MovWordStridedCopyMinBurstCycles), Sh2MovWordStridedCopyMaxBurstCycles),
                     out fastCycles))
             {
+                return fastCycles;
+            }
+
+            if (nextOpcode == 0x613F &&
+                cpu.TryFastForwardWordTableSearchLoop(cycleBudget, _sh2WordReaders[cpuIndex], out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1846,6 +1865,7 @@ public sealed class ThirtyTwoXDevice
     {
         if (!TryMapSh2CachedSdramAddress(address, out _) &&
             !TryMapSh2SdramAddress(address, out _) &&
+            !TryMapSh2FrameBufferAddress(address, out _, out _) &&
             !TryMapSh2CachedCartridgeAddress(address, out _, out _))
         {
             return false;

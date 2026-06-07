@@ -713,6 +713,273 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovLStoreAddBfSDtLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort storeOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort addOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort dtOpcode))
+        {
+            return false;
+        }
+
+        if ((storeOpcode & 0xF00F) != 0x2002 ||
+            (addOpcode & 0xF000) != 0x7000 ||
+            (branchOpcode & 0xFF00) != 0x8F00 ||
+            (dtOpcode & 0xF0FF) != 0x4010)
+        {
+            return false;
+        }
+
+        int addressRegister = (storeOpcode >> 8) & 0x0F;
+        int sourceRegister = (storeOpcode >> 4) & 0x0F;
+        int addRegister = (addOpcode >> 8) & 0x0F;
+        int addImmediate = (sbyte)(byte)addOpcode;
+        if (addRegister != addressRegister || addImmediate != 4)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 8 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[addressRegister];
+        uint value = R[sourceRegister];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeLong(address, value))
+            {
+                break;
+            }
+
+            completed++;
+            address += 4;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[addressRegister] += completed * 4;
+        R[countRegister] = count - completed;
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = dtOpcode;
+        LastOpcodePc = loopPc + 6;
+
+        if (completed == count)
+        {
+            SetT(true);
+            PC = loopPc + 8;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
+    public bool TryFastForwardWordTableSearchLoop(int maxCycles, Func<uint, ushort?> readWord, out int cycles)
+    {
+        cycles = 0;
+        const int CyclesPerIteration = 11;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0, out ushort extsIndexOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort movIndexOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort addIndexOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort extuValueOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 10, out ushort cmpEqOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 12, out ushort foundBranchOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 14, out ushort incrementOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 16, out ushort extsLimitOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 18, out ushort cmpGtOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 20, out ushort loopBranchOpcode))
+        {
+            return false;
+        }
+
+        if ((extsIndexOpcode & 0xF0FF) != 0x603F ||
+            (movIndexOpcode & 0xF00F) != 0x6003 ||
+            (addIndexOpcode & 0xF00F) != 0x300C ||
+            (loadOpcode & 0xF00F) != 0x000D ||
+            (extuValueOpcode & 0xF0FF) != 0x601D ||
+            (cmpEqOpcode & 0xF00F) != 0x3000 ||
+            (foundBranchOpcode & 0xFF00) != 0x8900 ||
+            (incrementOpcode & 0xF000) != 0x7000 ||
+            (extsLimitOpcode & 0xF0FF) != 0x603F ||
+            (cmpGtOpcode & 0xF00F) != 0x3007 ||
+            (loopBranchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int indexRegister = (extsIndexOpcode >> 4) & 0x0F;
+        int signedIndexRegister = (extsIndexOpcode >> 8) & 0x0F;
+        int movSourceRegister = (movIndexOpcode >> 4) & 0x0F;
+        int doubledIndexRegister = (movIndexOpcode >> 8) & 0x0F;
+        int addSourceRegister = (addIndexOpcode >> 4) & 0x0F;
+        int addDestinationRegister = (addIndexOpcode >> 8) & 0x0F;
+        int valueRegister = (loadOpcode >> 8) & 0x0F;
+        const int offsetRegister = 0;
+        int tableBaseRegister = (loadOpcode >> 4) & 0x0F;
+        int extuSourceRegister = (extuValueOpcode >> 4) & 0x0F;
+        int extuDestinationRegister = (extuValueOpcode >> 8) & 0x0F;
+        int compareExpectedRegister = (cmpEqOpcode >> 4) & 0x0F;
+        int compareValueRegister = (cmpEqOpcode >> 8) & 0x0F;
+        int incrementRegister = (incrementOpcode >> 8) & 0x0F;
+        int incrementValue = (sbyte)(byte)incrementOpcode;
+        int limitSignedRegister = (extsLimitOpcode >> 8) & 0x0F;
+        int limitSourceRegister = (extsLimitOpcode >> 4) & 0x0F;
+        int cmpGtLimitRegister = (cmpGtOpcode >> 4) & 0x0F;
+        int cmpGtIndexRegister = (cmpGtOpcode >> 8) & 0x0F;
+
+        if (signedIndexRegister != movSourceRegister ||
+            signedIndexRegister != addSourceRegister ||
+            doubledIndexRegister != addDestinationRegister ||
+            doubledIndexRegister != offsetRegister ||
+            valueRegister != signedIndexRegister ||
+            valueRegister != extuSourceRegister ||
+            valueRegister != extuDestinationRegister ||
+            valueRegister != compareValueRegister ||
+            compareExpectedRegister == valueRegister ||
+            incrementRegister != indexRegister ||
+            incrementValue != 1 ||
+            limitSignedRegister != signedIndexRegister ||
+            limitSourceRegister != indexRegister ||
+            cmpGtIndexRegister != signedIndexRegister)
+        {
+            return false;
+        }
+
+        int foundDisplacement = (sbyte)foundBranchOpcode;
+        uint foundTarget = loopPc + 16 + (uint)(foundDisplacement * 2);
+        int loopDisplacement = (sbyte)loopBranchOpcode;
+        uint loopTarget = loopPc + 24 + (uint)(loopDisplacement * 2);
+        if (loopTarget != loopPc || foundTarget != loopPc + 22)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        if (maxIterations == 0)
+        {
+            return false;
+        }
+
+        uint completed = 0;
+        bool found = false;
+        bool exhausted = false;
+        uint currentIndex = R[indexRegister];
+        uint tableBase = R[tableBaseRegister];
+        uint expected = R[compareExpectedRegister];
+        uint limit = R[cmpGtLimitRegister];
+        uint lastOffset = R[doubledIndexRegister];
+        uint lastValue = R[valueRegister];
+        uint lastSignedIndex = R[signedIndexRegister];
+
+        while (completed < maxIterations)
+        {
+            lastSignedIndex = SignExtend16((ushort)currentIndex);
+            lastOffset = lastSignedIndex + lastSignedIndex;
+            ushort? word = readWord(tableBase + lastOffset);
+            if (word is null)
+            {
+                break;
+            }
+
+            lastValue = word.Value;
+            completed++;
+
+            if (lastValue == expected)
+            {
+                found = true;
+                break;
+            }
+
+            currentIndex++;
+            lastSignedIndex = SignExtend16((ushort)currentIndex);
+            if (SignedGreaterThan(lastSignedIndex, limit))
+            {
+                exhausted = true;
+                break;
+            }
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[indexRegister] = currentIndex;
+        R[doubledIndexRegister] = lastOffset;
+        R[valueRegister] = found ? lastValue : lastSignedIndex;
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+
+        if (found || exhausted)
+        {
+            SetT(true);
+            PC = loopPc + 22;
+            LastOpcode = found ? foundBranchOpcode : loopBranchOpcode;
+            LastOpcodePc = found ? loopPc + 12 : loopPc + 20;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+            LastOpcode = loopBranchOpcode;
+            LastOpcodePc = loopPc + 20;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;
@@ -7017,6 +7284,11 @@ public sealed class Sh2Cpu
     private static uint SignExtend16(ushort value)
     {
         return (uint)(short)value;
+    }
+
+    private static bool SignedGreaterThan(uint left, uint right)
+    {
+        return (int)left > (int)right;
     }
 
     private static int SignExtend12(int value)
