@@ -11,7 +11,8 @@ namespace MdSharp.Core;
 
 public sealed class MegaDrive
 {
-    private const int ThirtyTwoXMinimumCycleBatch = 64;
+    private const int ThirtyTwoXMinimumCycleBatch = 2048;
+    private const int ThirtyTwoXSystemWordPollLoopCycles = 26;
     private const int ResetAudioFadeInSamples = 512;
     private const int MaxStoppedM68kIdleBatchCycles = 64;
     private static readonly double PsgFilterAlpha = LowPassAlpha(AudioConstants.PsgLowPassCutoffHz, AudioConstants.DefaultSampleRate);
@@ -238,6 +239,20 @@ public sealed class MegaDrive
             Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
             ServicePendingM68kInterrupts();
 
+            if (TryFastForwardThirtyTwoXSystemWordPollLoop(cycleBudget - consumed, out int pollCycles))
+            {
+                ThirtyTwoXDevice thirtyTwoX = Bus.ThirtyTwoX!;
+                MainCpu.AddWaitCycles(pollCycles);
+                RunThirtyTwoXForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider);
+                int skippedPolls = pollCycles / ThirtyTwoXSystemWordPollLoopCycles;
+                thirtyTwoX.SetCurrentMasterCycle(Bus.CurrentMasterCycle);
+                _thirtyTwoXExecutedInstructionSteps += thirtyTwoX.RunSh2Cycles(skippedPolls * 32);
+                ushort value = thirtyTwoX.ReadSystemRegisterWord(0x20);
+                MainCpu.D[0] = (MainCpu.D[0] & 0xFFFF_0000u) | value;
+                consumed += pollCycles;
+                continue;
+            }
+
             if (Bus.ThirtyTwoX is null &&
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
@@ -291,6 +306,49 @@ public sealed class MegaDrive
         Bus.CurrentMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
         Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
         return consumed;
+    }
+
+    private bool TryFastForwardThirtyTwoXSystemWordPollLoop(int cycleBudget, out int cycles)
+    {
+        cycles = 0;
+        if (Bus.ThirtyTwoX is null ||
+            MainCpu.InstructionObserver is not null ||
+            cycleBudget < ThirtyTwoXSystemWordPollLoopCycles)
+        {
+            return false;
+        }
+
+        uint comparePc = MainCpu.PC;
+        if (comparePc < 6 ||
+            Bus.ReadWord(comparePc - 6) != 0x3039 ||
+            Bus.ReadWord(comparePc - 4) != 0x00A1 ||
+            Bus.ReadWord(comparePc - 2) != 0x5120 ||
+            Bus.ReadWord(comparePc) != 0x0C40 ||
+            Bus.ReadWord(comparePc + 2) != 0x0001)
+        {
+            return false;
+        }
+
+        ushort branch = Bus.ReadWord(comparePc + 4);
+        if ((branch & 0xFF00) != 0x6C00)
+        {
+            return false;
+        }
+
+        uint branchTarget = comparePc + 6 + (uint)((sbyte)(branch & 0x00FF) * 2);
+        if (branchTarget != comparePc - 6 ||
+            (short)(MainCpu.D[0] & 0xFFFF) < 1)
+        {
+            return false;
+        }
+
+        cycles = cycleBudget - (cycleBudget % ThirtyTwoXSystemWordPollLoopCycles);
+        if (cycles <= 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private void RunZ80Until(long lineStartMasterCycle, long sliceEndMasterCycle, ref long z80MasterCycleCursor, ref bool z80InterruptPending, Action<Z80InstructionTrace>? z80Observer)
