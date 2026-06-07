@@ -1052,6 +1052,15 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (((nextOpcode & 0xFC00) == 0xC400 ||
+                    (nextOpcode & 0xFF00) == 0x8800 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardGbrCmpEqBtPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xFC00) == 0xC400 &&
                 cpu.TryFastForwardGbrRegisterCmpEqBfPollLoop(cycleBudget, out fastCycles))
             {
@@ -1170,6 +1179,21 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8D00 ||
                     (nextOpcode & 0xF00F) == 0x2009) &&
                 cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(cycleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xF00F) == 0x6001) ||
+                    (nextOpcode & 0xF0FF) == 0x7001 ||
+                    (nextOpcode & 0xF00F) == 0x2001 ||
+                    (nextOpcode & 0xFF00) == 0xC500 ||
+                    (nextOpcode & 0xFF00) == 0x8800 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardWordIncrementGbrZeroBtPollLoop(
+                    cycleBudget,
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
             {
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;

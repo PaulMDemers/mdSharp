@@ -75,6 +75,11 @@ public sealed class Sh2Cpu
         VBR = value;
     }
 
+    public void SetGbr(uint value)
+    {
+        GBR = value;
+    }
+
     public void RequestInterrupt(int level, int? vectorNumber = null)
     {
         if (level is < 1 or > 15)
@@ -2279,6 +2284,81 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardGbrCmpEqBtPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (branchOpcode & 0xFF00) != 0x8900 ||
+            (compareOpcode & 0xFF00) != 0x8800)
+        {
+            return false;
+        }
+
+        uint address;
+        uint value;
+        if ((loadOpcode & 0xFF00) == 0xC400)
+        {
+            address = GBR + (uint)(loadOpcode & 0xFF);
+            if (!peekBus.TryPeekByte(address, out byte byteValue))
+            {
+                return false;
+            }
+
+            value = (uint)(sbyte)byteValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC500)
+        {
+            address = GBR + (uint)((loadOpcode & 0xFF) * 2);
+            if (!peekBus.TryPeekWord(address, out ushort wordValue))
+            {
+                return false;
+            }
+
+            value = (uint)(short)wordValue;
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC600)
+        {
+            address = GBR + (uint)((loadOpcode & 0xFF) * 4);
+            if (!peekBus.TryPeekWord(address, out ushort high) ||
+                !peekBus.TryPeekWord(address + 2, out ushort low))
+            {
+                return false;
+            }
+
+            value = ((uint)high << 16) | low;
+        }
+        else
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = value == (uint)(sbyte)immediate;
+        if (!equal)
+        {
+            return false;
+        }
+
+        cycles = maxCycles;
+        Cycles += cycles;
+        R[0] = value;
+        SetT(true);
+        PC = loopPc;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardGbrRegisterCmpEqBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -4350,6 +4430,101 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardWordIncrementGbrZeroBtPollLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        const int CyclesPerIteration = 12;
+
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadWordIncrementGbrZeroBtPollPattern(peekBus, loopPc, out ushort loadOpcode, out ushort addOpcode, out ushort storeOpcode, out ushort guardLoadOpcode, out ushort compareOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 || !TryReadWordIncrementGbrZeroBtPollPattern(peekBus, PC - 2, out loadOpcode, out addOpcode, out storeOpcode, out guardLoadOpcode, out compareOpcode, out branchOpcode))
+            {
+                if (PC < 4 || !TryReadWordIncrementGbrZeroBtPollPattern(peekBus, PC - 4, out loadOpcode, out addOpcode, out storeOpcode, out guardLoadOpcode, out compareOpcode, out branchOpcode))
+                {
+                    if (PC < 6 || !TryReadWordIncrementGbrZeroBtPollPattern(peekBus, PC - 6, out loadOpcode, out addOpcode, out storeOpcode, out guardLoadOpcode, out compareOpcode, out branchOpcode))
+                    {
+                        if (PC < 8 || !TryReadWordIncrementGbrZeroBtPollPattern(peekBus, PC - 8, out loadOpcode, out addOpcode, out storeOpcode, out guardLoadOpcode, out compareOpcode, out branchOpcode))
+                        {
+                            if (PC < 10 || !TryReadWordIncrementGbrZeroBtPollPattern(peekBus, PC - 10, out loadOpcode, out addOpcode, out storeOpcode, out guardLoadOpcode, out compareOpcode, out branchOpcode))
+                            {
+                                return false;
+                            }
+
+                            loopPc = PC - 10;
+                        }
+                        else
+                        {
+                            loopPc = PC - 8;
+                        }
+                    }
+                    else
+                    {
+                        loopPc = PC - 6;
+                    }
+                }
+                else
+                {
+                    loopPc = PC - 4;
+                }
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int addDestination = (addOpcode >> 8) & 0x0F;
+        int storeDestination = (storeOpcode >> 8) & 0x0F;
+        int storeSource = (storeOpcode >> 4) & 0x0F;
+        if (loadDestination != addDestination ||
+            storeSource != addDestination ||
+            storeDestination != loadSource ||
+            loadDestination != 0 ||
+            (compareOpcode & 0x00FF) != 0)
+        {
+            return false;
+        }
+
+        uint guardAddress = GBR + (uint)((guardLoadOpcode & 0x00FF) * 2);
+        if (!peekBus.TryPeekWord(guardAddress, out ushort guardValue) ||
+            guardValue != 0 ||
+            !peekBus.TryPeekWord(R[loadSource], out ushort counter))
+        {
+            return false;
+        }
+
+        int boundedCycles = Math.Min(maxCycles, MaxBurstCycles);
+        int iterations = Math.Max(1, boundedCycles / CyclesPerIteration);
+        ushort newCounter = (ushort)(counter + iterations);
+        if (!writeWord(R[loadSource], newCounter))
+        {
+            return false;
+        }
+
+        R[loadDestination] = 0;
+        SetT(true);
+        PC = loopPc;
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 10;
+        return true;
+    }
+
     private static bool TryReadLongTstBtPaddedPattern(ISh2PeekBus peekBus, uint pc, out ushort loadOpcode, out ushort branchOpcode)
     {
         loadOpcode = 0;
@@ -4393,6 +4568,41 @@ public sealed class Sh2Cpu
             (branchOpcode & 0xFF00) == 0x8D00 &&
             (andOpcode & 0xF00F) == 0x2009 &&
             BranchByteTarget(pc + 4, branchOpcode) == pc;
+    }
+
+    private static bool TryReadWordIncrementGbrZeroBtPollPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort loadOpcode,
+        out ushort addOpcode,
+        out ushort storeOpcode,
+        out ushort guardLoadOpcode,
+        out ushort compareOpcode,
+        out ushort branchOpcode)
+    {
+        loadOpcode = 0;
+        addOpcode = 0;
+        storeOpcode = 0;
+        guardLoadOpcode = 0;
+        compareOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(pc, out loadOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out addOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out storeOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out guardLoadOpcode) ||
+            !peekBus.TryPeekWord(pc + 8, out compareOpcode) ||
+            !peekBus.TryPeekWord(pc + 10, out branchOpcode))
+        {
+            return false;
+        }
+
+        return (loadOpcode & 0xF00F) == 0x6001 &&
+            (addOpcode & 0xF0FF) == 0x7001 &&
+            (storeOpcode & 0xF00F) == 0x2001 &&
+            (guardLoadOpcode & 0xFF00) == 0xC500 &&
+            (compareOpcode & 0xFF00) == 0x8800 &&
+            (branchOpcode & 0xFF00) == 0x8900 &&
+            BranchByteTarget(pc + 10, branchOpcode) == pc;
     }
 
     public bool TryFastForwardWordTstBfPollLoop(int maxCycles, out int cycles)

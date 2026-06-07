@@ -32,6 +32,7 @@ Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPo
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
 Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
+Run("32X SH-2 word increment GBR zero BT poll loop fast-forward", ThirtyTwoXSh2WordIncrementGbrZeroBtPollLoopFastForward);
 Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoopFastForward);
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
@@ -52,6 +53,7 @@ Run("32X SH-2 long difference poll fast-forward", ThirtyTwoXSh2LongDifferencePol
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 GBR CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward);
 Run("32X SH-2 GBR register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward);
 Run("32X SH-2 null linked-list idle loop fast-forward", ThirtyTwoXSh2NullLinkedListIdleLoopFastForward);
 Run("32X SH-2 GBR word CMP/GT BF poll loop fast-forward", ThirtyTwoXSh2GbrWordCmpGtBfPollLoopFastForward);
@@ -2418,6 +2420,40 @@ void ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward()
     AssertTrue(!cpu.TryFastForwardLongMaskedChangeBtSDelayPollLoop(300, out _), "changed masked long value should fall back to the interpreter");
 }
 
+void ThirtyTwoXSh2WordIncrementGbrZeroBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_05EC;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x7001); // ADD #1,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x2101); // MOV.W R0,@R1
+    bus.WriteInstructionWord(LoopPc + 6, 0xC516); // MOV.W @(44,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 8, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 10, 0x89F9); // BT loop
+    bus.WriteWord(0x0600_49E2, 0x0007);
+    bus.WriteWord(0x2000_402C, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = 0x0600_49E2;
+    cpu.SetGbr(0x2000_4000);
+    AssertTrue(cpu.TryFastForwardWordIncrementGbrZeroBtPollLoop(120, bus.TryWriteWord, out int cycles), "word increment/GBR zero poll should fast-forward while the guard word is zero");
+    AssertEqual(120, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual((ushort)0x0011, bus.ReadWord(0x0600_49E2));
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 10);
+    cpu.R[1] = 0x0600_49E2;
+    cpu.SetGbr(0x2000_4000);
+    AssertTrue(cpu.TryFastForwardWordIncrementGbrZeroBtPollLoop(120, bus.TryWriteWord, out _), "word increment/GBR zero poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(0x2000_402C, 0x0001);
+    AssertTrue(!cpu.TryFastForwardWordIncrementGbrZeroBtPollLoop(120, bus.TryWriteWord, out _), "nonzero guard word should fall back to the interpreter");
+}
+
 void ThirtyTwoXSh2ByteTstBfPollLoopFastForward()
 {
     const uint LoopPc = 0x0600_0F06;
@@ -3308,6 +3344,34 @@ void ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward()
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     device.RunSh2Cycles(80);
     AssertTrue(device.MasterSh2.Halted, "zero poll value should let the SH-2 leave the loop and sleep");
+}
+
+void ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_1BD8;
+    const uint Gbr = 0x2000_4000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC516); // MOV.W @(44,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    bus.WriteWord(Gbr + 44, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardGbrCmpEqBtPollLoop(500, out int cycles), "GBR CMP/EQ BT poll should fast-forward while the value matches");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardGbrCmpEqBtPollLoop(500, out _), "GBR CMP/EQ BT poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(Gbr + 44, 0x0001);
+    AssertTrue(!cpu.TryFastForwardGbrCmpEqBtPollLoop(500, out _), "nonmatching GBR CMP/EQ BT value should fall back to the interpreter");
 }
 
 void ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward()
