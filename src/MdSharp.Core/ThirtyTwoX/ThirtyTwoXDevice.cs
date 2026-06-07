@@ -125,6 +125,8 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2LongStoreFillLoopMaxBurstIterations = 2048;
     private const int Sh2LongStoreDelayFillLoopCycles = 20;
     private const int Sh2LongStoreDelayFillLoopMaxBurstIterations = 4096;
+    private const int Sh2MovWordStridedCopyMinBurstCycles = 4096;
+    private const int Sh2MovWordStridedCopyMaxBurstCycles = 6 * 32768;
     private const int Sh2BraSelfIdleLoopTimerSensitiveBurstCycles = 32;
     private const int DreqBackpressureSh2Cycles = 64;
     private const int Sh2CartridgeByteWaitCycles = 6;
@@ -389,6 +391,8 @@ public sealed class ThirtyTwoXDevice
     public int EmptyDescriptorSpanFastPathHits { get; private set; }
     public int EmptyDescriptorSpanTailFastPathAttempts { get; private set; }
     public int EmptyDescriptorSpanTailFastPathHits { get; private set; }
+    public int MovWordStridedCopyFastPathAttempts { get; private set; }
+    public int MovWordStridedCopyFastPathHits { get; private set; }
     public int LongDifferencePollFastPathAttempts { get; private set; }
     public int LongDifferencePollFastPathHits { get; private set; }
     public int SdramFlagTaskletDispatcherFastPathAttempts { get; private set; }
@@ -892,13 +896,12 @@ public sealed class ThirtyTwoXDevice
             }
 
             if ((nextOpcode & 0xF00F) == 0x6005 &&
-                cpu.TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
-                    cycleBudget,
-                    _sh2WordReaders[cpuIndex],
-                    _sh2WordWriters[cpuIndex],
+                TryFastForwardMovWordStridedCopy(
+                    cpu,
+                    cpuIndex,
+                    Math.Min(Math.Max(cycleBudget, Sh2MovWordStridedCopyMinBurstCycles), Sh2MovWordStridedCopyMaxBurstCycles),
                     out fastCycles))
             {
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -1408,6 +1411,23 @@ public sealed class ThirtyTwoXDevice
         }
 
         GbrBytePairInterruptIdleFastPathHits++;
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardMovWordStridedCopy(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        MovWordStridedCopyFastPathAttempts++;
+        if (!cpu.TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
+                cycleBudget,
+                _sh2WordReaders[cpuIndex],
+                _sh2WordWriters[cpuIndex],
+                out cycles))
+        {
+            return false;
+        }
+
+        MovWordStridedCopyFastPathHits++;
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
     }
@@ -3249,6 +3269,24 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
+        {
+            AddSh2WaitCycles(cpuIndex, Sh2SdramWriteWaitCycles);
+            WriteBigEndianWord(_sdram, cachedSdramOffset, value);
+            UpdateSh2SdramCacheByte(cachedSdramOffset, (byte)(value >> 8), cpuIndex);
+            UpdateSh2SdramCacheByte((cachedSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), (byte)value, cpuIndex);
+            TraceSh2MemoryAccess(cpuIndex, "WC16", address, value);
+            return;
+        }
+
+        if (TryMapSh2SdramAddress(address, out int sdramOffset))
+        {
+            AddSh2WaitCycles(cpuIndex, Sh2SdramWriteWaitCycles);
+            WriteBigEndianWord(_sdram, sdramOffset, value);
+            TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
+            return;
+        }
+
         if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
         {
             AddSh2WaitCycles(cpuIndex, Sh2FrameBufferWriteWaitCycles);
@@ -3268,6 +3306,26 @@ public sealed class ThirtyTwoXDevice
                 WriteFrameBufferWordCore(frameBufferOffset, value, source, enforceAccessWindow: false);
             }
 
+            return;
+        }
+
+        if (TryMapSh2CachedCartridgeAddress(address, out uint cacheOffset, out uint romOffset))
+        {
+            if (IsSh2CacheEnabled(cpuIndex))
+            {
+                WriteSh2CachedCartridgeByte(cacheOffset, romOffset, (byte)(value >> 8), cpuIndex);
+                WriteSh2CachedCartridgeByte(cacheOffset + 1, romOffset + 1, (byte)value, cpuIndex);
+            }
+
+            TraceSh2MemoryAccess(cpuIndex, "WC16", address, value);
+            return;
+        }
+
+        if (TryMapSh2UncachedBankedCartridgeAddress(address, out _))
+        {
+            AddSh2WaitCycles(cpuIndex, IsSh2RomBlockedByRv() ? Sh2CartridgeRvBlockedWaitCycles : Sh2CartridgeByteWaitCycles * 2);
+            ClaimSh2CartridgeBus(2);
+            TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
             return;
         }
 
