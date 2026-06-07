@@ -411,6 +411,10 @@ public sealed class ThirtyTwoXDevice
     public int LiteralByteDisplacementTstRegisterPollFastPathHits { get; private set; }
     public int ByteDisplacementZeroWaitFastPathAttempts { get; private set; }
     public int ByteDisplacementZeroWaitFastPathHits { get; private set; }
+    public int TwoStageWordZeroPollRingFastPathAttempts { get; private set; }
+    public int TwoStageWordZeroPollRingFastPathHits { get; private set; }
+    public int StableWordPairPollFastPathAttempts { get; private set; }
+    public int StableWordPairPollFastPathHits { get; private set; }
     public long Sh2RunCycleCalls { get; private set; }
     public long Sh2RunCycleBudgetTotal { get; private set; }
     public int Sh2RunCycleBudgetMin { get; private set; }
@@ -1217,10 +1221,18 @@ public sealed class ThirtyTwoXDevice
             }
 
             if ((nextOpcode & 0xF00F) == 0x6001 &&
-                cpu.TryFastForwardWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
+                cpu.TryFastForwardWordCmpEqBtPollLoop(Math.Min(Math.Max(cycleBudget, 512), 4096), out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xF00F) == 0x6001) ||
+                    ((nextOpcode & 0xF00F) == 0x3000) ||
+                    ((nextOpcode & 0xFF00) == 0x8900)) &&
+                TryFastForwardStableWordPairPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
                 return fastCycles;
             }
 
@@ -1329,11 +1341,17 @@ public sealed class ThirtyTwoXDevice
             }
 
             if ((nextOpcode & 0xFF00) == 0x8900 &&
-                cpu.TryFastForwardTwoStageWordZeroPollRing(cycleBudget, out fastCycles))
+                IsLikelyTwoStageWordZeroPollRing(cpuIndex, cpu.PC, nextOpcode))
             {
-                RecordSh2FastPath(fastCycles);
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
-                return fastCycles;
+                TwoStageWordZeroPollRingFastPathAttempts++;
+                int twoStageBudget = Math.Max(cycleBudget, 512);
+                if (cpu.TryFastForwardTwoStageWordZeroPollRing(twoStageBudget, out fastCycles))
+                {
+                    TwoStageWordZeroPollRingFastPathHits++;
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
             }
 
         }
@@ -1443,6 +1461,47 @@ public sealed class ThirtyTwoXDevice
         return (opcode & 0xFF00) >= 0x8400 && (opcode & 0xFF00) <= 0x84F0;
     }
 
+    private bool IsLikelyTwoStageWordZeroPollRing(int cpuIndex, uint branchPc, ushort opcode)
+    {
+        if ((opcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)opcode;
+        uint setupEntryPc = branchPc + 4 + (uint)(displacement * 2);
+        if (!TryPeekSh2Word(setupEntryPc, cpuIndex, out ushort braToSetupOpcode) ||
+            !TryPeekSh2Word(setupEntryPc + 2, cpuIndex, out ushort firstDelaySlot) ||
+            (braToSetupOpcode & 0xF000) != 0xA000 ||
+            firstDelaySlot != 0x0009)
+        {
+            return false;
+        }
+
+        int setupDisplacement = SignExtend12(braToSetupOpcode & 0x0FFF);
+        uint setupPc = setupEntryPc + 4 + (uint)(setupDisplacement * 2);
+        return TryPeekSh2Word(setupPc, cpuIndex, out ushort firstLiteralOpcode) &&
+            TryPeekSh2Word(setupPc + 2, cpuIndex, out ushort firstLoadOpcode) &&
+            TryPeekSh2Word(setupPc + 4, cpuIndex, out ushort secondLoadOpcode) &&
+            TryPeekSh2Word(setupPc + 6, cpuIndex, out ushort compareOpcode) &&
+            TryPeekSh2Word(setupPc + 8, cpuIndex, out ushort bfOpcode) &&
+            TryPeekSh2Word(setupPc + 10, cpuIndex, out ushort braToPollOpcode) &&
+            TryPeekSh2Word(setupPc + 12, cpuIndex, out ushort secondDelaySlot) &&
+            (firstLiteralOpcode & 0xF000) == 0xD000 &&
+            (firstLoadOpcode & 0xF00F) == 0x6001 &&
+            (secondLoadOpcode & 0xF00F) == 0x8001 &&
+            (compareOpcode & 0xF00F) == 0x3000 &&
+            (bfOpcode & 0xFF00) == 0x8B00 &&
+            (braToPollOpcode & 0xF000) == 0xA000 &&
+            secondDelaySlot == 0x0009;
+    }
+
+    private static int SignExtend12(int value)
+    {
+        value &= 0x0FFF;
+        return (value & 0x0800) != 0 ? value | unchecked((int)0xFFFFF000) : value;
+    }
+
     private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         SdramFlagTaskletDispatcherFastPathAttempts++;
@@ -1494,6 +1553,21 @@ public sealed class ThirtyTwoXDevice
         }
 
         GbrBytePairInterruptIdleFastPathHits++;
+        RecordSh2FastPath(cycles);
+        AdvanceSh2InternalTimers(cpuIndex, cycles);
+        return true;
+    }
+
+    private bool TryFastForwardStableWordPairPoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        StableWordPairPollFastPathAttempts++;
+        int stablePollBudget = Math.Min(Math.Max(cycleBudget, 512), 4096);
+        if (!cpu.TryFastForwardStableWordPairCmpEqBtPollLoop(stablePollBudget, out cycles))
+        {
+            return false;
+        }
+
+        StableWordPairPollFastPathHits++;
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -3071,12 +3145,6 @@ public sealed class ThirtyTwoXDevice
             return true;
         }
 
-        if (address >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
-        {
-            value = ReadCartridgeByte(address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
-            return true;
-        }
-
         if (address is >= ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart and < ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + 0x80)
         {
             value = PeekSh2SystemRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart), cpuIndex);
@@ -3112,6 +3180,12 @@ public sealed class ThirtyTwoXDevice
         if (IsSh2InternalRegisterAddress(address))
         {
             value = 0x00;
+            return true;
+        }
+
+        if (address >= ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
+        {
+            value = ReadCartridgeByte(address - ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
             return true;
         }
 

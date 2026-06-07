@@ -29,6 +29,7 @@ Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovL
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
@@ -2310,6 +2311,32 @@ void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardWordCmpEqBtPollLoop(300, out _), "non-matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_2816;
+    const uint FlagAddress = 0x2603_2B90;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6211); // MOV.W @R1,R2
+    bus.WriteInstructionWord(LoopPc + 2, 0x3200); // CMP/EQ R0,R2
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    bus.WriteWord(FlagAddress, 0x0010);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 4);
+    cpu.R[0] = 0x0000_0010;
+    cpu.R[1] = FlagAddress;
+    cpu.R[2] = 0x0000_0010;
+    AssertTrue(cpu.TryFastForwardStableWordPairCmpEqBtPollLoop(512, out int cycles), "stable word pair CMP/EQ/BT poll should fast-forward from branch");
+    AssertEqual(512, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_0010u, cpu.R[0]);
+    AssertEqual(0x0000_0010u, cpu.R[2]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteWord(FlagAddress, 0x0011);
+    AssertTrue(!cpu.TryFastForwardStableWordPairCmpEqBtPollLoop(512, out _), "changed word pair value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()
