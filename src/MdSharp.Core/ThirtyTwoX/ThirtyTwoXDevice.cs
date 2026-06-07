@@ -31,6 +31,9 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2WatchdogResetControlAddress = 0xFFFF_FE83;
     private const uint Sh2WatchdogVectorAddress = 0xFFFF_FEE4;
     private const uint Sh2InterruptPriorityRegisterAHighAddress = 0xFFFF_FEE3;
+    private const uint Sh2InterruptPriorityRegisterBAddress = 0xFFFF_FE60;
+    private const uint Sh2FrtVectorRegisterCAddress = 0xFFFF_FE66;
+    private const uint Sh2FrtVectorRegisterDAddress = 0xFFFF_FE68;
     private const uint Sh2CacheControlRegisterAddress = 0xFFFF_FE92;
     private const uint Sh2DmaRegisterStart = 0xFFFF_FF80;
     private const uint Sh2DmaRegisterEnd = Sh2DmaRegisterStart + Sh2DmaRegisterBytes;
@@ -104,7 +107,9 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2VerticalInterruptVector = 70;
     private const int Sh2VresInterruptVector = 71;
     private const int Sh2FrtInputCaptureInterruptVector = 64;
-    private const int Sh2FrtInputCaptureInterruptLevel = 15;
+    private const int Sh2FrtOutputCompareInterruptVector = 65;
+    private const int Sh2FrtOverflowInterruptVector = 66;
+    private const int Sh2FrtDefaultInterruptLevel = 15;
     private const int Sh2SystemRegisterWaitCycles = 1;
     private const int Sh2VdpRegisterWaitCycles = 5;
     private const int Sh2PaletteWaitCycles = 5;
@@ -130,11 +135,13 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2CommunicationSyncCycleBudget = 64;
     private const byte Sh2FrtTierInputCaptureEnable = 0x80;
     private const byte Sh2FrtTierOutputCompareAEnable = 0x08;
+    private const byte Sh2FrtTierOutputCompareBEnable = 0x04;
     private const byte Sh2FrtTierOverflowEnable = 0x02;
     private const byte Sh2FrtFtcsrInputCaptureFlag = 0x80;
     private const byte Sh2FrtFtcsrOutputCompareAFlag = 0x08;
+    private const byte Sh2FrtFtcsrOutputCompareBFlag = 0x04;
     private const byte Sh2FrtFtcsrOverflowFlag = 0x02;
-    private const byte Sh2FrtFtcsrWritableMask = 0x8E;
+    private const byte Sh2FrtFtcsrWritableMask = 0x8E | Sh2FrtFtcsrOutputCompareBFlag;
     private const byte Sh2WatchdogWriteCounterKey = 0x5A;
     private const byte Sh2WatchdogWriteControlKey = 0xA5;
     private const byte Sh2WatchdogControlInitial = 0x18;
@@ -223,6 +230,7 @@ public sealed class ThirtyTwoXDevice
     private readonly long[] _sh2FrtBaseCycles = new long[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly ushort[] _sh2FrtBaseCounters = new ushort[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly ushort[] _sh2FrtLastCounters = new ushort[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly ushort[] _sh2FrtOutputCompareB = new ushort[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly int[] _sh2WaitCycles = new int[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Dictionary<uint, byte[]>[] _sh2LowCartridgeCacheLines =
     [
@@ -821,6 +829,13 @@ public sealed class ThirtyTwoXDevice
                 : cycleBudget;
             if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0xA000) &&
                 cpu.TryFastForwardBraSelfNopIdleLoop(braIdleBudget, out fastCycles))
+            {
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0x7000 || (nextOpcode & 0xF000) == 0xA000) &&
+                cpu.TryFastForwardAddBraNopDelayLoop(cycleBudget, out fastCycles))
             {
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
@@ -2362,6 +2377,7 @@ public sealed class ThirtyTwoXDevice
             (long[])_sh2FrtBaseCycles.Clone(),
             (ushort[])_sh2FrtBaseCounters.Clone(),
             (ushort[])_sh2FrtLastCounters.Clone(),
+            (ushort[])_sh2FrtOutputCompareB.Clone(),
             (byte[])_sh2CacheDataArrays[0].Clone(),
             (byte[])_sh2CacheDataArrays[1].Clone(),
             (byte[])_sh2CacheDataValid[0].Clone(),
@@ -2478,6 +2494,8 @@ public sealed class ThirtyTwoXDevice
         Array.Copy(state.FrtBaseCycles, _sh2FrtBaseCycles, Math.Min(_sh2FrtBaseCycles.Length, state.FrtBaseCycles.Length));
         Array.Copy(state.FrtBaseCounters, _sh2FrtBaseCounters, Math.Min(_sh2FrtBaseCounters.Length, state.FrtBaseCounters.Length));
         Array.Copy(state.FrtLastCounters, _sh2FrtLastCounters, Math.Min(_sh2FrtLastCounters.Length, state.FrtLastCounters.Length));
+        Array.Fill(_sh2FrtOutputCompareB, (ushort)0xFFFF);
+        Array.Copy(state.FrtOutputCompareB, _sh2FrtOutputCompareB, Math.Min(_sh2FrtOutputCompareB.Length, state.FrtOutputCompareB.Length));
         CopyStateArray(state.MasterCacheDataArray, _sh2CacheDataArrays[0]);
         CopyStateArray(state.SlaveCacheDataArray, _sh2CacheDataArrays[1]);
         CopyStateArray(state.MasterCacheDataValid, _sh2CacheDataValid[0]);
@@ -5543,7 +5561,7 @@ public sealed class ThirtyTwoXDevice
         if ((tier & Sh2FrtTierInputCaptureEnable) != 0)
         {
             Sh2Cpu cpu = index == 0 ? MasterSh2 : SlaveSh2;
-            cpu.RequestInterrupt(Sh2FrtInputCaptureInterruptLevel, Sh2FrtInputCaptureInterruptVector);
+            RequestSh2FrtInterrupt(cpu, index, GetSh2FrtInputCaptureInterruptVector(index));
         }
     }
 
@@ -5747,6 +5765,15 @@ public sealed class ThirtyTwoXDevice
             return value;
         }
 
+        if (address is >= Sh2FrtOutputCompareRegisterStart and < Sh2FrtOutputCompareRegisterStart + 2 &&
+            IsSh2FrtOutputCompareBSelected(cpuIndex))
+        {
+            ushort ocrb = _sh2FrtOutputCompareB[cpuIndex & 1];
+            value = (address & 1) == 0 ? (byte)(ocrb >> 8) : (byte)ocrb;
+            TraceSh2MemoryAccess(cpuIndex, "RP8", address, value);
+            return value;
+        }
+
         value = _sh2PeripheralRegisters[cpuIndex & 1][(int)(address - Sh2PeripheralRegisterStart)];
         TraceSh2MemoryAccess(cpuIndex, "RP8", address, value);
         return value;
@@ -5820,6 +5847,14 @@ public sealed class ThirtyTwoXDevice
         if (address is >= Sh2FreeRunningCounterStart and < Sh2FreeRunningCounterStart + 2)
         {
             WriteSh2FreeRunningCounterByte(address, value, cpuIndex);
+            TraceSh2MemoryAccess(cpuIndex, "WP8", address, value);
+            return;
+        }
+
+        if (address is >= Sh2FrtOutputCompareRegisterStart and < Sh2FrtOutputCompareRegisterStart + 2 &&
+            IsSh2FrtOutputCompareBSelected(cpuIndex))
+        {
+            WriteSh2FrtOutputCompareBByte(address, value, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "WP8", address, value);
             return;
         }
@@ -5963,6 +5998,39 @@ public sealed class ThirtyTwoXDevice
         return vector & 0x7F;
     }
 
+    private int GetSh2FrtInterruptPriority(int cpuIndex)
+    {
+        byte iprbHigh = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2InterruptPriorityRegisterBAddress - Sh2PeripheralRegisterStart)];
+        int priority = iprbHigh & 0x0F;
+        return priority == 0 ? Sh2FrtDefaultInterruptLevel : priority;
+    }
+
+    private int GetSh2FrtInputCaptureInterruptVector(int cpuIndex)
+    {
+        byte vcrcHigh = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2FrtVectorRegisterCAddress - Sh2PeripheralRegisterStart)];
+        int vector = vcrcHigh & 0x7F;
+        return vector == 0 ? Sh2FrtInputCaptureInterruptVector : vector;
+    }
+
+    private int GetSh2FrtOutputCompareInterruptVector(int cpuIndex)
+    {
+        byte vcrcLow = _sh2PeripheralRegisters[cpuIndex & 1][(int)((Sh2FrtVectorRegisterCAddress + 1) - Sh2PeripheralRegisterStart)];
+        int vector = vcrcLow & 0x7F;
+        return vector == 0 ? Sh2FrtOutputCompareInterruptVector : vector;
+    }
+
+    private int GetSh2FrtOverflowInterruptVector(int cpuIndex)
+    {
+        byte vcrdHigh = _sh2PeripheralRegisters[cpuIndex & 1][(int)(Sh2FrtVectorRegisterDAddress - Sh2PeripheralRegisterStart)];
+        int vector = vcrdHigh & 0x7F;
+        return vector == 0 ? Sh2FrtOverflowInterruptVector : vector;
+    }
+
+    private void RequestSh2FrtInterrupt(Sh2Cpu cpu, int cpuIndex, int vector)
+    {
+        cpu.RequestInterrupt(GetSh2FrtInterruptPriority(cpuIndex), vector);
+    }
+
     private void WriteSh2FreeRunningCounterByte(uint address, byte value, int cpuIndex)
     {
         int index = cpuIndex & 1;
@@ -5971,6 +6039,21 @@ public sealed class ThirtyTwoXDevice
             ? (ushort)((current & 0x00FF) | (value << 8))
             : (ushort)((current & 0xFF00) | value);
         SetSh2FreeRunningCounter(index, next);
+    }
+
+    private void WriteSh2FrtOutputCompareBByte(uint address, byte value, int cpuIndex)
+    {
+        int index = cpuIndex & 1;
+        ushort current = _sh2FrtOutputCompareB[index];
+        _sh2FrtOutputCompareB[index] = (address & 1) == 0
+            ? (ushort)((current & 0x00FF) | (value << 8))
+            : (ushort)((current & 0xFF00) | value);
+    }
+
+    private bool IsSh2FrtOutputCompareBSelected(int cpuIndex)
+    {
+        byte tocr = _sh2PeripheralRegisters[cpuIndex & 1][(int)((Sh2FrtRegisterStart + 7) - Sh2PeripheralRegisterStart)];
+        return (tocr & 0x10) != 0;
     }
 
     private void LatchSh2FreeRunningCounter(int cpuIndex)
@@ -6023,9 +6106,15 @@ public sealed class ThirtyTwoXDevice
         int ftcsrIndex = (int)(Sh2FrtControlStatusRegisterAddress - Sh2PeripheralRegisterStart);
         byte flags = 0;
         ushort ocra = ReadBigEndianWord(registers, (int)(Sh2FrtOutputCompareRegisterStart - Sh2PeripheralRegisterStart));
+        ushort ocrb = _sh2FrtOutputCompareB[index];
         if (CounterRangeIncludes(previous, current, ocra))
         {
             flags |= Sh2FrtFtcsrOutputCompareAFlag;
+        }
+
+        if (CounterRangeIncludes(previous, current, ocrb))
+        {
+            flags |= Sh2FrtFtcsrOutputCompareBFlag;
         }
 
         if (current < previous)
@@ -6043,12 +6132,17 @@ public sealed class ThirtyTwoXDevice
         Sh2Cpu cpu = index == 0 ? MasterSh2 : SlaveSh2;
         if ((flags & Sh2FrtFtcsrOutputCompareAFlag) != 0 && (tier & Sh2FrtTierOutputCompareAEnable) != 0)
         {
-            cpu.RequestInterrupt(Sh2FrtInputCaptureInterruptLevel, Sh2FrtInputCaptureInterruptVector);
+            RequestSh2FrtInterrupt(cpu, index, GetSh2FrtOutputCompareInterruptVector(index));
+        }
+
+        if ((flags & Sh2FrtFtcsrOutputCompareBFlag) != 0 && (tier & Sh2FrtTierOutputCompareBEnable) != 0)
+        {
+            RequestSh2FrtInterrupt(cpu, index, GetSh2FrtOutputCompareInterruptVector(index));
         }
 
         if ((flags & Sh2FrtFtcsrOverflowFlag) != 0 && (tier & Sh2FrtTierOverflowEnable) != 0)
         {
-            cpu.RequestInterrupt(Sh2FrtInputCaptureInterruptLevel, Sh2FrtInputCaptureInterruptVector);
+            RequestSh2FrtInterrupt(cpu, index, GetSh2FrtOverflowInterruptVector(index));
         }
     }
 
@@ -6106,6 +6200,7 @@ public sealed class ThirtyTwoXDevice
             registers[(int)((Sh2FrtRegisterStart + 4) - Sh2PeripheralRegisterStart)] = 0xFF;
             registers[(int)((Sh2FrtRegisterStart + 5) - Sh2PeripheralRegisterStart)] = 0xFF;
             registers[(int)((Sh2FrtRegisterStart + 7) - Sh2PeripheralRegisterStart)] = 0xE0;
+            _sh2FrtOutputCompareB[cpu] = 0xFFFF;
             registers[(int)(Sh2CacheControlRegisterAddress - Sh2PeripheralRegisterStart)] = 0x01;
             registers[(int)(Sh2WatchdogRegisterStart - Sh2PeripheralRegisterStart)] = Sh2WatchdogControlInitial;
             registers[(int)(Sh2WatchdogCounterAddress - Sh2PeripheralRegisterStart)] = 0x00;
@@ -7388,6 +7483,7 @@ public sealed class ThirtyTwoXDevice
         long[] FrtBaseCycles,
         ushort[] FrtBaseCounters,
         ushort[] FrtLastCounters,
+        ushort[] FrtOutputCompareB,
         byte[] MasterCacheDataArray,
         byte[] SlaveCacheDataArray,
         byte[] MasterCacheDataValid,

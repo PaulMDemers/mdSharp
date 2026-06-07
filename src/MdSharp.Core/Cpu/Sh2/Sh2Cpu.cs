@@ -189,6 +189,45 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardAddBraNopDelayLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 4 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryResolveAddBraNopDelayLoop(peekBus, ref loopPc, out ushort addOpcode, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        const int CyclesPerIteration = 4;
+        const int MaxBurstCycles = 4096;
+        int budget = Math.Min(maxCycles, MaxBurstCycles);
+        int iterations = budget / CyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        int register = (addOpcode >> 8) & 0x0F;
+        int immediate = (sbyte)(addOpcode & 0xFF);
+        R[register] = unchecked(R[register] + (uint)(immediate * iterations));
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 2;
+        PC = loopPc;
+        return true;
+    }
+
     public bool TryFastForwardDtBfLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -6598,6 +6637,39 @@ public sealed class Sh2Cpu
     private static uint BranchByteTarget(uint branchPc, ushort branchOpcode)
     {
         return branchPc + 4 + (uint)(((sbyte)branchOpcode) * 2);
+    }
+
+    private static bool TryResolveAddBraNopDelayLoop(ISh2PeekBus peekBus, ref uint loopPc, out ushort addOpcode, out ushort branchOpcode)
+    {
+        addOpcode = 0;
+        branchOpcode = 0;
+
+        for (int offset = 0; offset >= -4; offset -= 2)
+        {
+            if (offset < 0 && loopPc < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(loopPc + (uint)offset);
+            if (!peekBus.TryPeekWord(candidate, out ushort candidateAddOpcode) ||
+                (candidateAddOpcode & 0xF000) != 0x7000 ||
+                !peekBus.TryPeekWord(candidate + 2, out ushort candidateBranchOpcode) ||
+                (candidateBranchOpcode & 0xF000) != 0xA000 ||
+                BranchWordTarget(candidate + 2, candidateBranchOpcode) != candidate ||
+                !peekBus.TryPeekWord(candidate + 4, out ushort delaySlotOpcode) ||
+                delaySlotOpcode != 0x0009)
+            {
+                continue;
+            }
+
+            loopPc = candidate;
+            addOpcode = candidateAddOpcode;
+            branchOpcode = candidateBranchOpcode;
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryFindThreeWordPollLoop(

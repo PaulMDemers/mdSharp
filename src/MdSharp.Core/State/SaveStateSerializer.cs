@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 65;
+    private const int Version = 66;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -342,6 +342,7 @@ public static class SaveStateSerializer
         WriteArray(writer, state.FrtBaseCycles);
         WriteArray(writer, state.FrtBaseCounters);
         WriteArray(writer, state.FrtLastCounters);
+        WriteArray(writer, state.FrtOutputCompareB);
         WriteArray(writer, state.MasterCacheDataArray);
         WriteArray(writer, state.SlaveCacheDataArray);
         WriteArray(writer, state.MasterCacheDataValid);
@@ -445,6 +446,7 @@ public static class SaveStateSerializer
         long[] frtBaseCycles = version >= 63 ? ReadLongArray(reader) : new long[2];
         ushort[] frtBaseCounters = version >= 63 ? ReadUShortArray(reader) : new ushort[2];
         ushort[] frtLastCounters = version >= 63 ? ReadUShortArray(reader) : new ushort[2];
+        ushort[] frtOutputCompareB = version >= 66 ? ReadUShortArray(reader) : [0xFFFF, 0xFFFF];
         byte[] masterCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
         byte[] slaveCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
         byte[] masterCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(masterCacheDataArray);
@@ -632,6 +634,7 @@ public static class SaveStateSerializer
             frtBaseCycles,
             frtBaseCounters,
             frtLastCounters,
+            frtOutputCompareB,
             masterCacheDataArray,
             slaveCacheDataArray,
             masterCacheDataValid,

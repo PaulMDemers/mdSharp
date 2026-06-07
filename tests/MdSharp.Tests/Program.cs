@@ -20,6 +20,7 @@ Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
 Run("32X SH-2 FRT counter writes and flags", ThirtyTwoXSh2FrtCounterWritesAndFlags);
 Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticCode);
 Run("32X SH-2 BRA self idle loop fast-forward", ThirtyTwoXSh2BraSelfIdleLoopFastForward);
+Run("32X SH-2 ADD BRA NOP delay loop fast-forward", ThirtyTwoXSh2AddBraNopDelayLoopFastForward);
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
@@ -1598,6 +1599,28 @@ void ThirtyTwoXSh2FrtCounterWritesAndFlags()
     byte ftcsr = ReadSh2ByteForTest(flagsDevice, 0xFFFF_FE11);
     AssertTrue((ftcsr & 0x08) != 0, "FRT should set OCFA when FRC crosses OCRA");
     AssertTrue((ftcsr & 0x02) != 0, "FRT should set OVF when FRC wraps");
+
+    ThirtyTwoXDevice compareBDevice = new(rom);
+    compareBDevice.ResetSh2(0, 0);
+    compareBDevice.RestoreState(compareBDevice.CaptureState() with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+    });
+
+    WriteSh2ByteForTest(compareBDevice, 0xFFFF_FE60, 0x07); // FRT priority in IPRB.
+    WriteSh2ByteForTest(compareBDevice, 0xFFFF_FE67, 0x22); // FRT output-compare vector in VCRC.
+    WriteSh2ByteForTest(compareBDevice, 0xFFFF_FE17, 0xF0); // Select OCRB.
+    WriteSh2WordForTest(compareBDevice, 0xFFFF_FE14, 0x0002);
+    WriteSh2ByteForTest(compareBDevice, 0xFFFF_FE10, 0x05); // Enable OCIB.
+    WriteSh2WordForTest(compareBDevice, 0xFFFF_FE12, 0x0000);
+    compareBDevice.RunSh2Cycles(32);
+
+    byte compareBFtcsr = ReadSh2ByteForTest(compareBDevice, 0xFFFF_FE11);
+    AssertTrue((compareBFtcsr & 0x04) != 0, "FRT should set OCFB when FRC crosses OCRB");
+    AssertEqual(7, compareBDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(0x22, compareBDevice.MasterSh2.PendingInterruptVectorNumber);
 }
 
 void ThirtyTwoXSh2CoreExecutesSyntheticCode()
@@ -1981,6 +2004,59 @@ void ThirtyTwoXSh2BraSelfIdleLoopFastForward()
     AssertTrue(nopBranch.TryFastForwardBraSelfNopIdleLoop(101, out int branchEntryCycles), "NOP/BRA/NOP idle loop should fast-forward from the branch");
     AssertEqual(101, branchEntryCycles);
     AssertEqual(NopBranchLoopPc, nopBranch.PC);
+}
+
+void ThirtyTwoXSh2AddBraNopDelayLoopFastForward()
+{
+    const uint LoopPc = 0x0600_034E;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x7001); // ADD #1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0xAFFD); // BRA back to ADD
+    bus.WriteInstructionWord(LoopPc + 4, 0x0009); // NOP delay slot
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardAddBraNopDelayLoop(401, out int cycles), "ADD/BRA/NOP delay loop should fast-forward from the ADD");
+    AssertEqual(400, cycles);
+    AssertEqual(100u, cpu.R[0]);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(400L, cpu.Cycles);
+    AssertEqual((ushort)0xAFFD, cpu.LastOpcode);
+    AssertEqual(LoopPc + 2, cpu.LastOpcodePc);
+
+    cpu.Reset(LoopPc + 2);
+    cpu.R[0] = 5;
+    AssertTrue(cpu.TryFastForwardAddBraNopDelayLoop(40, out int branchEntryCycles), "ADD/BRA/NOP delay loop should fast-forward from the branch");
+    AssertEqual(40, branchEntryCycles);
+    AssertEqual(15u, cpu.R[0]);
+    AssertEqual(LoopPc, cpu.PC);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.R[0] = 10;
+    AssertTrue(cpu.TryFastForwardAddBraNopDelayLoop(40, out int delayEntryCycles), "ADD/BRA/NOP delay loop should fast-forward from the delay slot");
+    AssertEqual(40, delayEntryCycles);
+    AssertEqual(20u, cpu.R[0]);
+    AssertEqual(LoopPc, cpu.PC);
+
+    const uint DecrementLoopPc = 0x0600_0410;
+    SyntheticSh2Bus decrementBus = new();
+    decrementBus.WriteInstructionWord(DecrementLoopPc + 0, 0x72FF); // ADD #-1,R2
+    decrementBus.WriteInstructionWord(DecrementLoopPc + 2, 0xAFFD);
+    decrementBus.WriteInstructionWord(DecrementLoopPc + 4, 0x0009);
+    Sh2Cpu decrement = new(decrementBus, "test");
+    decrement.Reset(DecrementLoopPc);
+    decrement.R[2] = 50;
+    AssertTrue(decrement.TryFastForwardAddBraNopDelayLoop(80, out int decrementCycles), "negative immediate ADD/BRA/NOP delay loop should fast-forward");
+    AssertEqual(80, decrementCycles);
+    AssertEqual(30u, decrement.R[2]);
+
+    SyntheticSh2Bus nonIdleBus = new();
+    nonIdleBus.WriteInstructionWord(LoopPc + 0, 0x7001);
+    nonIdleBus.WriteInstructionWord(LoopPc + 2, 0xAFFD);
+    nonIdleBus.WriteInstructionWord(LoopPc + 4, 0x000B); // RTS, not NOP.
+    Sh2Cpu nonIdle = new(nonIdleBus, "test");
+    nonIdle.Reset(LoopPc);
+    AssertTrue(!nonIdle.TryFastForwardAddBraNopDelayLoop(40, out _), "non-NOP delay slot should not fast-forward");
 }
 
 void ThirtyTwoXSh2DtBfDelayLoopFastForward()
