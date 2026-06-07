@@ -981,6 +981,20 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (nextOpcode == 0x64A3 &&
+                cpu.TryFastForwardWordHighBitMaskTransformOuterLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2ByteWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (nextOpcode == 0x6033 &&
                 cpu.TryFastForwardWordHighBitMaskTransformLoop(
                     cycleBudget,
