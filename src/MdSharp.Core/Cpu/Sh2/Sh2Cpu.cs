@@ -5122,6 +5122,61 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardLongRegisterCmpEqBtPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6002 ||
+            (compareOpcode & 0xF00F) != 0x3000 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int compareLeft = (compareOpcode >> 8) & 0x0F;
+        int compareRight = (compareOpcode >> 4) & 0x0F;
+        int compareRegister;
+        if (compareLeft == loadDestination)
+        {
+            compareRegister = compareRight;
+        }
+        else if (compareRight == loadDestination)
+        {
+            compareRegister = compareLeft;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!TryPeekLong(peekBus, R[loadSource], out uint longValue) ||
+            longValue != R[compareRegister])
+        {
+            return false;
+        }
+
+        R[loadDestination] = longValue;
+        SetT(true);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardWordCmpEqBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;

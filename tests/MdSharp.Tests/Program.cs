@@ -37,6 +37,7 @@ Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovL
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
+Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
@@ -2913,6 +2914,38 @@ void ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(FlagAddress, 0x0011);
     AssertTrue(!cpu.TryFastForwardStableWordPairCmpEqBtPollLoop(512, out _), "changed word pair value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0D8E;
+    const uint FlagAddress = 0x0600_8234;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6202); // MOV.L @R0,R2
+    bus.WriteInstructionWord(LoopPc + 2, 0x3120); // CMP/EQ R2,R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    bus.WriteLong(FlagAddress, 0x1234_5678);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 4);
+    cpu.R[0] = FlagAddress;
+    cpu.R[1] = 0x1234_5678;
+    cpu.R[2] = 0x1234_5678;
+    AssertTrue(cpu.TryFastForwardLongRegisterCmpEqBtPollLoop(512, out int cycles), "MOV.L/CMP/EQ/BT long poll should fast-forward from branch");
+    AssertEqual(512, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x1234_5678u, cpu.R[1]);
+    AssertEqual(0x1234_5678u, cpu.R[2]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    Sh2Cpu comparePcCpu = new(bus, "test");
+    comparePcCpu.Reset(LoopPc + 2);
+    comparePcCpu.R[0] = FlagAddress;
+    comparePcCpu.R[1] = 0x1234_5678;
+    AssertTrue(comparePcCpu.TryFastForwardLongRegisterCmpEqBtPollLoop(512, out _), "MOV.L/CMP/EQ/BT long poll should fast-forward from compare");
+
+    bus.WriteLong(FlagAddress, 0x1234_5679);
+    AssertTrue(!cpu.TryFastForwardLongRegisterCmpEqBtPollLoop(512, out _), "changed long value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()

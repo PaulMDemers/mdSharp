@@ -1317,6 +1317,16 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((((nextOpcode & 0xF00F) == 0x6002) ||
+                    ((nextOpcode & 0xF00F) == 0x3000) ||
+                    ((nextOpcode & 0xFF00) == 0x8900)) &&
+                cpu.TryFastForwardLongRegisterCmpEqBtPollLoop(Math.Min(Math.Max(cycleBudget, 512), 4096), out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((((nextOpcode & 0xFF00) == 0xC600) ||
                     ((nextOpcode & 0xF00F) == 0x6003) ||
                     ((nextOpcode & 0xF00F) == 0x2009) ||
