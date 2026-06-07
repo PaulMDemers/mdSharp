@@ -26,6 +26,7 @@ Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopF
 Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
+Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -2316,6 +2317,105 @@ void ThirtyTwoXSh2WordTableSearchLoopFastForward()
     AssertEqual(2u, partial.R[0]);
     AssertEqual(2u, partial.R[1]);
     AssertEqual(0u, partial.SR & 1);
+}
+
+void ThirtyTwoXSh2WordHighBitMaskTransformFastForward()
+{
+    const uint LoopPc = 0x0600_3000;
+    const uint WordTable = 0x0603_1000;
+    const uint ByteTable = 0x0603_2000;
+
+    static void WriteTransformRoutine(SyntheticSh2Bus bus, uint loopPc)
+    {
+        ushort[] opcodes =
+        [
+            0x6033, 0x303C, 0x068D, 0xD11C, 0x2169, 0x2118, 0x890A, 0x6173,
+            0x4711, 0x8900, 0x7107, 0x4121, 0x4121, 0x4121, 0x319C, 0x6210,
+            0x224B, 0x2120, 0x614C, 0x6413, 0x4401, 0x911F, 0x2619, 0x6033,
+            0x303C, 0x0865, 0x7301, 0x7501, 0xE107, 0x3517, 0x8BE0, 0x001B
+        ];
+
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(loopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteWord(loopPc + 0x6C, 0x7FFF);
+        bus.WriteLong(loopPc + 0x78, 0x0000_8000);
+    }
+
+    static void SeedTransformState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[3] = 0;
+        cpu.R[4] = 0x80;
+        cpu.R[5] = 0;
+        cpu.R[7] = 0;
+        cpu.R[8] = WordTable;
+        cpu.R[9] = ByteTable;
+    }
+
+    static void SeedTransformMemory(SyntheticSh2Bus bus)
+    {
+        ushort[] words = [0x8001, 0x0002, 0x8003, 0x0004, 0x8005, 0x8006, 0x0007, 0x8008];
+        for (uint i = 0; i < words.Length; i++)
+        {
+            bus.WriteWord(WordTable + (i * 2), words[i]);
+        }
+
+        bus.WriteByte(ByteTable, 0x02);
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteTransformRoutine(interpretedBus, LoopPc);
+    SeedTransformMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedTransformState(interpreted);
+    interpreted.Run(256);
+    AssertTrue(interpreted.Halted, "interpreter transform routine should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteTransformRoutine(fastBus, LoopPc);
+    SeedTransformMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedTransformState(fast);
+    AssertTrue(
+        fast.TryFastForwardWordHighBitMaskTransformLoop(512, fastBus.TryReadWord, fastBus.TryWriteWord, fastBus.TryReadByte, fastBus.TryWriteByte, out int cycles),
+        "word high-bit mask transform should fast-forward");
+    AssertEqual(248, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast transform routine should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 16; offset += 2)
+    {
+        AssertEqual(interpretedBus.ReadWord(WordTable + offset), fastBus.ReadWord(WordTable + offset));
+    }
+
+    AssertEqual(interpretedBus.ReadByte(ByteTable), fastBus.ReadByte(ByteTable));
+
+    SyntheticSh2Bus partialBus = new();
+    WriteTransformRoutine(partialBus, LoopPc);
+    SeedTransformMemory(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedTransformState(partial);
+    AssertTrue(
+        partial.TryFastForwardWordHighBitMaskTransformLoop(62, partialBus.TryReadWord, partialBus.TryWriteWord, partialBus.TryReadByte, partialBus.TryWriteByte, out int partialCycles),
+        "word high-bit mask transform should respect the cycle budget");
+    AssertEqual(62, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(2u, partial.R[3]);
+    AssertEqual(2u, partial.R[5]);
+    AssertEqual(0x20u, partial.R[4]);
+    AssertEqual((ushort)0x0001, partialBus.ReadWord(WordTable));
+    AssertEqual((ushort)0x0002, partialBus.ReadWord(WordTable + 2));
+    AssertEqual((byte)0x82, partialBus.ReadByte(ByteTable));
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
@@ -10586,6 +10686,8 @@ sealed class SyntheticSh2Bus : ISh2Bus, ISh2PeekBus
 
     public ushort? TryReadWord(uint address) => ReadWord(address);
 
+    public byte? TryReadByte(uint address) => ReadByte(address);
+
     public bool TryWriteWord(uint address, ushort value)
     {
         WriteWord(address, value);
@@ -10595,6 +10697,12 @@ sealed class SyntheticSh2Bus : ISh2Bus, ISh2PeekBus
     public bool TryWriteLong(uint address, uint value)
     {
         WriteLong(address, value);
+        return true;
+    }
+
+    public bool TryWriteByte(uint address, byte value)
+    {
+        WriteByte(address, value);
         return true;
     }
 }

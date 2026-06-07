@@ -244,6 +244,8 @@ public sealed class ThirtyTwoXDevice
     private readonly Func<uint, ushort, bool>[] _sh2WordWriters = new Func<uint, ushort, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, ushort?>[] _sh2FastCopyWordReaders = new Func<uint, ushort?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, ushort, bool>[] _sh2FastCopyWordWriters = new Func<uint, ushort, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly Func<uint, byte?>[] _sh2ByteReaders = new Func<uint, byte?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
+    private readonly Func<uint, byte, bool>[] _sh2ByteWriters = new Func<uint, byte, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, uint, bool>[] _sh2LongWriters = new Func<uint, uint, bool>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly Func<uint, uint?>[] _sh2LongReaders = new Func<uint, uint?>[ThirtyTwoXHardwareProfile.Sh2CpuCount];
     private readonly byte[] _sh2DmaRequestSelect = new byte[2];
@@ -362,6 +364,10 @@ public sealed class ThirtyTwoXDevice
         _sh2FastCopyWordReaders[1] = address => TryReadSh2WordForFastCopy(address, 1, out ushort value) ? value : null;
         _sh2FastCopyWordWriters[0] = (address, value) => TryWriteSh2WordForFastCopy(address, value, 0);
         _sh2FastCopyWordWriters[1] = (address, value) => TryWriteSh2WordForFastCopy(address, value, 1);
+        _sh2ByteReaders[0] = address => TryReadSh2ByteFast(address, 0, out byte value) ? value : null;
+        _sh2ByteReaders[1] = address => TryReadSh2ByteFast(address, 1, out byte value) ? value : null;
+        _sh2ByteWriters[0] = (address, value) => TryWriteSh2ByteFast(address, value, 0);
+        _sh2ByteWriters[1] = (address, value) => TryWriteSh2ByteFast(address, value, 1);
         _sh2LongWriters[0] = (address, value) => TryWriteSh2LongFast(address, value, 0);
         _sh2LongWriters[1] = (address, value) => TryWriteSh2LongFast(address, value, 1);
         _sh2LongReaders[0] = address => TryReadSh2LongNoAllocate(address, 0);
@@ -969,6 +975,20 @@ public sealed class ThirtyTwoXDevice
 
             if (nextOpcode == 0x613F &&
                 cpu.TryFastForwardWordTableSearchLoop(cycleBudget, _sh2WordReaders[cpuIndex], out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (nextOpcode == 0x6033 &&
+                cpu.TryFastForwardWordHighBitMaskTransformLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2ByteWriters[cpuIndex],
+                    out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -1724,6 +1744,30 @@ public sealed class ThirtyTwoXDevice
         }
 
         return true;
+    }
+
+    private bool TryReadSh2ByteFast(uint address, int cpuIndex, out byte value)
+    {
+        if (TryPeekSh2Byte(address, cpuIndex, out value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
+    }
+
+    private bool TryWriteSh2ByteFast(uint address, byte value, int cpuIndex)
+    {
+        if (TryMapSh2CachedSdramAddress(address, out _) ||
+            TryMapSh2SdramAddress(address, out _) ||
+            TryMapSh2CachedCartridgeAddress(address, out _, out _))
+        {
+            WriteSh2Byte(address, value, cpuIndex);
+            return true;
+        }
+
+        return false;
     }
 
     private bool IsSlaveInInterruptDispatcherIdle()

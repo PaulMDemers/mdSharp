@@ -980,6 +980,150 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardWordHighBitMaskTransformLoop(
+        int maxCycles,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        Func<uint, byte?> readByte,
+        Func<uint, byte, bool> writeByte,
+        out int cycles)
+    {
+        cycles = 0;
+        const int CyclesPerIteration = 31;
+        const int LoopBytes = 62;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        ReadOnlySpan<ushort> expected =
+        [
+            0x6033, 0x303C, 0x068D, 0xD11C, 0x2169, 0x2118, 0x890A, 0x6173,
+            0x4711, 0x8900, 0x7107, 0x4121, 0x4121, 0x4121, 0x319C, 0x6210,
+            0x224B, 0x2120, 0x614C, 0x6413, 0x4401, 0x911F, 0x2619, 0x6033,
+            0x303C, 0x0865, 0x7301, 0x7501, 0xE107, 0x3517, 0x8BE0
+        ];
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            if (!peekBus.TryPeekWord(loopPc + (uint)(i * 2), out ushort opcode) ||
+                opcode != expected[i])
+            {
+                return false;
+            }
+        }
+
+        if (!TryPeekPcRelativeLong(peekBus, loopPc + 6, displacement: 0x1C, out uint highBitMask) ||
+            highBitMask != 0x0000_8000 ||
+            !TryPeekPcRelativeWord(peekBus, loopPc + 42, displacement: 0x1F, out ushort clearHighBitMask) ||
+            clearHighBitMask != 0x7FFF)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        if (maxIterations == 0)
+        {
+            return false;
+        }
+
+        uint completed = 0;
+        bool exhausted = false;
+        while (completed < maxIterations)
+        {
+            if (SignedGreaterThan(R[5], 7))
+            {
+                exhausted = true;
+                break;
+            }
+
+            uint wordOffset = R[3] + R[3];
+            uint wordAddress = R[8] + wordOffset;
+            ushort? sourceWord = readWord(wordAddress);
+            if (sourceWord is null)
+            {
+                break;
+            }
+
+            R[0] = wordOffset;
+            R[6] = (uint)(short)sourceWord.Value;
+            R[1] = R[6] & 0x0000_8000u;
+            bool highBitSet = R[1] != 0;
+            SetT(!highBitSet);
+
+            if (highBitSet)
+            {
+                R[1] = R[7];
+                SetT((int)R[7] >= 0);
+                if (!IsTSet())
+                {
+                    R[1] += 7;
+                }
+
+                R[1] = (uint)((int)R[1] >> 3);
+                R[1] += R[9];
+                byte? maskByte = readByte(R[1]);
+                if (maskByte is null)
+                {
+                    break;
+                }
+
+                R[2] = (uint)(sbyte)maskByte.Value;
+                R[2] |= R[4];
+                if (!writeByte(R[1], (byte)R[2]))
+                {
+                    break;
+                }
+            }
+
+            R[1] = R[4] & 0xFF;
+            R[4] = R[1];
+            SetT((R[4] & 1) != 0);
+            R[4] >>= 1;
+            R[1] = 0x0000_7FFF;
+            R[6] &= R[1];
+            R[0] = R[3] + R[3];
+            if (!writeWord(R[8] + R[0], (ushort)R[6]))
+            {
+                break;
+            }
+
+            R[3]++;
+            R[5]++;
+            R[1] = 7;
+            SetT(SignedGreaterThan(R[5], R[1]));
+            completed++;
+            if (IsTSet())
+            {
+                exhausted = true;
+                break;
+            }
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8BE0;
+        LastOpcodePc = loopPc + 60;
+        PC = exhausted ? loopPc + LoopBytes : loopPc;
+        if (!exhausted)
+        {
+            SetT(false);
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;
@@ -7124,6 +7268,11 @@ public sealed class Sh2Cpu
         }
     }
 
+    private bool IsTSet()
+    {
+        return (SR & TBit) != 0;
+    }
+
     private bool MatchesRtsLdsPrReturn(ISh2PeekBus peekBus, uint rtsPc, out uint returnPc, out uint restoredPr)
     {
         returnPc = 0;
@@ -7159,6 +7308,18 @@ public sealed class Sh2Cpu
     {
         uint literalAddress = ((opcodePc + 4) & 0xFFFF_FFFCu) + (uint)((opcode & 0x00FF) * 4);
         return TryPeekLong(peekBus, literalAddress, out uint value) ? value : 0;
+    }
+
+    private static bool TryPeekPcRelativeLong(ISh2PeekBus peekBus, uint opcodePc, byte displacement, out uint value)
+    {
+        uint literalAddress = ((opcodePc + 4) & 0xFFFF_FFFCu) + (uint)(displacement * 4);
+        return TryPeekLong(peekBus, literalAddress, out value);
+    }
+
+    private static bool TryPeekPcRelativeWord(ISh2PeekBus peekBus, uint opcodePc, byte displacement, out ushort value)
+    {
+        uint literalAddress = opcodePc + 4 + (uint)(displacement * 2);
+        return peekBus.TryPeekWord(literalAddress, out value);
     }
 
     private static uint BranchByteTarget(uint branchPc, ushort branchOpcode)
