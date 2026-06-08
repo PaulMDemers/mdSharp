@@ -3245,6 +3245,12 @@ public sealed class ThirtyTwoXDevice
 
     internal uint ReadSh2Long(uint address, int cpuIndex)
     {
+        if (TryConsumeBootRomSixtyEightUpReadyLong(address, out uint bootRomSixtyEightUpReady))
+        {
+            TraceSh2MemoryAccess(cpuIndex, "R32", address, (ushort)bootRomSixtyEightUpReady);
+            return bootRomSixtyEightUpReady;
+        }
+
         if (IsSh2DivisionUnitRegisterAddress(address))
         {
             uint value = ReadSh2DivisionUnitLong(address, cpuIndex);
@@ -3797,6 +3803,11 @@ public sealed class ThirtyTwoXDevice
 
     internal void WriteSh2Long(uint address, uint value, int cpuIndex)
     {
+        if (TryAcknowledgeBootRomGOkLong(address, value, cpuIndex))
+        {
+            return;
+        }
+
         if (TrySignalSh2InputCapture(address, value, cpuIndex))
         {
             return;
@@ -4218,6 +4229,12 @@ public sealed class ThirtyTwoXDevice
     private bool TryReadBootRomCommunicationSignatureByte(ushort offset, out byte value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (TryRetireObservedPostStartSignatureOnHostRead(relative, 1))
+        {
+            value = 0;
+            return false;
+        }
+
         if ((_bootRomHandshakePending || _bootRomPostStartSignaturePending) &&
             relative is >= 0 and < 8 &&
             IsBootSignatureVisible(relative, 1))
@@ -4279,6 +4296,12 @@ public sealed class ThirtyTwoXDevice
     private bool TryReadBootRomCommunicationSignatureWord(ushort offset, out ushort value)
     {
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (TryRetireObservedPostStartSignatureOnHostRead(relative, 2))
+        {
+            value = 0;
+            return false;
+        }
+
         if ((_bootRomHandshakePending || _bootRomPostStartSignaturePending) &&
             relative is >= 0 and < 7 &&
             IsBootSignatureVisible(relative, 2))
@@ -4405,6 +4428,22 @@ public sealed class ThirtyTwoXDevice
         PublishBootRomChecksumAfterHostClear((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
     }
 
+    private bool TryRetireObservedPostStartSignatureOnHostRead(int relative, int bytes)
+    {
+        if (!_bootRomPostStartSignaturePending ||
+            !_bootRomPostStartSignatureHiddenFromSh2 ||
+            _bootRomPostStartSignatureReadMask != 0xFF ||
+            relative < 0 ||
+            relative + bytes > BootRomCommunicationSignature.Length ||
+            HasPostStartReadyToken(relative, bytes))
+        {
+            return false;
+        }
+
+        RetirePostStartSignatureAfterReadyTokenHostClear();
+        return true;
+    }
+
     private void RetireObservedPostStartSignatureOnHostWrite(ushort offset)
     {
         if (!_bootRomPostStartSignaturePending ||
@@ -4472,6 +4511,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomPostStartSignatureHiddenFromSh2 = false;
         _bootRomPostStartSignatureReadMask = 0;
         _bootRomPostStartHostClearProtectMask = 0;
+        ClearBootRomCommunicationSignature();
         ClearCommunicationStaleRange(0, 8);
     }
 
@@ -4689,12 +4729,20 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        WriteBigEndianWord(_systemRegisters, comm + 12, 0x475F);
         WriteBigEndianWord(_systemRegisters, comm + 14, 0x4F4B);
+        _m68kCommunicationStaleWordValid[6] = false;
         _m68kCommunicationStaleWordValid[7] = false;
+        _m68kCommunicationStaleValid[12] = false;
+        _m68kCommunicationStaleValid[13] = false;
         _m68kCommunicationStaleValid[14] = false;
         _m68kCommunicationStaleValid[15] = false;
+        _m68kCommunicationPendingHostBytes[12] = false;
+        _m68kCommunicationPendingHostBytes[13] = false;
         _m68kCommunicationPendingHostBytes[14] = false;
         _m68kCommunicationPendingHostBytes[15] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[12] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[13] = false;
         _m68kCommunicationDeferredSh2ClearBytes[14] = false;
         _m68kCommunicationDeferredSh2ClearBytes[15] = false;
         _bootRomSixtyEightUpPending = false;
@@ -4734,6 +4782,67 @@ public sealed class ThirtyTwoXDevice
         }
 
         return false;
+    }
+
+    private bool TryConsumeBootRomSixtyEightUpReadyLong(uint address, out uint value)
+    {
+        value = 0;
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (!_bootRomSixtyEightUpReadyHiddenFromSh2 ||
+            address != ThirtyTwoXHardwareProfile.Sh2SystemRegister((ushort)(comm + 12)) ||
+            _systemRegisters[comm + 12] != 0x47 ||
+            _systemRegisters[comm + 13] != 0x5F ||
+            _systemRegisters[comm + 14] != 0x4F ||
+            _systemRegisters[comm + 15] != 0x4B)
+        {
+            return false;
+        }
+
+        value = 0x475F_4F4B;
+        for (int i = 12; i < 16; i++)
+        {
+            _systemRegisters[comm + i] = 0;
+            _m68kCommunicationStaleValid[i] = false;
+            _m68kCommunicationPendingHostBytes[i] = false;
+            _m68kCommunicationDeferredSh2ClearBytes[i] = false;
+        }
+
+        _m68kCommunicationStaleWordValid[6] = false;
+        _m68kCommunicationStaleWordValid[7] = false;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
+        return true;
+    }
+
+    private bool TryAcknowledgeBootRomGOkLong(uint address, uint value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (value != 0 ||
+            address != ThirtyTwoXHardwareProfile.Sh2SystemRegister((ushort)(comm + 12)) ||
+            _systemRegisters[comm + 12] != 0x47 ||
+            _systemRegisters[comm + 13] != 0x5F ||
+            _systemRegisters[comm + 14] != 0x4F ||
+            _systemRegisters[comm + 15] != 0x4B)
+        {
+            return false;
+        }
+
+        string source = cpuIndex == 0 ? "MSH2" : "SSH2";
+        _sideEffectPreviousSystemRegisterWord = 0x475F;
+        for (int i = 12; i < 16; i++)
+        {
+            _systemRegisters[comm + i] = 0;
+            _m68kCommunicationStaleValid[i] = false;
+            _m68kCommunicationPendingHostBytes[i] = false;
+            _m68kCommunicationDeferredSh2ClearBytes[i] = false;
+            SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)(comm + i), 0));
+        }
+
+        _m68kCommunicationStaleWordValid[6] = false;
+        _m68kCommunicationStaleWordValid[7] = false;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
+        TraceSystemRegisterAccess(source, "W32", (ushort)(comm + 12), 0);
+        ApplySystemRegisterSideEffects((ushort)(comm + 12), allowAdapterControl: false);
+        return true;
     }
 
     private bool MatchesCommunicationRange(int relative, int bytes, ReadOnlySpan<byte> expected, int baseRelative)

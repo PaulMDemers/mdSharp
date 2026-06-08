@@ -580,10 +580,22 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x0000);
     sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0000);
+    AssertEqual((ushort)0x475F, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
     AssertEqual((ushort)0x4F4B, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual((ushort)0x475F, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
     AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual(0x475F_4F4Bu, ReadSh2LongForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, sixtyEightUpDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     sixtyEightUpDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0000);
     AssertEqual((ushort)0x0000, ReadSh2WordForTest(sixtyEightUpDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    ThirtyTwoXDevice directGOkDevice = new();
+    directGOkDevice.Reset();
+    directGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x475F);
+    directGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x4F4B);
+    WriteSh2LongForTest(directGOkDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0);
+    AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;
@@ -5078,7 +5090,7 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
     AssertEqual((ushort)0x535F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4));
     AssertEqual((ushort)0x4F4B, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6));
-    AssertEqual((ushort)0x4D5F, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     postStartClobberDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
     AssertEqual((ushort)0x0000, postStartClobberDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
@@ -11167,6 +11179,13 @@ static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address, int cpuI
     System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("ReadSh2Word helper was not found");
     return (ushort)method.Invoke(target, [address, cpuIndex])!;
+}
+
+static uint ReadSh2LongForTest(ThirtyTwoXDevice target, uint address, int cpuIndex = 0)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("ReadSh2Long helper was not found");
+    return (uint)method.Invoke(target, [address, cpuIndex])!;
 }
 
 static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value, int cpuIndex = 0)
