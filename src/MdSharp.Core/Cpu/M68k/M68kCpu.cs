@@ -242,6 +242,63 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardLongAbsoluteTstBneWaitLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 14;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        if (_bus.ReadWord(pc) != 0x4A79)
+        {
+            return false;
+        }
+
+        uint address = (_bus.ReadLong(pc + 2) & AddressMask);
+        if (!canFastForwardAddress(address))
+        {
+            return false;
+        }
+
+        ushort branch = _bus.ReadWord(pc + 6);
+        if ((branch & 0xFF00) != 0x6600)
+        {
+            return false;
+        }
+
+        sbyte displacement = unchecked((sbyte)(branch & 0x00FF));
+        if (displacement == 0 || NormalizePc(pc + 8 + (uint)displacement) != pc)
+        {
+            return false;
+        }
+
+        uint value = _bus.ReadLong(address);
+        if (value == 0)
+        {
+            return false;
+        }
+
+        SR = (ushort)(SR & ~0x000F);
+        if ((value & 0x8000_0000u) != 0)
+        {
+            SR |= 0x0008;
+        }
+
+        int iterations = cycleBudget / CyclesPerIteration;
+        cycles = iterations * CyclesPerIteration;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
     public void ClearAllocationProfile()
     {
         EnsureAllocationProfile();

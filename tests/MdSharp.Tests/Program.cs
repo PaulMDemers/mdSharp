@@ -38,6 +38,7 @@ Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLitera
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 MOV literal byte CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
@@ -195,6 +196,7 @@ Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
+Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
 Run("68000 multiply instructions", MultiplyInstructions);
 Run("68000 EOR and CMPM instructions", EorAndCmpmInstructions);
@@ -3015,6 +3017,34 @@ void ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(300, out _), "non-matching poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0460;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD809); // MOV.L @(9,PC),R8
+    bus.WriteInstructionWord(LoopPc + 2, 0x6080); // MOV.B @R8,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x89FB); // BT loop
+    bus.WriteLong(LoopPc + 0x28, 0x2000_4020);
+    bus.WriteByte(0x2000_4020, 0x00);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    AssertTrue(cpu.TryFastForwardMovLiteralByteCmpEqBtPollLoop(300, out int cycles), "MOV literal/MOV.B/CMP/EQ/BT zero poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x2000_4020u, cpu.R[8]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    AssertTrue(cpu.TryFastForwardMovLiteralByteCmpEqBtPollLoop(300, out _), "MOV literal/MOV.B/CMP/EQ/BT zero poll should fast-forward from the compare instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteByte(0x2000_4020, 0x01);
+    AssertTrue(!cpu.TryFastForwardMovLiteralByteCmpEqBtPollLoop(300, out _), "non-matching byte poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()
@@ -9145,6 +9175,40 @@ void M68kMoveByteDbfFillLoopFastForward()
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1002));
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1003));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the fill loop");
+}
+
+void M68kTstLongBneWaitLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x4A79); // TST.L $00FFCAD0
+    EmitLong(rom, ref pc, 0x00FF_CAD0);
+    EmitWord(rom, ref pc, 0x66F8); // BNE loop
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteLong(0x00FF_CAD0, 0x0000_0001);
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(56, address => (address & 0x00FF_0000u) == 0x00FF_0000u, out int cycles, out int instructions),
+        "fast-forward should recognize the absolute work-RAM wait loop");
+    AssertEqual(56, cycles);
+    AssertEqual(8, instructions);
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertEqual(0x0000_0001u, machine.Bus.ReadLong(0x00FF_CAD0));
+    AssertTrue((machine.MainCpu.SR & 0x0004) == 0, "nonzero TST result should leave Z clear");
+
+    machine.Bus.WriteLong(0x00FF_CAD0, 0);
+    AssertTrue(
+        !machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(56, _ => true, out _, out _),
+        "zero wait flag should fall back to the interpreter so the branch can exit");
 }
 
 void MovemPredecrementStoresOriginalAddressRegister()

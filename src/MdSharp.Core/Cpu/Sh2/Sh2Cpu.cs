@@ -4338,6 +4338,119 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovLiteralByteCmpEqBtPollLoop(int maxCycles, out int cycles)
+    {
+        const int CyclesPerIteration = 5;
+        const int MaxBurstCycles = 4096;
+
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadMovLiteralByteCmpEqBtPattern(peekBus, loopPc, out ushort literalOpcode, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 || !TryReadMovLiteralByteCmpEqBtPattern(peekBus, PC - 2, out literalOpcode, out loadOpcode, out compareOpcode, out branchOpcode))
+            {
+                if (PC < 4 || !TryReadMovLiteralByteCmpEqBtPattern(peekBus, PC - 4, out literalOpcode, out loadOpcode, out compareOpcode, out branchOpcode))
+                {
+                    if (PC < 6 || !TryReadMovLiteralByteCmpEqBtPattern(peekBus, PC - 6, out literalOpcode, out loadOpcode, out compareOpcode, out branchOpcode))
+                    {
+                        return false;
+                    }
+
+                    loopPc = PC - 6;
+                }
+                else
+                {
+                    loopPc = PC - 4;
+                }
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        int literalRegister = (literalOpcode >> 8) & 0x0F;
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        if (loadSource != literalRegister ||
+            loadDestination != 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 10 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint address = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        if (!peekBus.TryPeekByte(address, out byte byteValue))
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        if (byteValue != immediate)
+        {
+            return false;
+        }
+
+        int boundedCycles = Math.Min(maxCycles, MaxBurstCycles);
+        int iterations = boundedCycles / CyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        R[literalRegister] = address;
+        R[0] = (uint)(sbyte)byteValue;
+        SetT(true);
+        PC = loopPc;
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
+    private static bool TryReadMovLiteralByteCmpEqBtPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort literalOpcode,
+        out ushort loadOpcode,
+        out ushort compareOpcode,
+        out ushort branchOpcode)
+    {
+        literalOpcode = 0;
+        loadOpcode = 0;
+        compareOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(pc, out literalOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out loadOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out compareOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out branchOpcode))
+        {
+            return false;
+        }
+
+        return (literalOpcode & 0xF000) == 0xD000 &&
+            (loadOpcode & 0xF00F) == 0x6000 &&
+            (compareOpcode & 0xFF00) == 0x8800 &&
+            (branchOpcode & 0xFF00) == 0x8900;
+    }
+
     public bool TryFastForwardSdramFlagTaskletReturn(int maxCycles, out int cycles)
     {
         const int TaskletCycles = 10;

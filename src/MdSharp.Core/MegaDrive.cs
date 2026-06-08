@@ -253,6 +253,19 @@ public sealed class MegaDrive
                 continue;
             }
 
+            if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(
+                    cycleBudget - consumed,
+                    IsM68kWorkRamAddress,
+                    out int waitLoopCycles,
+                    out int waitLoopInstructions))
+            {
+                RunThirtyTwoXForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider);
+                consumed += waitLoopCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - waitLoopInstructions);
+                continue;
+            }
+
             if (Bus.ThirtyTwoX is null &&
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
@@ -349,6 +362,11 @@ public sealed class MegaDrive
         }
 
         return true;
+    }
+
+    private static bool IsM68kWorkRamAddress(uint address)
+    {
+        return (address & 0x00FF_0000u) == 0x00FF_0000u;
     }
 
     private void RunZ80Until(long lineStartMasterCycle, long sliceEndMasterCycle, ref long z80MasterCycleCursor, ref bool z80InterruptPending, Action<Z80InstructionTrace>? z80Observer)
