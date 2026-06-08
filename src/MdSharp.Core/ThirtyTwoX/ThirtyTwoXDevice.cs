@@ -1084,6 +1084,44 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((nextOpcode == 0x6153 ||
+                    nextOpcode == 0x2411 ||
+                    nextOpcode == 0x70FF ||
+                    nextOpcode == 0x88FF ||
+                    (nextOpcode & 0xFF00) == 0x8F00 ||
+                    nextOpcode == 0x7402) &&
+                cpu.TryFastForwardWordFillCmpEqMinusOneBfsLoop(
+                    Math.Min(cycleBudget, 8 * 4096),
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((nextOpcode == 0x1457 ||
+                    nextOpcode == 0x1456 ||
+                    nextOpcode == 0x1455 ||
+                    nextOpcode == 0x1454 ||
+                    nextOpcode == 0x1453 ||
+                    nextOpcode == 0x1452 ||
+                    nextOpcode == 0x1451 ||
+                    nextOpcode == 0x2452 ||
+                    nextOpcode == 0x70F0 ||
+                    nextOpcode == 0x3017 ||
+                    nextOpcode == 0x8DF4 ||
+                    nextOpcode == 0x7420) &&
+                cpu.TryFastForwardUnrolledLongFillGtBtsLoop(
+                    Math.Min(cycleBudget, 13 * 4096),
+                    _sh2LongWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (nextOpcode == 0x64A3 &&
                 cpu.TryFastForwardWordHighBitMaskTransformOuterLoop(
                     cycleBudget,

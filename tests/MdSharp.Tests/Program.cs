@@ -37,6 +37,8 @@ Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookup
 Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookupWordStoreStepFastForward);
 Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStridedByteSpanFastForward);
 Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
+Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
+Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -3089,6 +3091,111 @@ void ThirtyTwoXSh2BackwardLongRecordScanFastForward()
     AssertEqual(MatchRecord + 16, partial.R[2]);
     AssertEqual(SentinelAddress, partial.R[1]);
     AssertEqual(0u, partial.SR & 1);
+}
+
+void ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward()
+{
+    const uint SetupPc = 0x0600_7888;
+    const uint TailPc = SetupPc + 2;
+    const uint Destination = 0x0600_A000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(SetupPc, 0x6153); // MOV R5,R1
+    bus.WriteInstructionWord(TailPc + 0, 0x2411); // MOV.W R1,@R4
+    bus.WriteInstructionWord(TailPc + 2, 0x70FF); // ADD #-1,R0
+    bus.WriteInstructionWord(TailPc + 4, 0x88FF); // CMP/EQ #-1,R0
+    bus.WriteInstructionWord(TailPc + 6, 0x8FFB); // BF/S loop
+    bus.WriteInstructionWord(TailPc + 8, 0x7402); // ADD #2,R4
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(SetupPc);
+    cpu.R[0] = 3;
+    cpu.R[4] = Destination;
+    cpu.R[5] = 0x0000_00AB;
+    AssertTrue(
+        cpu.TryFastForwardWordFillCmpEqMinusOneBfsLoop(32, bus.TryWriteWord, out int cycles),
+        "word fill CMP/EQ -1 BF/S loop should fast-forward through completion from setup");
+    AssertEqual(32, cycles);
+    AssertEqual(TailPc + 10, cpu.PC);
+    AssertEqual(0xFFFF_FFFFu, cpu.R[0]);
+    AssertEqual(0x0000_00ABu, cpu.R[1]);
+    AssertEqual(Destination + 8, cpu.R[4]);
+    AssertEqual(1u, cpu.SR & 1);
+    for (uint i = 0; i < 4; i++)
+    {
+        AssertEqual((ushort)0x00AB, bus.ReadWord(Destination + (i * 2)));
+    }
+
+    Sh2Cpu partial = new(bus, "partial");
+    partial.Reset(TailPc + 4);
+    partial.R[0] = 5;
+    partial.R[1] = 0x0000_1234;
+    partial.R[4] = Destination + 0x20;
+    AssertTrue(
+        partial.TryFastForwardWordFillCmpEqMinusOneBfsLoop(24, bus.TryWriteWord, out int partialCycles),
+        "word fill CMP/EQ -1 BF/S loop should fast-forward partially from mid-tail");
+    AssertEqual(24, partialCycles);
+    AssertEqual(TailPc, partial.PC);
+    AssertEqual(2u, partial.R[0]);
+    AssertEqual(Destination + 0x26, partial.R[4]);
+    AssertEqual(0u, partial.SR & 1);
+    for (uint i = 0; i < 3; i++)
+    {
+        AssertEqual((ushort)0x1234, bus.ReadWord(Destination + 0x20 + (i * 2)));
+    }
+}
+
+void ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward()
+{
+    const uint LoopPc = 0x0600_786A;
+    const uint Destination = 0x0600_B000;
+    SyntheticSh2Bus bus = new();
+    ushort[] opcodes =
+    [
+        0x1457, 0x1456, 0x1455, 0x1454, 0x1453, 0x1452,
+        0x1451, 0x2452, 0x70F0, 0x3017, 0x8DF4, 0x7420
+    ];
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = 47;
+    cpu.R[1] = 15;
+    cpu.R[4] = Destination;
+    cpu.R[5] = 0xDEAD_BEEFu;
+    AssertTrue(
+        cpu.TryFastForwardUnrolledLongFillGtBtsLoop(26, bus.TryWriteLong, out int cycles),
+        "unrolled long fill should fast-forward through completion");
+    AssertEqual(26, cycles);
+    AssertEqual(15u, cpu.R[0]);
+    AssertEqual(Destination + 64, cpu.R[4]);
+    AssertEqual(LoopPc + 0x18, cpu.PC);
+    AssertEqual(0u, cpu.SR & 1);
+    for (uint offset = 0; offset < 64; offset += 4)
+    {
+        AssertEqual(0xDEAD_BEEFu, bus.ReadLong(Destination + offset));
+    }
+
+    Sh2Cpu partial = new(bus, "partial");
+    partial.Reset(LoopPc + 0x10);
+    partial.R[0] = 79;
+    partial.R[1] = 15;
+    partial.R[4] = Destination + 0x100;
+    partial.R[5] = 0x1234_5678u;
+    AssertTrue(
+        partial.TryFastForwardUnrolledLongFillGtBtsLoop(26, bus.TryWriteLong, out int partialCycles),
+        "unrolled long fill should fast-forward partially from mid-loop");
+    AssertEqual(26, partialCycles);
+    AssertEqual(47u, partial.R[0]);
+    AssertEqual(Destination + 0x140, partial.R[4]);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(1u, partial.SR & 1);
+    for (uint offset = 0; offset < 64; offset += 4)
+    {
+        AssertEqual(0x1234_5678u, bus.ReadLong(Destination + 0x100 + offset));
+    }
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()

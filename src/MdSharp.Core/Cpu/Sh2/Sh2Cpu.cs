@@ -1997,6 +1997,242 @@ Done:
             MatchesInstructionSequence(peekBus, loopPc + 0x22, tail);
     }
 
+    public bool TryFastForwardWordFillCmpEqMinusOneBfsLoop(
+        int maxCycles,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        const int SetupCycles = 1;
+        const int TakenIterationCycles = 8;
+        const int FinalIterationCycles = 7;
+        cycles = 0;
+        if (maxCycles < FinalIterationCycles ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint tailPc = PC;
+        bool includeSetup = false;
+        if (MatchesWordFillCmpEqMinusOneBfsPattern(peekBus, PC + 2))
+        {
+            if (!peekBus.TryPeekWord(PC, out ushort setupOpcode) ||
+                (setupOpcode & 0xF00F) != 0x6003)
+            {
+                return false;
+            }
+
+            int setupDestination = (setupOpcode >> 8) & 0x0F;
+            int setupSource = (setupOpcode >> 4) & 0x0F;
+            if (setupDestination != 1 || setupSource != 5)
+            {
+                return false;
+            }
+
+            tailPc = PC + 2;
+            includeSetup = true;
+        }
+        else if (!MatchesWordFillCmpEqMinusOneBfsPattern(peekBus, tailPc))
+        {
+            for (int back = 2; back <= 8; back += 2)
+            {
+                if (PC < (uint)back)
+                {
+                    break;
+                }
+
+                uint candidate = PC - (uint)back;
+                if (MatchesWordFillCmpEqMinusOneBfsPattern(peekBus, candidate))
+                {
+                    tailPc = candidate;
+                    break;
+                }
+            }
+
+            if (!MatchesWordFillCmpEqMinusOneBfsPattern(peekBus, tailPc))
+            {
+                return false;
+            }
+        }
+
+        if (includeSetup && maxCycles <= SetupCycles)
+        {
+            return false;
+        }
+
+        uint remaining = R[0] + 1;
+        if (remaining == 0)
+        {
+            return false;
+        }
+
+        int availableCycles = includeSetup ? maxCycles - SetupCycles : maxCycles;
+        uint maxIterations;
+        long completionCycles = ((long)(remaining - 1) * TakenIterationCycles) + FinalIterationCycles;
+        if (completionCycles <= availableCycles)
+        {
+            maxIterations = remaining;
+        }
+        else
+        {
+            maxIterations = (uint)(availableCycles / TakenIterationCycles);
+            if (maxIterations == 0 && availableCycles >= FinalIterationCycles)
+            {
+                maxIterations = 1;
+            }
+        }
+
+        uint iterations = Math.Min(remaining, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        ushort value = (ushort)(includeSetup ? R[5] : R[1]);
+        uint address = R[4];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, value))
+            {
+                break;
+            }
+
+            address += 2;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        if (includeSetup)
+        {
+            R[1] = R[5];
+        }
+
+        R[0] -= completed;
+        R[4] = address;
+        bool finished = completed == remaining;
+        SetT(finished);
+        cycles = includeSetup ? SetupCycles : 0;
+        cycles += finished
+            ? checked((int)(((completed - 1) * TakenIterationCycles) + FinalIterationCycles))
+            : checked((int)(completed * TakenIterationCycles));
+        Cycles += cycles;
+        LastOpcode = 0x7402;
+        LastOpcodePc = tailPc + 8;
+        PC = finished ? tailPc + 10 : tailPc;
+        return true;
+    }
+
+    private static bool MatchesWordFillCmpEqMinusOneBfsPattern(ISh2PeekBus peekBus, uint tailPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x2411, 0x70FF, 0x88FF, 0x8FFB, 0x7402];
+        return MatchesInstructionSequence(peekBus, tailPc, expected);
+    }
+
+    public bool TryFastForwardUnrolledLongFillGtBtsLoop(
+        int maxCycles,
+        Func<uint, uint, bool> writeLong,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 13;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        bool found = false;
+        for (int back = 0; back <= 0x16; back += 2)
+        {
+            if (back != 0 && PC < (uint)back)
+            {
+                break;
+            }
+
+            uint candidate = PC - (uint)back;
+            if (MatchesUnrolledLongFillGtBtsPattern(peekBus, candidate))
+            {
+                loopPc = candidate;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found || R[1] != 15 || (int)R[0] <= 15)
+        {
+            return false;
+        }
+
+        uint requested = (R[0] - 15) / 16;
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint iterations = Math.Min(requested, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[4];
+        uint value = R[5];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeLong(address + 28, value) ||
+                !writeLong(address + 24, value) ||
+                !writeLong(address + 20, value) ||
+                !writeLong(address + 16, value) ||
+                !writeLong(address + 12, value) ||
+                !writeLong(address + 8, value) ||
+                !writeLong(address + 4, value) ||
+                !writeLong(address, value))
+            {
+                break;
+            }
+
+            address += 32;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[0] -= completed * 16;
+        R[4] = address;
+        bool branchTaken = (int)R[0] > 15;
+        SetT(branchTaken);
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x7420;
+        LastOpcodePc = loopPc + 0x16;
+        PC = branchTaken ? loopPc : loopPc + 0x18;
+        return true;
+    }
+
+    private static bool MatchesUnrolledLongFillGtBtsPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected =
+        [
+            0x1457, 0x1456, 0x1455, 0x1454, 0x1453, 0x1452,
+            0x1451, 0x2452, 0x70F0, 0x3017, 0x8DF4, 0x7420
+        ];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;
