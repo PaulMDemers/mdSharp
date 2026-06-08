@@ -38,6 +38,7 @@ Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookup
 Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStridedByteSpanFastForward);
 Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
 Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
+Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
@@ -3142,6 +3143,83 @@ void ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward()
     {
         AssertEqual((ushort)0x1234, bus.ReadWord(Destination + 0x20 + (i * 2)));
     }
+}
+
+void ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward()
+{
+    const uint LoopPc = 0x0600_6DD0;
+    const uint Destination = 0x0600_C000;
+    ushort[] opcodes =
+    [
+        0x2271, // MOV.W R7,@R2
+        0x7101, // ADD #1,R1
+        0x3137, // CMP/GT R3,R1
+        0x8FFB, // BF/S loop
+        0x7202, // ADD #2,R2
+        0x001B  // SLEEP
+    ];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+    }
+
+    static void SeedState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[1] = 4;
+        cpu.R[2] = Destination;
+        cpu.R[3] = 7;
+        cpu.R[7] = 0x0000_3456;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedState(interpreted);
+    interpreted.Run(64);
+    AssertTrue(interpreted.Halted, "interpreter word fill ADD CMP/GT BF/S loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedState(fast);
+    AssertTrue(
+        fast.TryFastForwardWordFillAddCompareGtBfsLoop(28, fastBus.TryWriteWord, out int cycles),
+        "word fill ADD CMP/GT BF/S loop should fast-forward through completion");
+    AssertEqual(28, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast word fill ADD CMP/GT BF/S loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 8; offset += 2)
+    {
+        AssertEqual(interpretedBus.ReadWord(Destination + offset), fastBus.ReadWord(Destination + offset));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteRoutine(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedState(partial);
+    AssertTrue(
+        partial.TryFastForwardWordFillAddCompareGtBfsLoop(14, partialBus.TryWriteWord, out int partialCycles),
+        "word fill ADD CMP/GT BF/S loop should respect the cycle budget");
+    AssertEqual(14, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(6u, partial.R[1]);
+    AssertEqual(Destination + 4, partial.R[2]);
+    AssertEqual(0u, partial.SR & 1);
+    AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination));
+    AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination + 2));
 }
 
 void ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward()

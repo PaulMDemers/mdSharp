@@ -2137,6 +2137,75 @@ Done:
         return MatchesInstructionSequence(peekBus, tailPc, expected);
     }
 
+    public bool TryFastForwardWordFillAddCompareGtBfsLoop(
+        int maxCycles,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 7;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesWordFillAddCompareGtBfsPattern(peekBus, loopPc) ||
+            (int)R[1] > (int)R[3])
+        {
+            return false;
+        }
+
+        uint remaining = (uint)((int)R[3] - (int)R[1] + 1);
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint iterations = Math.Min(remaining, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        ushort value = (ushort)R[7];
+        uint address = R[2];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, value))
+            {
+                break;
+            }
+
+            address += 2;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[1] += completed;
+        R[2] = address;
+        bool finished = (int)R[1] > (int)R[3];
+        SetT(finished);
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8FFB;
+        LastOpcodePc = loopPc + 6;
+        PC = finished ? loopPc + 10 : loopPc;
+        return true;
+    }
+
+    private static bool MatchesWordFillAddCompareGtBfsPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x2271, 0x7101, 0x3137, 0x8FFB, 0x7202];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardUnrolledLongFillGtBtsLoop(
         int maxCycles,
         Func<uint, uint, bool> writeLong,
