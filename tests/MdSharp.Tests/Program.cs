@@ -26,6 +26,7 @@ Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForw
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
 Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
+Run("32X SH-2 DT MOV.L padded BF/S ADD loop fast-forward", ThirtyTwoXSh2DtMovLManyNopBfSAddLoopFastForward);
 Run("32X SH-2 MOV.W DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovWStoreDtBfSAddLoopFastForward);
 Run("32X SH-2 MOV.W ADD register DT BF ramp loop fast-forward", ThirtyTwoXSh2MovWStoreAddRegisterDtBfLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
@@ -38,6 +39,7 @@ Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLitera
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
+Run("32X SH-2 MOV literal word displacement TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordDisplacementTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal byte CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
@@ -2302,6 +2304,51 @@ void ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward()
     AssertEqual(0x1122_3344u, bus.ReadLong(Destination + 0x110));
 }
 
+void ThirtyTwoXSh2DtMovLManyNopBfSAddLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0500;
+    const uint Destination = 0x2400_0200;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x4110); // DT R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x2202); // MOV.L R0,@R2
+    for (uint offset = 4; offset <= 0x1A; offset += 2)
+    {
+        bus.WriteInstructionWord(LoopPc + offset, 0x0009); // NOP padding
+    }
+
+    bus.WriteInstructionWord(LoopPc + 0x1C, 0x8FF0); // BF/S loop
+    bus.WriteInstructionWord(LoopPc + 0x1E, 0x7204); // ADD #4,R2
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = 0xCAFE_BABEu;
+    cpu.R[1] = 4;
+    cpu.R[2] = Destination;
+
+    AssertTrue(cpu.TryFastForwardDtMovLManyNopBfSAddLoop(64, bus.TryWriteLong, 16, out int finalCycles), "DT/MOV.L/NOP/BF/S/ADD loop should fast-forward through completion");
+    AssertEqual(64, finalCycles);
+    AssertEqual(LoopPc + 0x20, cpu.PC);
+    AssertEqual(0u, cpu.R[1]);
+    AssertEqual(Destination + 16, cpu.R[2]);
+    AssertEqual(0xCAFE_BABEu, bus.ReadLong(Destination));
+    AssertEqual(0xCAFE_BABEu, bus.ReadLong(Destination + 12));
+    AssertEqual(1u, cpu.SR & 1);
+
+    Sh2Cpu midCpu = new(bus, "test-mid");
+    midCpu.Reset(LoopPc + 0x10);
+    midCpu.R[0] = 0x1234_5678u;
+    midCpu.R[1] = 10;
+    midCpu.R[2] = Destination + 0x40;
+    AssertTrue(midCpu.TryFastForwardDtMovLManyNopBfSAddLoop(32, bus.TryWriteLong, 16, out int partialCycles), "DT/MOV.L/NOP/BF/S/ADD loop should fast-forward from the NOP pad");
+    AssertEqual(32, partialCycles);
+    AssertEqual(LoopPc, midCpu.PC);
+    AssertEqual(8u, midCpu.R[1]);
+    AssertEqual(Destination + 0x48, midCpu.R[2]);
+    AssertEqual(0x1234_5678u, bus.ReadLong(Destination + 0x40));
+    AssertEqual(0x1234_5678u, bus.ReadLong(Destination + 0x44));
+    AssertEqual(0u, midCpu.SR & 1);
+}
+
 void ThirtyTwoXSh2MovWStoreDtBfSAddLoopFastForward()
 {
     const uint StoreFirstLoopPc = 0x0600_0814;
@@ -3017,6 +3064,38 @@ void ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(300, out _), "non-matching poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2MovLiteralWordDisplacementTstBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_424E;
+    const uint RegisterBase = 0x2000_4000;
+    const uint PollAddress = RegisterBase + 4;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD107); // MOV.L @(7,PC),R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x85E2); // MOV.W @(2,R14),R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x2018); // TST R1,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop while the masked bit is set
+    bus.WriteLong(LoopPc + 0x1E, 0x0000_8000);
+    bus.WriteWord(PollAddress, 0x81FC);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[14] = RegisterBase;
+    AssertTrue(cpu.TryFastForwardMovLiteralWordDisplacementTstBfPollLoop(300, out int cycles), "MOV literal/MOV.W displacement/TST/BF set-bit poll should fast-forward");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_8000u, cpu.R[1]);
+    AssertEqual(0xFFFF_81FCu, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 6);
+    cpu.R[14] = RegisterBase;
+    AssertTrue(cpu.TryFastForwardMovLiteralWordDisplacementTstBfPollLoop(300, out _), "MOV literal/MOV.W displacement/TST/BF poll should fast-forward from branch");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(PollAddress, 0x01FC);
+    AssertTrue(!cpu.TryFastForwardMovLiteralWordDisplacementTstBfPollLoop(300, out _), "clear masked bit should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward()

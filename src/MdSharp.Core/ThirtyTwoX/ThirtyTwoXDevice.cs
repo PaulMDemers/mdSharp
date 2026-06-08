@@ -990,6 +990,21 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
+            if (((nextOpcode & 0xF0FF) == 0x4010 ||
+                    (nextOpcode & 0xF00F) == 0x2002 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xFF00) == 0x8F00) &&
+                cpu.TryFastForwardDtMovLManyNopBfSAddLoop(
+                    Math.Min(cycleBudget, Sh2LongStoreDelayFillLoopCycles * Sh2LongStoreDelayFillLoopMaxBurstIterations),
+                    _sh2LongWriters[cpuIndex],
+                    Sh2LongStoreDelayFillLoopCycles,
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x6005 &&
                 cpu.TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(
                     cycleBudget,
@@ -1327,6 +1342,13 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (cpu.TryFastForwardMovLiteralWordDisplacementTstBfPollLoop(cycleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 if (cpu.TryFastForwardMovLiteralByteCmpEqBtPollLoop(cycleBudget, out fastCycles))
                 {
                     RecordSh2FastPath(fastCycles);
@@ -1349,6 +1371,16 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardMovLiteralWordTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xFF00) >= 0x8500 && (nextOpcode & 0xFF00) <= 0x85F0) ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardMovLiteralWordDisplacementTstBfPollLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
