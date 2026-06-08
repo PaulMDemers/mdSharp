@@ -1984,6 +1984,19 @@ public sealed class ThirtyTwoXDevice
 
     private bool TryWriteSh2ByteFast(uint address, byte value, int cpuIndex)
     {
+        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out bool overwriteFrameBuffer))
+        {
+            if (IsSh2FrameBufferAccessDenied())
+            {
+                TraceDeniedFrameBufferAccess(cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer ? "DENY-OW8" : "DENY-W8", frameBufferOffset, value);
+                return true;
+            }
+
+            AddSh2FrameBufferBusyWaitIfNeeded(cpuIndex);
+            WriteFrameBufferByteCore(frameBufferOffset, value, cpuIndex == 0 ? "MSH2" : "SSH2", overwriteFrameBuffer, transparentZero: overwriteFrameBuffer, enforceAccessWindow: false);
+            return true;
+        }
+
         if (TryMapSh2CachedSdramAddress(address, out _) ||
             TryMapSh2SdramAddress(address, out _) ||
             TryMapSh2CachedCartridgeAddress(address, out _, out _))
