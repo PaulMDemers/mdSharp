@@ -2206,6 +2206,142 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardByteSpanCompareLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        int cyclesPerMatchedIteration,
+        out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerMatchedIteration ||
+            cyclesPerMatchedIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesByteSpanComparePattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint source = R[5];
+        uint destination = R[4];
+        uint count = R[6];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        byte currentDestination = (byte)R[2];
+        uint maxIterations = (uint)(maxCycles / cyclesPerMatchedIteration);
+        uint completed = 0;
+        while (completed < maxIterations)
+        {
+            byte? sourceByte = readByte(source);
+            if (sourceByte is null)
+            {
+                break;
+            }
+
+            R[1] = (uint)(sbyte)sourceByte.Value;
+            SetT(R[1] == 0);
+            if (sourceByte.Value == 0)
+            {
+                SetT(currentDestination == sourceByte.Value);
+                cycles = checked((int)(completed * (uint)cyclesPerMatchedIteration) + 4);
+                Cycles += cycles;
+                LastOpcode = 0x8D09;
+                LastOpcodePc = loopPc + 4;
+                PC = loopPc + 0x1A;
+                return true;
+            }
+
+            SetT(currentDestination == sourceByte.Value);
+            destination++;
+            if (currentDestination != sourceByte.Value)
+            {
+                cycles = checked((int)(completed * (uint)cyclesPerMatchedIteration) + 6);
+                Cycles += cycles;
+                LastOpcode = 0x8F0E;
+                LastOpcodePc = loopPc + 8;
+                R[4] = destination;
+                PC = loopPc + 0x28;
+                return true;
+            }
+
+            count--;
+            SetT(count == 0);
+            source++;
+            if (count == 0)
+            {
+                cycles = checked((int)(completed * (uint)cyclesPerMatchedIteration) + 10);
+                Cycles += cycles;
+                LastOpcode = 0x8D08;
+                LastOpcodePc = loopPc + 0x10;
+                R[4] = destination;
+                R[5] = source;
+                R[6] = count;
+                PC = loopPc + 0x24;
+                return true;
+            }
+
+            byte? nextDestinationByte = readByte(destination);
+            if (nextDestinationByte is null)
+            {
+                break;
+            }
+
+            currentDestination = nextDestinationByte.Value;
+            R[2] = (uint)(sbyte)currentDestination;
+            SetT(currentDestination == 0);
+            completed++;
+            if (currentDestination == 0)
+            {
+                cycles = checked((int)(completed * (uint)cyclesPerMatchedIteration));
+                Cycles += cycles;
+                LastOpcode = 0x8BF2;
+                LastOpcodePc = loopPc + 0x18;
+                R[4] = destination;
+                R[5] = source;
+                R[6] = count;
+                PC = loopPc + 0x1A;
+                return true;
+            }
+
+            R[4] = destination;
+            R[5] = source;
+            R[6] = count;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        cycles = checked((int)(completed * (uint)cyclesPerMatchedIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8BF2;
+        LastOpcodePc = loopPc + 0x18;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesByteSpanComparePattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected =
+        [
+            0x6150, 0x2118, 0x8D09, 0x3210, 0x8F0E, 0x7401, 0x76FF,
+            0x2668, 0x8D08, 0x7501, 0x6240, 0x2228, 0x8BF2
+        ];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardUnrolledLongFillGtBtsLoop(
         int maxCycles,
         Func<uint, uint, bool> writeLong,

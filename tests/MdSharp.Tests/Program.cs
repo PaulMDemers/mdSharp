@@ -39,6 +39,7 @@ Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStrided
 Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
 Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
+Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
@@ -3220,6 +3221,77 @@ void ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward()
     AssertEqual(0u, partial.SR & 1);
     AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination));
     AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination + 2));
+}
+
+void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()
+{
+    const uint LoopPc = 0x0600_792C;
+    const uint Source = 0x0203_FE40;
+    const uint Destination = 0x2400_0B4A;
+    ushort[] opcodes =
+    [
+        0x6150, 0x2118, 0x8D09, 0x3210, 0x8F0E, 0x7401, 0x76FF,
+        0x2668, 0x8D08, 0x7501, 0x6240, 0x2228, 0x8BF2
+    ];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(LoopPc + 0x1A, 0x001B);
+        bus.WriteInstructionWord(LoopPc + 0x24, 0x001B);
+        bus.WriteInstructionWord(LoopPc + 0x28, 0x001B);
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        byte[] values = [0x46, 0x5F, 0x53];
+        for (uint i = 0; i < values.Length; i++)
+        {
+            bus.WriteByte(Source + i, values[i]);
+            bus.WriteByte(Destination + i, values[i]);
+        }
+    }
+
+    static void SeedState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[2] = 0x46;
+        cpu.R[4] = Destination;
+        cpu.R[5] = Source;
+        cpu.R[6] = 3;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    SeedMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedState(interpreted);
+    interpreted.Run(256);
+    AssertTrue(interpreted.Halted, "interpreter byte span compare loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    SeedMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedState(fast);
+    AssertTrue(
+        fast.TryFastForwardByteSpanCompareLoop(174, fastBus.TryReadByte, 58, out int cycles),
+        "byte span compare loop should fast-forward until the count is exhausted");
+    AssertEqual(126, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast byte span compare loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
 }
 
 void ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward()
