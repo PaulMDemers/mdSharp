@@ -1788,6 +1788,116 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMaskedStridedByteSpanLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, byte, bool> writeByte,
+        int cyclesPerIteration,
+        out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        bool found = false;
+        for (int back = 0; back <= 24; back += 2)
+        {
+            if (back != 0 && PC < (uint)back)
+            {
+                break;
+            }
+
+            uint candidate = PC - (uint)back;
+            if (MatchesMaskedStridedByteSpanPattern(peekBus, candidate))
+            {
+                loopPc = candidate;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        uint counter = R[2];
+        uint limit = R[5];
+        if ((int)counter > (int)limit)
+        {
+            return false;
+        }
+
+        uint remaining = limit - counter + 1;
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(remaining, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint sourceBase = R[7];
+        uint destination = R[8];
+        uint completed = 0;
+        byte output = 0;
+        while (completed < iterations)
+        {
+            uint sourceOffset = ((counter + completed) & 0x3Fu) << 6;
+            byte? source = readByte(sourceBase + sourceOffset);
+            if (source is null)
+            {
+                break;
+            }
+
+            output = (byte)(source.Value | 0x01);
+            if (!writeByte(destination + completed, output))
+            {
+                break;
+            }
+
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        uint newCounter = counter + completed;
+        R[0] = (uint)(sbyte)output;
+        R[0] |= 1;
+        R[1] = (newCounter - 1) & 0x3Fu;
+        R[2] = newCounter;
+        R[8] = destination + completed;
+        bool finished = (int)newCounter > (int)limit;
+        SetT(finished);
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x7801;
+        LastOpcodePc = loopPc + 0x18;
+        PC = finished ? loopPc + 0x1A : loopPc;
+        return true;
+    }
+
+    private static bool MatchesMaskedStridedByteSpanPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected =
+        [
+            0xE13F, 0x2129, 0x6013, 0x4008, 0x4008, 0x4008, 0x007C,
+            0x7201, 0x3257, 0xCB01, 0x2800, 0x8FF3, 0x7801
+        ];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;

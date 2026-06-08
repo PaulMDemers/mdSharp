@@ -35,6 +35,7 @@ Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighB
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
 Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookupWordStoreStepFastForward);
+Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStridedByteSpanFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -2965,6 +2966,68 @@ void ThirtyTwoXSh2ByteLookupWordStoreStepFastForward()
     AssertEqual(interpreted.PC, fast.PC);
     AssertEqual(interpreted.SR, fast.SR);
     AssertEqual(interpretedBus.ReadWord(Destination), fastBus.ReadWord(Destination));
+}
+
+void ThirtyTwoXSh2MaskedStridedByteSpanFastForward()
+{
+    const uint LoopPc = 0x0600_7636;
+    const uint SourceBase = 0x2600_1000;
+    const uint Destination = 0x2400_8000;
+    ushort[] opcodes =
+    [
+        0xE13F, 0x2129, 0x6013, 0x4008, 0x4008, 0x4008, 0x007C,
+        0x7201, 0x3257, 0xCB01, 0x2800, 0x8FF3, 0x7801, 0x001B
+    ];
+
+    SyntheticSh2Bus bus = new();
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    for (uint i = 0; i < 64; i++)
+    {
+        bus.WriteByte(SourceBase + (i << 6), (byte)(0x80 | i));
+    }
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[2] = 0;
+    cpu.R[5] = 7;
+    cpu.R[7] = SourceBase;
+    cpu.R[8] = Destination;
+    AssertTrue(
+        cpu.TryFastForwardMaskedStridedByteSpanLoop(192, bus.TryReadByte, bus.TryWriteByte, 24, out int cycles),
+        "masked strided byte span should fast-forward through completion");
+    AssertEqual(192, cycles);
+    AssertEqual(LoopPc + 0x1A, cpu.PC);
+    AssertEqual(8u, cpu.R[2]);
+    AssertEqual(Destination + 8, cpu.R[8]);
+    AssertEqual(1u, cpu.SR & 1);
+    for (uint i = 0; i < 8; i++)
+    {
+        AssertEqual((byte)((0x80 | i) | 1), bus.ReadByte(Destination + i));
+    }
+
+    Sh2Cpu partial = new(bus, "partial");
+    partial.Reset(LoopPc + 0x0C);
+    partial.R[2] = 4;
+    partial.R[5] = 15;
+    partial.R[7] = SourceBase;
+    partial.R[8] = Destination + 0x40;
+    AssertTrue(
+        partial.TryFastForwardMaskedStridedByteSpanLoop(96, bus.TryReadByte, bus.TryWriteByte, 24, out int partialCycles),
+        "masked strided byte span should fast-forward from mid-loop");
+    AssertEqual(96, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(8u, partial.R[2]);
+    AssertEqual(Destination + 0x44, partial.R[8]);
+    AssertEqual(0u, partial.SR & 1);
+    for (uint i = 0; i < 4; i++)
+    {
+        uint sourceIndex = 4 + i;
+        AssertEqual((byte)((0x80 | sourceIndex) | 1), bus.ReadByte(Destination + 0x40 + i));
+    }
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()
