@@ -36,6 +36,7 @@ Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2Wor
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
 Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookupWordStoreStepFastForward);
 Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStridedByteSpanFastForward);
+Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordTstBtPollLoopFastForward);
@@ -3028,6 +3029,66 @@ void ThirtyTwoXSh2MaskedStridedByteSpanFastForward()
         uint sourceIndex = 4 + i;
         AssertEqual((byte)((0x80 | sourceIndex) | 1), bus.ReadByte(Destination + 0x40 + i));
     }
+}
+
+void ThirtyTwoXSh2BackwardLongRecordScanFastForward()
+{
+    const uint LoopPc = 0x0600_6C14;
+    const uint SentinelLiteral = LoopPc + 0x44;
+    const uint SentinelAddress = 0x0600_9000;
+    const uint StartRecord = 0x0600_9040;
+    const uint Target = 0xABCD_EF01;
+    SyntheticSh2Bus bus = new();
+    ushort[] head = [0x5133, 0x3160, 0x8B0D, 0x5132, 0x2149, 0x3150, 0x8B09];
+    ushort[] tail = [0xD708, 0x6233, 0x6172, 0x3210, 0x8FE9, 0x73F0];
+    for (int i = 0; i < head.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), head[i]);
+    }
+
+    for (int i = 0; i < tail.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + 0x22 + (uint)(i * 2), tail[i]);
+    }
+
+    bus.WriteLong(SentinelLiteral, SentinelAddress);
+    for (uint record = SentinelAddress; record <= StartRecord; record += 16)
+    {
+        bus.WriteLong(record + 12, 0x1111_0000 + record);
+    }
+
+    bus.WriteLong(SentinelAddress, SentinelAddress);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[3] = StartRecord;
+    cpu.R[6] = Target;
+    AssertTrue(
+        cpu.TryFastForwardBackwardLongRecordScanLoop(50, bus.TryReadLong, out int cycles),
+        "backward long record scan should fast-forward to the sentinel");
+    AssertEqual(50, cycles);
+    AssertEqual(LoopPc + 0x2E, cpu.PC);
+    AssertEqual(SentinelAddress - 16, cpu.R[3]);
+    AssertEqual(SentinelAddress, cpu.R[2]);
+    AssertEqual(SentinelAddress, cpu.R[1]);
+    AssertEqual(SentinelAddress, cpu.R[7]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    const uint MatchRecord = StartRecord - 32;
+    bus.WriteLong(MatchRecord + 12, Target);
+    Sh2Cpu partial = new(bus, "partial");
+    partial.Reset(LoopPc + 0x28);
+    partial.R[3] = StartRecord;
+    partial.R[6] = Target;
+    AssertTrue(
+        partial.TryFastForwardBackwardLongRecordScanLoop(50, bus.TryReadLong, out int partialCycles),
+        "backward long record scan should stop before a candidate match");
+    AssertEqual(20, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(MatchRecord, partial.R[3]);
+    AssertEqual(MatchRecord + 16, partial.R[2]);
+    AssertEqual(SentinelAddress, partial.R[1]);
+    AssertEqual(0u, partial.SR & 1);
 }
 
 void ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward()

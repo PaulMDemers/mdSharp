@@ -1898,6 +1898,105 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardBackwardLongRecordScanLoop(
+        int maxCycles,
+        Func<uint, uint?> readLong,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 10;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        bool found = false;
+        for (int back = 0; back <= 0x2C; back += 2)
+        {
+            if (back != 0 && PC < (uint)back)
+            {
+                break;
+            }
+
+            uint candidate = PC - (uint)back;
+            if (MatchesBackwardLongRecordScanPattern(peekBus, candidate))
+            {
+                loopPc = candidate;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        if (!TryPeekPcRelativeLong(peekBus, loopPc + 0x22, 0x08, out uint sentinelAddress) ||
+            readLong(sentinelAddress) is not uint sentinel)
+        {
+            return false;
+        }
+
+        uint current = R[3];
+        uint target = R[6];
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint completed = 0;
+        bool exhausted = false;
+        while (completed < maxIterations)
+        {
+            if (readLong(current + 12) is not uint recordValue)
+            {
+                break;
+            }
+
+            if (recordValue == target)
+            {
+                break;
+            }
+
+            uint comparedPointer = current;
+            current -= 16;
+            completed++;
+            exhausted = comparedPointer == sentinel;
+            if (exhausted)
+            {
+                break;
+            }
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[1] = sentinel;
+        R[2] = current + 16;
+        R[3] = current;
+        R[7] = sentinelAddress;
+        SetT(exhausted);
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x73F0;
+        LastOpcodePc = loopPc + 0x2C;
+        PC = exhausted ? loopPc + 0x2E : loopPc;
+        return true;
+    }
+
+    private static bool MatchesBackwardLongRecordScanPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> head = [0x5133, 0x3160, 0x8B0D, 0x5132, 0x2149, 0x3150, 0x8B09];
+        ReadOnlySpan<ushort> tail = [0xD708, 0x6233, 0x6172, 0x3210, 0x8FE9, 0x73F0];
+        return MatchesInstructionSequence(peekBus, loopPc, head) &&
+            MatchesInstructionSequence(peekBus, loopPc + 0x22, tail);
+    }
+
     public bool TryFastForwardMovLNopDtBfSAddLoop(int maxCycles, Func<uint, uint, bool> writeLong, int cyclesPerIteration, out int cycles)
     {
         cycles = 0;

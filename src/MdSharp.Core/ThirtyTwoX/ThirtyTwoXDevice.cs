@@ -1065,6 +1065,25 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((nextOpcode == 0x5133 ||
+                    nextOpcode == 0x3160 ||
+                    (nextOpcode & 0xFF00) == 0x8B00 ||
+                    nextOpcode == 0xD708 ||
+                    nextOpcode == 0x6233 ||
+                    nextOpcode == 0x6172 ||
+                    nextOpcode == 0x3210 ||
+                    (nextOpcode & 0xFF00) == 0x8F00 ||
+                    nextOpcode == 0x73F0) &&
+                cpu.TryFastForwardBackwardLongRecordScanLoop(
+                    Math.Min(cycleBudget, 10 * 4096),
+                    _sh2LongReaders[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (nextOpcode == 0x64A3 &&
                 cpu.TryFastForwardWordHighBitMaskTransformOuterLoop(
                     cycleBudget,
