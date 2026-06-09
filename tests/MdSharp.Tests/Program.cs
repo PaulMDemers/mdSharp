@@ -40,6 +40,7 @@ Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLong
 Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
 Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
+Run("32X SH-2 byte nibble lookup expand loop fast-forward", ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
 Run("32X SH-2 MOV literal TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal long TST/BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralLongTstBtPollLoopFastForward);
@@ -3292,6 +3293,102 @@ void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()
 
     AssertEqual(interpreted.PC, fast.PC);
     AssertEqual(interpreted.SR, fast.SR);
+}
+
+void ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward()
+{
+    const uint LoopPc = 0x0600_3DD0;
+    const uint Table = 0x0600_3D50;
+    const uint Source = 0x0219_9510;
+    const uint Destination = 0x0600_D4F8;
+    ushort[] opcodes =
+    [
+        0x6424, 0xE50F, 0x2549, 0x4409, 0x4409, 0xE708, 0x2478, 0x8901,
+        0xA001, 0x6463, 0x044C, 0x2340, 0x7301, 0x2578, 0x8901, 0xA001,
+        0x6563, 0x055C, 0x2350, 0x7301, 0x4110, 0x8BE9
+    ];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(LoopPc + 0x2C, 0x001B);
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        byte[] tableValues = [0x00, 0x11, 0x22, 0x33, 0xA4, 0x55, 0x66, 0xE7];
+        for (uint i = 0; i < tableValues.Length; i++)
+        {
+            bus.WriteByte(Table + i, tableValues[i]);
+        }
+
+        byte[] packed = [0x47, 0xF4, 0x80, 0xFF];
+        for (uint i = 0; i < packed.Length; i++)
+        {
+            bus.WriteByte(Source + i, packed[i]);
+        }
+    }
+
+    static void SeedState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[0] = Table;
+        cpu.R[1] = 4;
+        cpu.R[2] = Source;
+        cpu.R[3] = Destination;
+        cpu.R[6] = 0;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    SeedMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedState(interpreted);
+    interpreted.Run(512);
+    AssertTrue(interpreted.Halted, "interpreter byte nibble lookup expand loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    SeedMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedState(fast);
+    AssertTrue(
+        fast.TryFastForwardByteNibbleLookupExpandLoop(132, fastBus.TryReadByte, fastBus.TryWriteByte, out int cycles),
+        "byte nibble lookup expand loop should fast-forward through completion");
+    AssertEqual(132, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast byte nibble lookup expand loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 8; offset++)
+    {
+        AssertEqual(interpretedBus.ReadByte(Destination + offset), fastBus.ReadByte(Destination + offset));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteRoutine(partialBus);
+    SeedMemory(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedState(partial);
+    AssertTrue(
+        partial.TryFastForwardByteNibbleLookupExpandLoop(78, partialBus.TryReadByte, partialBus.TryWriteByte, out int partialCycles),
+        "byte nibble lookup expand loop should respect the cycle budget");
+    AssertEqual(78, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(2u, partial.R[1]);
+    AssertEqual(Source + 2, partial.R[2]);
+    AssertEqual(Destination + 4, partial.R[3]);
+    AssertEqual(0u, partial.SR & 1);
 }
 
 void ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward()

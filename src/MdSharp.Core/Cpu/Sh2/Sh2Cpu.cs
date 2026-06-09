@@ -2342,6 +2342,132 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardByteNibbleLookupExpandLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, byte, bool> writeByte,
+        out int cycles)
+    {
+        const int MinCyclesPerIteration = 21;
+        const int SdramLookupReadWaitCycles = 12;
+        cycles = 0;
+        if (maxCycles < MinCyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesByteNibbleLookupExpandPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint remaining = R[1];
+        if (remaining == 0)
+        {
+            return false;
+        }
+
+        uint tableBase = R[0];
+        uint source = R[2];
+        uint destination = R[3];
+        byte zeroSubstitute = (byte)R[6];
+        uint completed = 0;
+        int accumulatedCycles = 0;
+        byte lastHigh = 0;
+        byte lastLow = 0;
+
+        while (completed < remaining)
+        {
+            byte? packed = readByte(source);
+            if (packed is null)
+            {
+                break;
+            }
+
+            int highNibble = packed.Value >> 4;
+            int lowNibble = packed.Value & 0x0F;
+            int iterationCycles = MinCyclesPerIteration;
+
+            byte? high = highNibble >= 8 ? zeroSubstitute : readByte(tableBase + (uint)highNibble);
+            if (high is null)
+            {
+                break;
+            }
+
+            if (highNibble < 8)
+            {
+                iterationCycles += SdramLookupReadWaitCycles;
+            }
+
+            byte? low = lowNibble >= 8 ? zeroSubstitute : readByte(tableBase + (uint)lowNibble);
+            if (low is null)
+            {
+                break;
+            }
+
+            if (lowNibble < 8)
+            {
+                iterationCycles += SdramLookupReadWaitCycles;
+            }
+
+            if (accumulatedCycles + iterationCycles > maxCycles)
+            {
+                break;
+            }
+
+            if (!writeByte(destination, high.Value) ||
+                !writeByte(destination + 1, low.Value))
+            {
+                break;
+            }
+
+            lastHigh = high.Value;
+            lastLow = low.Value;
+            source++;
+            destination += 2;
+            completed++;
+            accumulatedCycles += iterationCycles;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[1] = remaining - completed;
+        R[2] = source;
+        R[3] = destination;
+        R[4] = (uint)(sbyte)lastHigh;
+        R[5] = (uint)(sbyte)lastLow;
+        R[7] = 8;
+
+        bool finished = R[1] == 0;
+        SetT(finished);
+        cycles = accumulatedCycles;
+        Cycles += cycles;
+        LastOpcode = 0x8BE9;
+        LastOpcodePc = loopPc + 0x2A;
+        PC = finished ? loopPc + 0x2C : loopPc;
+        return true;
+    }
+
+    private static bool MatchesByteNibbleLookupExpandPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected =
+        [
+            0x6424, 0xE50F, 0x2549, 0x4409, 0x4409, 0xE708, 0x2478, 0x8901,
+            0xA001, 0x6463, 0x044C, 0x2340, 0x7301, 0x2578, 0x8901, 0xA001,
+            0x6563, 0x055C, 0x2350, 0x7301, 0x4110, 0x8BE9
+        ];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardUnrolledLongFillGtBtsLoop(
         int maxCycles,
         Func<uint, uint, bool> writeLong,

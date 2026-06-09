@@ -1123,6 +1123,18 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (nextOpcode == 0x6424 &&
+                cpu.TryFastForwardByteNibbleLookupExpandLoop(
+                    Math.Min(cycleBudget, 45 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2ByteWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode == 0x1457 ||
                     nextOpcode == 0x1456 ||
                     nextOpcode == 0x1455 ||
