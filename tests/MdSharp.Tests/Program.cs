@@ -31,6 +31,8 @@ Run("32X SH-2 MOV.W DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovWStoreD
 Run("32X SH-2 MOV.W ADD register DT BF ramp loop fast-forward", ThirtyTwoXSh2MovWStoreAddRegisterDtBfLoopFastForward);
 Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearchLoopFastForward);
 Run("32X SH-2 byte fill indexed CMP/GE loop fast-forward", ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward);
+Run("32X SH-2 MOV.B DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovBStoreDtBfsAddLoopFastForward);
+Run("32X SH-2 GBR word helper JSR BF/S poll loop fast-forward", ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
@@ -2599,6 +2601,114 @@ void ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward()
     AssertEqual((byte)0x5A, partialBus.ReadByte(Base));
     AssertEqual((byte)0x5A, partialBus.ReadByte(Base + 1));
     AssertEqual((byte)0x00, partialBus.ReadByte(Base + 2));
+}
+
+void ThirtyTwoXSh2MovBStoreDtBfsAddLoopFastForward()
+{
+    const uint LoopPc = 0x0207_401A;
+    const uint Destination = 0x0603_4000;
+    ushort[] opcodes = [0x2100, 0x4210, 0x8FFC, 0x7101];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(LoopPc + 8, 0x001B);
+    }
+
+    static void SeedState(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[0] = 0xA5;
+        cpu.R[1] = Destination;
+        cpu.R[2] = 5;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedState(interpreted);
+    interpreted.Run(64);
+    AssertTrue(interpreted.Halted, "interpreter MOV.B/DT/BF/S/ADD fill loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedState(fast);
+    AssertTrue(
+        fast.TryFastForwardMovBStoreDtBfsAddLoop(20, fastBus.TryWriteByte, 4, out int cycles),
+        "MOV.B/DT/BF/S/ADD fill loop should fast-forward through completion");
+    AssertEqual(20, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast MOV.B/DT/BF/S/ADD fill loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint offset = 0; offset < 5; offset++)
+    {
+        AssertEqual((byte)0xA5, fastBus.ReadByte(Destination + offset));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteRoutine(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedState(partial);
+    AssertTrue(
+        partial.TryFastForwardMovBStoreDtBfsAddLoop(8, partialBus.TryWriteByte, 4, out int partialCycles),
+        "MOV.B/DT/BF/S/ADD fill loop should respect the cycle budget");
+    AssertEqual(8, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(Destination + 2, partial.R[1]);
+    AssertEqual(3u, partial.R[2]);
+    AssertEqual(0u, partial.SR & 1);
+}
+
+void ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward()
+{
+    const uint LoopPc = 0x0207_5A8C;
+    const uint HelperPc = 0x0207_402A;
+    const uint Gbr = 0x2000_4000;
+    SyntheticSh2Bus bus = new();
+    ushort[] loopOpcodes = [0x480B, 0xE401, 0x2008, 0x8FFB, 0xE507];
+    for (int i = 0; i < loopOpcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), loopOpcodes[i]);
+    }
+
+    ushort[] helperOpcodes = [0x0012, 0x7020, 0x4400, 0x004D, 0x000B, 0x600D];
+    for (int i = 0; i < helperOpcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(HelperPc + (uint)(i * 2), helperOpcodes[i]);
+    }
+
+    bus.WriteWord(Gbr + 0x22, 3);
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    cpu.R[8] = HelperPc;
+    AssertTrue(
+        cpu.TryFastForwardGbrWordHelperJsrBfsPollLoop(120, bus.TryReadWord, out int cycles),
+        "GBR word helper JSR/BF/S poll loop should fast-forward while the polled word is nonzero");
+    AssertEqual(120, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(LoopPc + 4, cpu.PR);
+    AssertEqual(3u, cpu.R[0]);
+    AssertEqual(2u, cpu.R[4]);
+    AssertEqual(7u, cpu.R[5]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteWord(Gbr + 0x22, 0);
+    AssertTrue(
+        !cpu.TryFastForwardGbrWordHelperJsrBfsPollLoop(120, bus.TryReadWord, out _),
+        "GBR word helper JSR/BF/S poll loop should fall back once the polled word clears");
 }
 
 void ThirtyTwoXSh2WordHighBitMaskTransformFastForward()

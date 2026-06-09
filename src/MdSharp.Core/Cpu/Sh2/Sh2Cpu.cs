@@ -1582,6 +1582,127 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovBStoreDtBfsAddLoop(
+        int maxCycles,
+        Func<uint, byte, bool> writeByte,
+        int cyclesPerIteration,
+        out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesMovBStoreDtBfsAddPattern(peekBus, loopPc) ||
+            R[2] == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint iterations = Math.Min(R[2], maxIterations);
+        byte value = (byte)R[0];
+        uint address = R[1];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeByte(address, value))
+            {
+                break;
+            }
+
+            address++;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[1] = address;
+        R[2] -= completed;
+        bool finished = R[2] == 0;
+        SetT(finished);
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8FFC;
+        LastOpcodePc = loopPc + 4;
+        PC = finished ? loopPc + 8 : loopPc;
+        return true;
+    }
+
+    private static bool MatchesMovBStoreDtBfsAddPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x2100, 0x4210, 0x8FFC, 0x7101];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
+    public bool TryFastForwardGbrWordHelperJsrBfsPollLoop(
+        int maxCycles,
+        Func<uint, ushort?> readWord,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 12;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        uint helperPc = R[8];
+        if (!MatchesGbrWordHelperJsrBfsPollPattern(peekBus, loopPc) ||
+            !MatchesGbrWordHelperRoutine(peekBus, helperPc))
+        {
+            return false;
+        }
+
+        ushort? polled = readWord(GBR + 0x22);
+        if (polled is null || polled.Value == 0)
+        {
+            return false;
+        }
+
+        int iterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        R[0] = polled.Value;
+        R[4] = 2;
+        R[5] = 7;
+        PR = loopPc + 4;
+        SetT(false);
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = 0x8FFB;
+        LastOpcodePc = loopPc + 6;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesGbrWordHelperJsrBfsPollPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x480B, 0xE401, 0x2008, 0x8FFB, 0xE507];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
+    private static bool MatchesGbrWordHelperRoutine(ISh2PeekBus peekBus, uint helperPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x0012, 0x7020, 0x4400, 0x004D, 0x000B, 0x600D];
+        return MatchesInstructionSequence(peekBus, helperPc, expected);
+    }
+
     public bool TryFastForwardByteLookupWordRowExpandLoop(
         int maxCycles,
         Func<uint, byte?> readByte,
