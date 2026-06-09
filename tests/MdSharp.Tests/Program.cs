@@ -584,6 +584,28 @@ void ThirtyTwoXDeviceShell()
         ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2),
         0xBEEF);
     AssertEqual((ushort)0xDEAF, ReadSh2WordForTest(peerReadyProbeDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2)));
+    ThirtyTwoXDevice postStartSh2ClearDevice = new();
+    postStartSh2ClearDevice.Reset();
+    ThirtyTwoXDevice.ThirtyTwoXState postStartSh2ClearState = postStartSh2ClearDevice.CaptureState();
+    byte[] postStartSh2ClearRegisters = (byte[])postStartSh2ClearState.SystemRegisters.Clone();
+    postStartSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0] = (byte)'M';
+    postStartSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1] = (byte)'_';
+    postStartSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2] = (byte)'O';
+    postStartSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3] = (byte)'K';
+    postStartSh2ClearDevice.RestoreState(postStartSh2ClearState with
+    {
+        SystemRegisters = postStartSh2ClearRegisters,
+        BootRomHandshakePending = false,
+        BootRomPostStartSignaturePending = true,
+        BootRomPostStartSignatureHiddenFromSh2 = true,
+        BootRomPostStartSignatureReadMask = 0,
+    });
+    WriteSh2WordForTest(
+        postStartSh2ClearDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset),
+        0);
+    AssertEqual((ushort)0x4D5F, postStartSh2ClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartSh2ClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset)));
     ThirtyTwoXDevice lowerCommandClearDevice = new();
     lowerCommandClearDevice.Reset();
     lowerCommandClearDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0xFF);

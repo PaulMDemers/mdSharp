@@ -4220,7 +4220,7 @@ public sealed class ThirtyTwoXDevice
         int index = offset & (SystemRegisterBytes - 1);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         SyncOtherSh2ForCommunicationAccess((ushort)index, cpuIndex);
-        if (ShouldProtectPostStartSignatureFromSh2((ushort)index, 1))
+        if (ShouldProtectPostStartSignatureFromSh2((ushort)index, 1, value))
         {
             TraceSystemRegisterAccess(source, "W8", (ushort)index, value);
             return;
@@ -4279,7 +4279,7 @@ public sealed class ThirtyTwoXDevice
         ushort aligned = (ushort)(index & ~1);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         SyncOtherSh2ForCommunicationAccess(aligned, cpuIndex);
-        if (ShouldProtectPostStartSignatureFromSh2(aligned, 2))
+        if (ShouldProtectPostStartSignatureFromSh2(aligned, 2, value))
         {
             TraceSystemRegisterAccess(source, "W16", aligned, value);
             return;
@@ -4861,12 +4861,20 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
-    private bool ShouldProtectPostStartSignatureFromSh2(ushort offset, int bytes)
+    private bool ShouldProtectPostStartSignatureFromSh2(ushort offset, int bytes, uint value)
     {
         // The post-start signature is a 68000-side read overlay. SH-2 startup
         // code can legally begin publishing command/mailbox values beneath it
         // before the host has fully retired the virtual M_OK/S_OK bytes.
-        return false;
+        if (value != 0 ||
+            !_bootRomPostStartSignaturePending ||
+            _bootRomPostStartSignatureReadMask == 0xFF)
+        {
+            return false;
+        }
+
+        int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        return relative >= 0 && relative + bytes <= BootRomCommunicationSignature.Length;
     }
 
     private bool HasPendingBootRomSignatureWrite(ushort offset)
