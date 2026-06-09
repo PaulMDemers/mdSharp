@@ -79,6 +79,7 @@ Run("32X SH-2 GBR byte zero BT poll loop fast-forward", ThirtyTwoXSh2GbrByteZero
 Run("32X SH-2 literal byte displacement TST register BT poll loop fast-forward", ThirtyTwoXSh2LiteralByteDisplacementTstRegisterBtPollLoopFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
+Run("32X SH-2 MOV.W postincrement ADD immediate copy loop fast-forward", ThirtyTwoXSh2MovWordPostIncAddImmediateCopyLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
 Run("32X SH-2 long difference poll fast-forward", ThirtyTwoXSh2LongDifferencePollFastForward);
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
@@ -4779,6 +4780,79 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
         cpu.R[10] = Source;
         cpu.R[11] = Destination;
         SetSh2Property(cpu, nameof(Sh2Cpu.PR), LoopPc + 0x10);
+        return cpu;
+    }
+}
+
+void ThirtyTwoXSh2MovWordPostIncAddImmediateCopyLoopFastForward()
+{
+    const uint LoopPc = 0x0600_01BC;
+    const uint Source = 0x0200_219C;
+    const uint Destination = 0x2400_0200;
+    SyntheticSh2Bus fullBus = new();
+    LoadLoop(fullBus);
+    SeedData(fullBus);
+    Sh2Cpu full = CreateCpu(fullBus);
+
+    AssertTrue(
+        full.TryFastForwardMovWPostIncStoreAddImmediateDtBfLoop(256, fullBus.TryReadWord, fullBus.TryWriteWord, out int fullCycles),
+        "MOV.W postincrement ADD immediate copy loop should fast-forward");
+    AssertEqual(22, fullCycles);
+    AssertEqual(LoopPc + 10, full.PC);
+    AssertEqual(0u, full.R[0]);
+    AssertEqual(Source + 8, full.R[1]);
+    AssertEqual(Destination + 8, full.R[2]);
+    AssertEqual(unchecked((uint)(short)0x8001), full.R[3]);
+    AssertEqual(1u, full.SR & 1);
+    AssertEqual((ushort)0x1234, fullBus.ReadWord(Destination + 0));
+    AssertEqual((ushort)0xFEDC, fullBus.ReadWord(Destination + 2));
+    AssertEqual((ushort)0x0002, fullBus.ReadWord(Destination + 4));
+    AssertEqual((ushort)0x8001, fullBus.ReadWord(Destination + 6));
+
+    SyntheticSh2Bus partialBus = new();
+    LoadLoop(partialBus);
+    SeedData(partialBus);
+    Sh2Cpu partial = CreateCpu(partialBus);
+
+    AssertTrue(
+        partial.TryFastForwardMovWPostIncStoreAddImmediateDtBfLoop(12, partialBus.TryReadWord, partialBus.TryWriteWord, out int partialCycles),
+        "MOV.W postincrement ADD immediate copy loop should honor a partial cycle budget");
+    AssertEqual(12, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(2u, partial.R[0]);
+    AssertEqual(Source + 4, partial.R[1]);
+    AssertEqual(Destination + 4, partial.R[2]);
+    AssertEqual(unchecked((uint)(short)0xFEDC), partial.R[3]);
+    AssertEqual(0u, partial.SR & 1);
+    AssertEqual((ushort)0x1234, partialBus.ReadWord(Destination + 0));
+    AssertEqual((ushort)0xFEDC, partialBus.ReadWord(Destination + 2));
+    AssertEqual((ushort)0x0000, partialBus.ReadWord(Destination + 4));
+
+    static void LoadLoop(SyntheticSh2Bus bus)
+    {
+        bus.WriteInstructionWord(LoopPc + 0, 0x6315); // MOV.W @R1+,R3
+        bus.WriteInstructionWord(LoopPc + 2, 0x2231); // MOV.W R3,@R2
+        bus.WriteInstructionWord(LoopPc + 4, 0x7202); // ADD #2,R2
+        bus.WriteInstructionWord(LoopPc + 6, 0x4010); // DT R0
+        bus.WriteInstructionWord(LoopPc + 8, 0x8BFA); // BF loop
+        bus.WriteInstructionWord(LoopPc + 10, 0x001B); // SLEEP
+    }
+
+    static void SeedData(SyntheticSh2Bus bus)
+    {
+        bus.WriteWord(Source + 0, 0x1234);
+        bus.WriteWord(Source + 2, 0xFEDC);
+        bus.WriteWord(Source + 4, 0x0002);
+        bus.WriteWord(Source + 6, 0x8001);
+    }
+
+    static Sh2Cpu CreateCpu(SyntheticSh2Bus bus)
+    {
+        Sh2Cpu cpu = new(bus, "test");
+        cpu.Reset(LoopPc);
+        cpu.R[0] = 4;
+        cpu.R[1] = Source;
+        cpu.R[2] = Destination;
         return cpu;
     }
 }

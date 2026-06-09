@@ -3483,6 +3483,137 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovWPostIncStoreAddImmediateDtBfLoop(
+        int maxCycles,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        cycles = 0;
+        const int TakenIterationCycles = 6;
+        const int FinalIterationCycles = 4;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort storeOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort addOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort dtOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((loadOpcode & 0xF00F) != 0x6005 ||
+            (storeOpcode & 0xF00F) != 0x2001 ||
+            (addOpcode & 0xF000) != 0x7000 ||
+            (dtOpcode & 0xF0FF) != 0x4010 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int valueRegister = (loadOpcode >> 8) & 0x0F;
+        int sourceRegister = (loadOpcode >> 4) & 0x0F;
+        int storeDestination = (storeOpcode >> 8) & 0x0F;
+        int storeSource = (storeOpcode >> 4) & 0x0F;
+        int addDestination = (addOpcode >> 8) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        int addImmediate = (sbyte)(addOpcode & 0xFF);
+        if (storeSource != valueRegister ||
+            addDestination != storeDestination ||
+            addImmediate != 2)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 12 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count == 0)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / TakenIterationCycles);
+        if (maxIterations == 0 && maxCycles >= FinalIterationCycles)
+        {
+            maxIterations = 1;
+        }
+
+        uint iterations = Math.Min(count, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint source = R[sourceRegister];
+        uint destination = R[storeDestination];
+        uint completed = 0;
+        ushort value = 0;
+        while (completed < iterations)
+        {
+            ushort? read = readWord(source);
+            if (read is null)
+            {
+                break;
+            }
+
+            value = read.Value;
+            if (!writeWord(destination, value))
+            {
+                break;
+            }
+
+            source += 2;
+            destination += 2;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[sourceRegister] = source;
+        R[storeDestination] = destination;
+        R[valueRegister] = SignExtend16(value);
+        R[countRegister] = count - completed;
+        bool completedLoop = completed == count;
+        cycles = completedLoop
+            ? checked((int)(((completed - 1) * TakenIterationCycles) + FinalIterationCycles))
+            : checked((int)(completed * TakenIterationCycles));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 8;
+
+        if (completedLoop)
+        {
+            SetT(true);
+            PC = loopPc + 10;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        return true;
+    }
+
     public bool TryFastForwardEmptyDescriptorSpanFillLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
     {
         const int CyclesPerIteration = 6;
