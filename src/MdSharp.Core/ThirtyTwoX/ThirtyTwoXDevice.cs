@@ -595,6 +595,7 @@ public sealed class ThirtyTwoXDevice
         bool nowVBlank = scanline >= visibleLines;
         if (nowVBlank && !_vBlank)
         {
+            LatchVdpDisplayControls();
             _vBlank = true;
             CompletePendingFrameBufferSwap();
             _masterVerticalInterruptPending = true;
@@ -2026,8 +2027,8 @@ public sealed class ThirtyTwoXDevice
             return false;
         }
 
-        value = 0xFFFF;
-        return true;
+        value = 0;
+        return false;
     }
 
     private bool TryWriteSh2WordForFastCopy(uint address, ushort value, int cpuIndex)

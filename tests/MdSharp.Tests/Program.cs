@@ -1447,6 +1447,23 @@ void ThirtyTwoXDeviceShell()
     latchDevice.WriteFrameBufferWord(0, 0x55AA);
     AssertEqual((ushort)0x55AA, latchDevice.DrawFrameBuffer[0] << 8 | latchDevice.DrawFrameBuffer[1]);
 
+    ThirtyTwoXDevice vblankLatchDevice = new();
+    vblankLatchDevice.Reset();
+    vblankLatchDevice.WriteFrameBufferWord(0, 0x0100);
+    vblankLatchDevice.WriteFrameBufferByte(0x200, 1);
+    vblankLatchDevice.WritePaletteWord(2, 0x001F);
+    vblankLatchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    AssertEqual(1, vblankLatchDevice.DisplayFrameBufferIndex);
+    vblankLatchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    vblankLatchDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    byte[] vblankLatchFrame = new byte[ThirtyTwoXHardwareProfile.NominalWidth * ThirtyTwoXHardwareProfile.NtscVisibleLines * 3];
+    vblankLatchDevice.CompositeFrameRgbInto(vblankLatchFrame);
+    AssertEqual(255, vblankLatchFrame[0]);
+    AssertEqual(0, vblankLatchFrame[1]);
+    AssertEqual(0, vblankLatchFrame[2]);
+    AssertEqual(1, vblankLatchDevice.LastCompositeMode);
+    AssertTrue(!vblankLatchDevice.LastCompositeUsedFallback, "VBlank entry should latch nonblank bitmap mode before compositing");
+
     ThirtyTwoXDevice sh2VdpAccessDevice = new();
     sh2VdpAccessDevice.Reset();
     WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart, 0x1234);
