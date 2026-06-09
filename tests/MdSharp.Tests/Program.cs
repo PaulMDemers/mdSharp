@@ -34,6 +34,7 @@ Run("32X SH-2 byte fill indexed CMP/GE loop fast-forward", ThirtyTwoXSh2ByteFill
 Run("32X SH-2 MOV.B DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovBStoreDtBfsAddLoopFastForward);
 Run("32X SH-2 GBR word helper JSR BF/S poll loop fast-forward", ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward);
 Run("32X SH-2 long TST immediate BT poll loop fast-forward", ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward);
+Run("32X SH-2 DMA idle communication mismatch poll loop fast-forward", ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward);
 Run("32X SH-2 byte displacement dual TST/BRA poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
@@ -393,11 +394,11 @@ void ThirtyTwoXDeviceShell()
         return (byte)method.Invoke(target, [address, 0])!;
     }
 
-    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address)
+    static ushort ReadSh2WordForTest(ThirtyTwoXDevice target, uint address, int cpuIndex = 0)
     {
         System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("ReadSh2Word", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("ReadSh2Word helper was not found");
-        return (ushort)method.Invoke(target, [address, 0])!;
+        return (ushort)method.Invoke(target, [address, cpuIndex])!;
     }
 
     static void WriteSh2ByteForTest(ThirtyTwoXDevice target, uint address, byte value, int cpuIndex = 0)
@@ -422,6 +423,10 @@ void ThirtyTwoXDeviceShell()
     }
 
     AssertTrue(device.Sh2HeldInReset, "32X shell should hold SH-2s until adapter control releases them");
+    AssertEqual((ushort)0x0002, ReadSh2WordForTest(device, 0xFFFF_FF8E));
+    AssertEqual((ushort)0x0002, ReadSh2WordForTest(device, 0xFFFF_FF9E));
+    AssertEqual((ushort)0x0002, ReadSh2WordForTest(device, 0xFFFF_FF8E, cpuIndex: 1));
+    AssertEqual((ushort)0x0002, ReadSh2WordForTest(device, 0xFFFF_FF9E, cpuIndex: 1));
     AssertEqual((ushort)0x8000, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
     device.WriteVdpRegisterWord(0x0072, 0xFFFF);
     AssertEqual((ushort)0x0000, device.ReadVdpRegisterWord(0x0072));
@@ -2740,6 +2745,40 @@ void ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward()
     AssertTrue(
         !cpu.TryFastForwardLongTstImmediateBtPollLoop(30, bus.TryReadByte, out _),
         "long TST immediate BT poll loop should fall back once the masked bit is set");
+}
+
+void ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0198;
+    const uint DmaControl = 0xFFFF_FF8C;
+    const uint Gbr = 0x2000_4000;
+    const uint ExpectedSignature = 0x414C_4C20;
+    SyntheticSh2Bus bus = new();
+    ushort[] opcodes = [0x6022, 0xC802, 0x89FC, 0xC608, 0x3100, 0x8BF9];
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    bus.WriteLong(DmaControl, 2);
+    bus.WriteLong(Gbr + 0x20, 0);
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    cpu.R[1] = ExpectedSignature;
+    cpu.R[2] = DmaControl;
+    AssertTrue(
+        cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(60, bus.TryReadByte, out int cycles),
+        "DMA idle communication mismatch loop should fast-forward while the signature is absent");
+    AssertEqual(60, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteLong(Gbr + 0x20, ExpectedSignature);
+    AssertTrue(
+        !cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(60, bus.TryReadByte, out _),
+        "DMA idle communication mismatch loop should fall back once the signature matches");
 }
 
 void ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward()

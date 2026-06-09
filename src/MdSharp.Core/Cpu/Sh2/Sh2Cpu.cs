@@ -1758,6 +1758,70 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 6;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesDmaIdleCommunicationLongMismatchPollPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint? dmaControl = TryReadBigEndianLong(readByte, R[2]);
+        uint? communication = TryReadBigEndianLong(readByte, GBR + 0x20);
+        if (dmaControl is null ||
+            communication is null ||
+            (dmaControl.Value & 2) == 0 ||
+            communication.Value == R[1])
+        {
+            return false;
+        }
+
+        int iterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        R[0] = communication.Value;
+        SetT(false);
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = 0x8BF9;
+        LastOpcodePc = loopPc + 0x0A;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesDmaIdleCommunicationLongMismatchPollPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x6022, 0xC802, 0x89FC, 0xC608, 0x3100, 0x8BF9];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
+    private static uint? TryReadBigEndianLong(Func<uint, byte?> readByte, uint address)
+    {
+        byte? b0 = readByte(address);
+        byte? b1 = readByte(address + 1);
+        byte? b2 = readByte(address + 2);
+        byte? b3 = readByte(address + 3);
+        if (b0 is null || b1 is null || b2 is null || b3 is null)
+        {
+            return null;
+        }
+
+        return (uint)((b0.Value << 24) | (b1.Value << 16) | (b2.Value << 8) | b3.Value);
+    }
+
     public bool TryFastForwardByteDisplacementDualTstBraPollLoop(
         int maxCycles,
         Func<uint, byte?> readByte,

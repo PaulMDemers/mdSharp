@@ -512,6 +512,7 @@ public sealed class ThirtyTwoXDevice
         _sh2LowCartridgeCacheLines[0].Clear();
         _sh2LowCartridgeCacheLines[1].Clear();
         ResetSh2PeripheralDefaults();
+        ResetSh2DmaDefaults();
         Array.Clear(_sh2DmaRequestSelect);
         _activeDisplayFrameBufferIndex = 0;
         _requestedDisplayFrameBufferIndex = 0;
@@ -653,6 +654,9 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sh2FrtBaseCounters);
         Array.Clear(_sh2FrtLastCounters);
         ResetSh2PeripheralDefaults();
+        Array.Clear(_sh2DmaRegisters[0]);
+        Array.Clear(_sh2DmaRegisters[1]);
+        ResetSh2DmaDefaults();
         MasterSh2.Reset(masterPc);
         SlaveSh2.Reset(slavePc);
         ResetSh2FrtBaseCycles();
@@ -668,6 +672,9 @@ public sealed class ThirtyTwoXDevice
 
         uint master = _userHeader.IsValid ? NormalizeSh2ProgramAddress(_userHeader.MasterStart) : ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart;
         uint slave = _userHeader.IsValid ? NormalizeSh2ProgramAddress(_userHeader.SlaveStart) : ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart;
+        Array.Clear(_sh2DmaRegisters[0]);
+        Array.Clear(_sh2DmaRegisters[1]);
+        ResetSh2DmaDefaults();
         MasterSh2.Reset(master);
         SlaveSh2.Reset(slave);
         MasterSh2.SetGbr(Sh2SciStatusRegisterAddress);
@@ -701,6 +708,9 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sdram);
         ResetSh2CacheTags();
         ResetSh2PeripheralDefaults();
+        Array.Clear(_sh2DmaRegisters[0]);
+        Array.Clear(_sh2DmaRegisters[1]);
+        ResetSh2DmaDefaults();
         MasterSh2.Reset(ReadSh2BiosLong(cpuIndex: 0, offset: 0));
         SlaveSh2.Reset(ReadSh2BiosLong(cpuIndex: 1, offset: 0));
         MasterSh2.R[15] = ReadSh2BiosLong(cpuIndex: 0, offset: 4);
@@ -1151,6 +1161,17 @@ public sealed class ThirtyTwoXDevice
                 cpu.TryFastForwardGbrWordHelperJsrBfsPollLoop(
                     Math.Min(cycleBudget, 12 * 4096),
                     _sh2WordReaders[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (nextOpcode == 0x6022 &&
+                cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(
+                    Math.Min(cycleBudget, 6 * 4096),
+                    _sh2ByteReaders[cpuIndex],
                     out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -3604,8 +3625,12 @@ public sealed class ThirtyTwoXDevice
             return true;
         }
 
-        if (IsSh2DmaRegisterAddress(address) ||
-            IsSh2DivisionUnitRegisterAddress(address) ||
+        if (TryPeekSh2DmaByte(address, cpuIndex, out value))
+        {
+            return true;
+        }
+
+        if (IsSh2DivisionUnitRegisterAddress(address) ||
             IsSh2PeripheralRegisterAddress(address))
         {
             value = 0;
@@ -3647,6 +3672,24 @@ public sealed class ThirtyTwoXDevice
 
         value = _sh2PeripheralRegisters[cpuIndex & 1][(int)(address - Sh2PeripheralRegisterStart)];
         return true;
+    }
+
+    private bool TryPeekSh2DmaByte(uint address, int cpuIndex, out byte value)
+    {
+        if (TryGetSh2DmaRequestSelectIndex(address, out int requestSelectIndex))
+        {
+            value = _sh2DmaRequestSelect[requestSelectIndex];
+            return true;
+        }
+
+        if (address is >= Sh2DmaRegisterStart and < Sh2DmaRegisterEnd)
+        {
+            value = _sh2DmaRegisters[cpuIndex & 1][(int)(address - Sh2DmaRegisterStart)];
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private bool TryReadSh2BootRomByte(uint address, int cpuIndex, out byte value)
@@ -7154,6 +7197,21 @@ public sealed class ThirtyTwoXDevice
         }
     }
 
+    private void ResetSh2DmaDefaults()
+    {
+        for (int cpu = 0; cpu < _sh2DmaRegisters.Length; cpu++)
+        {
+            byte[] registers = _sh2DmaRegisters[cpu];
+            for (int channel = 0; channel < 2; channel++)
+            {
+                WriteBigEndianLong(
+                    registers,
+                    (channel * Sh2DmaChannelRegisterStride) + Sh2DmaChannelControl0Offset,
+                    Sh2DmaTransferEnd);
+            }
+        }
+    }
+
     private byte ReadSh2DmaByte(uint address, int cpuIndex)
     {
         byte value;
@@ -7237,7 +7295,8 @@ public sealed class ThirtyTwoXDevice
         {
             (cpuIndex == 0 ? MasterSh2 : SlaveSh2).ClearPendingInterrupt(priority, vector);
         }
-        else if (!oldTransferEnd && newTransferEnd)
+
+        if (newTransferEnd)
         {
             RequestSh2DmaInterruptIfEnabled(cpuIndex, registers, channel, newChannelControl);
         }
