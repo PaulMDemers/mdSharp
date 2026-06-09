@@ -1703,6 +1703,117 @@ Done:
         return MatchesInstructionSequence(peekBus, helperPc, expected);
     }
 
+    public bool TryFastForwardLongTstImmediateBtPollLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 3;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesLongTstImmediateBtPollPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        byte? b0 = readByte(R[2]);
+        byte? b1 = readByte(R[2] + 1);
+        byte? b2 = readByte(R[2] + 2);
+        byte? b3 = readByte(R[2] + 3);
+        if (b0 is null || b1 is null || b2 is null || b3 is null)
+        {
+            return false;
+        }
+
+        uint value = (uint)((b0.Value << 24) | (b1.Value << 16) | (b2.Value << 8) | b3.Value);
+        if ((value & 2) != 0)
+        {
+            return false;
+        }
+
+        int iterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        R[0] = value;
+        SetT(true);
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = 0x89FC;
+        LastOpcodePc = loopPc + 4;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesLongTstImmediateBtPollPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x6022, 0xC802, 0x89FC];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
+    public bool TryFastForwardByteDisplacementDualTstBraPollLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 8;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesByteDisplacementDualTstBraPollPattern(peekBus, loopPc))
+        {
+            if (PC < 6)
+            {
+                return false;
+            }
+
+            loopPc = PC - 6;
+            if (!MatchesByteDisplacementDualTstBraPollPattern(peekBus, loopPc) ||
+                PC != loopPc + 6)
+            {
+                return false;
+            }
+        }
+
+        byte? value = readByte(R[1] + 4);
+        if (value is null || (value.Value & 0x78) != 0)
+        {
+            return false;
+        }
+
+        int iterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        R[0] = (uint)(sbyte)value.Value;
+        SetT(true);
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = 0xAFF9;
+        LastOpcodePc = loopPc + 0x0A;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesByteDisplacementDualTstBraPollPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x8414, 0xC838, 0x8B0E, 0xC840, 0x8B04, 0xAFF9, 0x0009];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     public bool TryFastForwardByteLookupWordRowExpandLoop(
         int maxCycles,
         Func<uint, byte?> readByte,

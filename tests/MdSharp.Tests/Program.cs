@@ -33,6 +33,8 @@ Run("32X SH-2 word table search loop fast-forward", ThirtyTwoXSh2WordTableSearch
 Run("32X SH-2 byte fill indexed CMP/GE loop fast-forward", ThirtyTwoXSh2ByteFillIndexedCmpGeFastForward);
 Run("32X SH-2 MOV.B DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovBStoreDtBfsAddLoopFastForward);
 Run("32X SH-2 GBR word helper JSR BF/S poll loop fast-forward", ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward);
+Run("32X SH-2 long TST immediate BT poll loop fast-forward", ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward);
+Run("32X SH-2 byte displacement dual TST/BRA poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
@@ -2709,6 +2711,73 @@ void ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward()
     AssertTrue(
         !cpu.TryFastForwardGbrWordHelperJsrBfsPollLoop(120, bus.TryReadWord, out _),
         "GBR word helper JSR/BF/S poll loop should fall back once the polled word clears");
+}
+
+void ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0198;
+    const uint PollAddress = 0xFFFF_FF8C;
+    SyntheticSh2Bus bus = new();
+    ushort[] opcodes = [0x6022, 0xC802, 0x89FC];
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    bus.WriteLong(PollAddress, 0);
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[2] = PollAddress;
+    AssertTrue(
+        cpu.TryFastForwardLongTstImmediateBtPollLoop(30, bus.TryReadByte, out int cycles),
+        "long TST immediate BT poll loop should fast-forward while the masked bit is clear");
+    AssertEqual(30, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteLong(PollAddress, 2);
+    AssertTrue(
+        !cpu.TryFastForwardLongTstImmediateBtPollLoop(30, bus.TryReadByte, out _),
+        "long TST immediate BT poll loop should fall back once the masked bit is set");
+}
+
+void ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_2218;
+    const uint Base = 0xFFFF_FE00;
+    SyntheticSh2Bus bus = new();
+    ushort[] opcodes = [0x8414, 0xC838, 0x8B0E, 0xC840, 0x8B04, 0xAFF9, 0x0009];
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    bus.WriteByte(Base + 4, 0x84);
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = Base;
+    AssertTrue(
+        cpu.TryFastForwardByteDisplacementDualTstBraPollLoop(80, bus.TryReadByte, out int cycles),
+        "byte displacement dual TST/BRA poll loop should fast-forward while both masks are clear");
+    AssertEqual(80, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0xFFFF_FF84u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    bus.WriteByte(Base + 4, 0xC4);
+    AssertTrue(
+        !cpu.TryFastForwardByteDisplacementDualTstBraPollLoop(80, bus.TryReadByte, out _),
+        "byte displacement dual TST/BRA poll loop should fall back once either mask is set");
+
+    bus.WriteByte(Base + 4, 0x84);
+    cpu.Reset(LoopPc + 6);
+    cpu.R[0] = 0xFFFF_FF84;
+    cpu.R[1] = Base;
+    AssertTrue(
+        cpu.TryFastForwardByteDisplacementDualTstBraPollLoop(80, bus.TryReadByte, out _),
+        "byte displacement dual TST/BRA poll loop should fast-forward from the second TST entry point");
+    AssertEqual(LoopPc, cpu.PC);
 }
 
 void ThirtyTwoXSh2WordHighBitMaskTransformFastForward()
