@@ -452,6 +452,8 @@ public sealed class ThirtyTwoXDevice
     public Action<Sh2Cpu.Sh2RechainTrace>? Sh2RechainObserver { get; set; }
     public Action<int, uint, ushort>? Sh2PcSampleObserver { get; set; }
     public Func<uint, bool>? Sh2MemoryAccessTraceFilter { get; set; }
+    public Action<SdramWriteTrace>? SdramWriteObserver { get; set; }
+    public Func<int, bool>? SdramWriteTraceFilter { get; set; }
     public bool AdapterEnabled => _adapterEnabled;
     public bool Sh2ResetEnabled => _sh2ResetEnabled;
     public bool Sh2ResetReleased => _sh2ResetReleased;
@@ -2035,22 +2037,33 @@ public sealed class ThirtyTwoXDevice
     {
         if (TryMapSh2OverflowSdramMirrorAddress(address, out int overflowSdramOffset))
         {
-            _sdram[overflowSdramOffset] = (byte)(value >> 8);
-            _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
+            TraceSdramWordWrite(cpuIndex, "FSKIP16", address, overflowSdramOffset, value);
+            TraceSh2MemoryAccess(cpuIndex, "FSKIP16", address, value);
             return true;
         }
 
-        if (TryMapSh2CachedSdramAddress(address, out int cachedSdramOffset))
+        if (TryMapExactSh2CachedSdramAddress(address, out int cachedSdramOffset))
         {
             WriteBigEndianWord(_sdram, cachedSdramOffset, value);
             UpdateSh2SdramCacheByte(cachedSdramOffset, (byte)(value >> 8), cpuIndex);
             UpdateSh2SdramCacheByte((cachedSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), (byte)value, cpuIndex);
+            TraceSdramWordWrite(cpuIndex, "FWC16", address, cachedSdramOffset, value);
+            TraceSh2MemoryAccess(cpuIndex, "FWC16", address, value);
             return true;
         }
 
-        if (TryMapSh2SdramAddress(address, out int sdramOffset))
+        if (TryMapExactSh2SdramAddress(address, out int sdramOffset))
         {
             WriteBigEndianWord(_sdram, sdramOffset, value);
+            TraceSdramWordWrite(cpuIndex, "FW16", address, sdramOffset, value);
+            TraceSh2MemoryAccess(cpuIndex, "FW16", address, value);
+            return true;
+        }
+
+        if (TryMapSh2SdramAddress(address, out int mirroredSdramOffset))
+        {
+            TraceSdramWordWrite(cpuIndex, "FSKIP16", address, mirroredSdramOffset, value);
+            TraceSh2MemoryAccess(cpuIndex, "FSKIP16", address, value);
             return true;
         }
 
@@ -2084,10 +2097,15 @@ public sealed class ThirtyTwoXDevice
             address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80 ||
             address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) ||
             address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteCachedStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2) ||
-            TryMapSh2FrameBufferAddress(address, out _, out _) ||
             IsSh2DmaRegisterAddress(address) ||
             TryMapSh2CachePurgeAddress(address) ||
             TryMapSh2CacheAddressArrayAddress(address, out _))
+        {
+            TraceSh2MemoryAccess(cpuIndex, "FSKIPMMIO16", address, value);
+            return true;
+        }
+
+        if (TryMapSh2FrameBufferAddress(address, out _, out _))
         {
             WriteSh2Word(address, value, cpuIndex);
             return true;
@@ -4013,7 +4031,9 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2OverflowSdramMirrorAddress(address, out int overflowSdramOffset))
         {
             _sdram[overflowSdramOffset] = (byte)(value >> 8);
-            _sdram[(overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1)] = (byte)value;
+            int lowOffset = (overflowSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1);
+            _sdram[lowOffset] = (byte)value;
+            TraceSdramWordWrite(cpuIndex, "W16", address, overflowSdramOffset, value);
             TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
             return;
         }
@@ -4045,6 +4065,7 @@ public sealed class ThirtyTwoXDevice
             WriteBigEndianWord(_sdram, cachedSdramOffset, value);
             UpdateSh2SdramCacheByte(cachedSdramOffset, (byte)(value >> 8), cpuIndex);
             UpdateSh2SdramCacheByte((cachedSdramOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1), (byte)value, cpuIndex);
+            TraceSdramWordWrite(cpuIndex, "WC16", address, cachedSdramOffset, value);
             TraceSh2MemoryAccess(cpuIndex, "WC16", address, value);
             return;
         }
@@ -4053,6 +4074,7 @@ public sealed class ThirtyTwoXDevice
         {
             AddSh2WaitCycles(cpuIndex, Sh2SdramWriteWaitCycles);
             WriteBigEndianWord(_sdram, sdramOffset, value);
+            TraceSdramWordWrite(cpuIndex, "W16", address, sdramOffset, value);
             TraceSh2MemoryAccess(cpuIndex, "W16", address, value);
             return;
         }
@@ -5273,6 +5295,33 @@ public sealed class ThirtyTwoXDevice
         }
 
         Sh2MemoryAccessObserver(new Sh2MemoryAccessTrace(cpuIndex == 0 ? "MSH2" : "SSH2", operation, address, value));
+    }
+
+    private void TraceSdramWordWrite(int cpuIndex, string operation, uint address, int offset, ushort value)
+    {
+        Action<SdramWriteTrace>? observer = SdramWriteObserver;
+        if (observer is null)
+        {
+            return;
+        }
+
+        int normalizedOffset = offset & (ThirtyTwoXHardwareProfile.SdramBytes - 1);
+        int lowOffset = (normalizedOffset + 1) & (ThirtyTwoXHardwareProfile.SdramBytes - 1);
+        Func<int, bool>? filter = SdramWriteTraceFilter;
+        if (filter is not null && !filter(normalizedOffset) && !filter(lowOffset))
+        {
+            return;
+        }
+
+        Sh2Cpu cpu = cpuIndex == 0 ? MasterSh2 : SlaveSh2;
+        observer(new SdramWriteTrace(
+            cpuIndex == 0 ? "MSH2" : "SSH2",
+            operation,
+            address,
+            normalizedOffset,
+            value,
+            cpu.LastOpcodePc,
+            cpu.LastOpcode));
     }
 
     private FrameBufferAccessTrace BuildFrameBufferAccessTrace(string source, string operation, uint offset, ushort value)
@@ -8305,6 +8354,30 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
+    private static bool TryMapExactSh2SdramAddress(uint address, out int offset)
+    {
+        if (address < ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)address;
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramStart and < ThirtyTwoXHardwareProfile.Sh2SdramStart + ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramStart);
+            return true;
+        }
+
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart and < ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart + ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramCacheThroughStart);
+            return true;
+        }
+
+        offset = 0;
+        return false;
+    }
+
     private static bool TryMapSh2OverflowSdramMirrorAddress(uint address, out int offset)
     {
         // Some 32X SDK helpers form oversized effective addresses from an SDRAM
@@ -8325,6 +8398,18 @@ public sealed class ThirtyTwoXDevice
         if ((address & 0xFE00_0000u) == ThirtyTwoXHardwareProfile.Sh2SdramStart)
         {
             offset = (int)(address & (ThirtyTwoXHardwareProfile.SdramBytes - 1));
+            return true;
+        }
+
+        offset = 0;
+        return false;
+    }
+
+    private static bool TryMapExactSh2CachedSdramAddress(uint address, out int offset)
+    {
+        if (address is >= ThirtyTwoXHardwareProfile.Sh2SdramStart and < ThirtyTwoXHardwareProfile.Sh2SdramStart + ThirtyTwoXHardwareProfile.SdramBytes)
+        {
+            offset = (int)(address - ThirtyTwoXHardwareProfile.Sh2SdramStart);
             return true;
         }
 
@@ -8705,6 +8790,7 @@ public sealed class ThirtyTwoXDevice
     public readonly record struct SystemRegisterAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
     public readonly record struct Sh2MemoryAccessTrace(string Source, string Operation, uint Address, ushort Value);
+    public readonly record struct SdramWriteTrace(string Source, string Operation, uint Address, int Offset, ushort Value, uint Pc, ushort Opcode);
 
     public readonly record struct PaletteAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 

@@ -47,6 +47,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-comm-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
+    Console.WriteLine("  mdsharp --32x-sdram-watch <rom-file> <output.csv> [frames] [instructions-per-frame] [offset-start] [offset-end] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
@@ -399,6 +400,24 @@ if (args[0].Equals("--32x-diagnostic-trace", StringComparison.OrdinalIgnoreCase)
     int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? parsedStartFrame : 0;
     int maxEvents = args.Length > 6 && int.TryParse(args[6], out int parsedMaxEvents) ? parsedMaxEvents : 10_000;
     TraceThirtyTwoXDiagnostic(args[1], args[2], frames, instructionsPerFrame, startFrame, maxEvents);
+    return;
+}
+
+if (args[0].Equals("--32x-sdram-watch", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sdram-watch <rom-file> <output.csv> [frames] [instructions-per-frame] [offset-start] [offset-end] [start-frame] [max-lines]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int offsetStart = args.Length > 5 ? (int)ParseNumber(args[5]) : 0;
+    int offsetEnd = args.Length > 6 ? (int)ParseNumber(args[6]) : offsetStart;
+    int startFrame = args.Length > 7 && int.TryParse(args[7], out int parsedStartFrame) ? parsedStartFrame : 0;
+    int maxLines = args.Length > 8 && int.TryParse(args[8], out int parsedMaxLines) ? parsedMaxLines : 1_000;
+    TraceThirtyTwoXSdramWatch(args[1], args[2], frames, instructionsPerFrame, offsetStart, offsetEnd, startFrame, maxLines);
     return;
 }
 
@@ -4027,6 +4046,80 @@ void TraceThirtyTwoXDiagnostic(string romPath, string outputCsv, int frames, int
     device.PaletteAccessObserver = null;
     device.FrameBufferAccessObserver = null;
     Console.WriteLine($"Wrote {emittedEvents:N0} 32X diagnostic trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
+void TraceThirtyTwoXSdramWatch(string romPath, string outputCsv, int frames, int instructionsPerFrame, int offsetStart, int offsetEnd, int startFrame, int maxLines)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    int normalizedStart = offsetStart & (ThirtyTwoXHardwareProfile.SdramBytes - 1);
+    int normalizedEnd = offsetEnd & (ThirtyTwoXHardwareProfile.SdramBytes - 1);
+    if (normalizedEnd < normalizedStart)
+    {
+        (normalizedStart, normalizedEnd) = (normalizedEnd, normalizedStart);
+    }
+
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,source,operation,address,offset,value,pc,opcode,masterPc,masterSr,masterLastPc,masterLastOpcode,slavePc,slaveSr,slaveLastPc,slaveLastOpcode,m68kPc,bitmap,fbctl,draw,display");
+
+    int currentFrame = 0;
+    int lines = 0;
+    int sequence = 0;
+    device.SdramWriteTraceFilter = offset => offset >= normalizedStart && offset <= normalizedEnd;
+    device.SdramWriteObserver = trace =>
+    {
+        if (currentFrame < startFrame || lines >= maxLines)
+        {
+            return;
+        }
+
+        lines++;
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            trace.Source,
+            trace.Operation,
+            $"${trace.Address:X8}",
+            $"${trace.Offset:X5}",
+            $"${trace.Value:X4}",
+            $"${trace.Pc:X8}",
+            $"${trace.Opcode:X4}",
+            $"${device.MasterSh2.PC:X8}",
+            $"${device.MasterSh2.SR:X8}",
+            $"${device.MasterSh2.LastOpcodePc:X8}",
+            $"${device.MasterSh2.LastOpcode:X4}",
+            $"${device.SlaveSh2.PC:X8}",
+            $"${device.SlaveSh2.SR:X8}",
+            $"${device.SlaveSh2.LastOpcodePc:X8}",
+            $"${device.SlaveSh2.LastOpcode:X4}",
+            $"${machine.MainCpu.PC:X8}",
+            $"${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset):X4}",
+            $"${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4}",
+            device.DrawFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            device.DisplayFrameBufferIndex.ToString(CultureInfo.InvariantCulture)));
+    };
+
+    Console.WriteLine($"32X SDRAM watch: {Path.GetFileName(romPath)}, {frames:N0} frame(s), offset=${normalizedStart:X5}-${normalizedEnd:X5}, startFrame={startFrame:N0}, max {maxLines:N0} row(s)");
+    for (currentFrame = 0; currentFrame < frames && lines < maxLines; currentFrame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+    }
+
+    device.SdramWriteObserver = null;
+    device.SdramWriteTraceFilter = null;
+    Console.WriteLine($"Wrote {lines:N0} 32X SDRAM watch row(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
 }
 

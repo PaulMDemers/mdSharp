@@ -1464,6 +1464,37 @@ void ThirtyTwoXDeviceShell()
     AssertEqual(1, vblankLatchDevice.LastCompositeMode);
     AssertTrue(!vblankLatchDevice.LastCompositeUsedFallback, "VBlank entry should latch nonblank bitmap mode before compositing");
 
+    ThirtyTwoXDevice fastOverflowMirrorDevice = new();
+    fastOverflowMirrorDevice.Reset();
+    System.Reflection.MethodInfo fastCopyWrite = typeof(ThirtyTwoXDevice).GetMethod("TryWriteSh2WordForFastCopy", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("TryWriteSh2WordForFastCopy helper was not found");
+    bool fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [0x502C_1280u, (ushort)0xFFFF, 0])!;
+    AssertTrue(fastCopyAccepted, "overflow mirror writes should be consumed by the fast-copy helper");
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1281]);
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [0x0C9C_1280u, (ushort)0x7A79, 0])!;
+    AssertTrue(fastCopyAccepted, "stack-alias mirror writes should be consumed by the fast-copy helper");
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1281]);
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [0x272C_1280u, (ushort)0x1443, 0])!;
+    AssertTrue(fastCopyAccepted, "cache-through mirror writes should be consumed by the fast-copy helper");
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x00, fastOverflowMirrorDevice.Sdram[0x1281]);
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [0x0600_1280u, (ushort)0x1234, 0])!;
+    AssertTrue(fastCopyAccepted, "canonical SDRAM writes should still be handled by the fast-copy helper");
+    AssertEqual((byte)0x12, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x34, fastOverflowMirrorDevice.Sdram[0x1281]);
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [0x0000_1280u, (ushort)0x5678, 0])!;
+    AssertTrue(fastCopyAccepted, "local SDRAM writes should still be handled by the fast-copy helper");
+    AssertEqual((byte)0x56, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x78, fastOverflowMirrorDevice.Sdram[0x1281]);
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + ThirtyTwoXHardwareProfile.BitmapModeOffset, (ushort)0x7B79, 0])!;
+    AssertTrue(fastCopyAccepted, "MMIO writes should be consumed by the fast-copy helper without mutating VDP registers");
+    AssertEqual((ushort)0x8000, fastOverflowMirrorDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
+    WriteSh2WordForTest(fastOverflowMirrorDevice, 0x502C_1280u, 0x4F26);
+    AssertEqual((byte)0x4F, fastOverflowMirrorDevice.Sdram[0x1280]);
+    AssertEqual((byte)0x26, fastOverflowMirrorDevice.Sdram[0x1281]);
+
     ThirtyTwoXDevice sh2VdpAccessDevice = new();
     sh2VdpAccessDevice.Reset();
     WriteSh2WordForTest(sh2VdpAccessDevice, ThirtyTwoXHardwareProfile.Sh2FrameBufferStart, 0x1234);
