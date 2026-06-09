@@ -2532,11 +2532,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         ushort remaining = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset);
-        if (remaining == 0)
-        {
-            ClearRomToVramDmaRequest();
-            return false;
-        }
+        bool boundedTransfer = remaining != 0;
 
         uint expectedSource = ReadDreqSourceAddress();
         uint normalizedSource = sourceAddress & 0x00FF_FFFE;
@@ -2556,10 +2552,14 @@ public sealed class ThirtyTwoXDevice
 
         _dreqFifo.Enqueue(value);
         _dreqFifoWriteCount++;
-        remaining--;
-        WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, remaining);
+        if (boundedTransfer)
+        {
+            remaining--;
+            WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.DreqLengthOffset, remaining);
+        }
+
         WriteDreqSourceAddress(normalizedSource + 2);
-        if (remaining == 0)
+        if (boundedTransfer && remaining == 0)
         {
             ClearRomToVramDmaRequest();
         }
@@ -5339,7 +5339,17 @@ public sealed class ThirtyTwoXDevice
             opcode = SlaveSh2.LastOpcode;
         }
 
-        return new FrameBufferAccessTrace(source, operation, offset, value, DrawFrameBufferIndex, pc, opcode);
+        return new FrameBufferAccessTrace(
+            source,
+            operation,
+            offset,
+            value,
+            DrawFrameBufferIndex,
+            DisplayFrameBufferIndex,
+            _requestedDisplayFrameBufferIndex,
+            _frameBufferSwapPending,
+            pc,
+            opcode);
     }
 
     private void TraceDeniedFrameBufferAccess(string source, string operation, uint offset, ushort value)
@@ -5463,7 +5473,7 @@ public sealed class ThirtyTwoXDevice
                         break;
                     }
 
-                    if (ReadBigEndianWord(source, sourceIndex) != 0)
+                    if (HasVisibleDirectColorBits(ReadBigEndianWord(source, sourceIndex)))
                     {
                         return true;
                     }
@@ -5627,6 +5637,11 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
+    private static bool HasVisibleDirectColorBits(ushort color)
+    {
+        return (color & 0x7FFF) != 0;
+    }
+
     private static void WriteRgb555(Span<byte> framebuffer, int offset, ushort color, bool blueFirst)
     {
         byte r = Expand5To8(color & 0x1F);
@@ -5737,7 +5752,7 @@ public sealed class ThirtyTwoXDevice
         _requestedDisplayFrameBufferIndex = requestedDisplayFrameBuffer & 0x01;
         _pendingDrawFrameBufferIndex = _requestedDisplayFrameBufferIndex ^ 1;
         _frameBufferSwapPending = _requestedDisplayFrameBufferIndex != _activeDisplayFrameBufferIndex;
-        if (CanSwitchFrameBufferNow())
+        if (IsLatchedBlankMode())
         {
             CompletePendingFrameBufferSwap();
         }
@@ -8794,5 +8809,15 @@ public sealed class ThirtyTwoXDevice
 
     public readonly record struct PaletteAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
-    public readonly record struct FrameBufferAccessTrace(string Source, string Operation, uint Offset, ushort Value, int BufferIndex, uint Pc, ushort Opcode);
+    public readonly record struct FrameBufferAccessTrace(
+        string Source,
+        string Operation,
+        uint Offset,
+        ushort Value,
+        int BufferIndex,
+        int DisplayBufferIndex,
+        int RequestedDisplayBufferIndex,
+        bool SwapPending,
+        uint Pc,
+        ushort Opcode);
 }

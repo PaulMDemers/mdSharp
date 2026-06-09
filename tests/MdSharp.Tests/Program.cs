@@ -880,6 +880,14 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x0004, dreqWordWriteDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
     AssertEqual((ushort)0x4004, ReadSh2WordForTest(dreqWordWriteDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset)));
 
+    ThirtyTwoXDevice unboundedRvDreqDevice = new();
+    unboundedRvDreqDevice.Reset();
+    unboundedRvDreqDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset, 0x0001);
+    AssertTrue(unboundedRvDreqDevice.SnoopM68kVdpDmaWord(0x0001_2344, 0xA55A), "RV DREQ snooping should accept VDP DMA words even when the CPU-write length register is zero");
+    AssertEqual(1, unboundedRvDreqDevice.DreqFifoWriteCount);
+    AssertEqual((ushort)0x0001, unboundedRvDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset));
+    AssertEqual((ushort)0xA55A, unboundedRvDreqDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqFifoOffset));
+
     byte[] lowCartridgeAliasRom = new byte[0x80];
     WriteWord(lowCartridgeAliasRom, 0x00, 0xD004); // MOV.L @(literal,PC),R0
     WriteWord(lowCartridgeAliasRom, 0x02, 0x6101); // MOV.W @R0,R1
@@ -1408,6 +1416,22 @@ void ThirtyTwoXDeviceShell()
     AssertTrue(!swapDevice.FrameBufferSwapPending, "VBlank should complete the pending 32X frame buffer swap");
     ushort frameBufferStatus = swapDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
     AssertTrue((frameBufferStatus & 0x8000) != 0, "32X VBlank status should be visible in frame buffer control reads");
+
+    ThirtyTwoXDevice vblankSelectDevice = new();
+    vblankSelectDevice.Reset();
+    vblankSelectDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(vblankSelectDevice);
+    vblankSelectDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    vblankSelectDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    AssertEqual(0, vblankSelectDevice.DisplayFrameBufferIndex);
+    AssertEqual(1, vblankSelectDevice.RequestedDisplayFrameBufferIndex);
+    AssertTrue(vblankSelectDevice.FrameBufferSwapPending, "active-mode frame-buffer selections written during VBlank should wait for the next VBlank edge");
+    vblankSelectDevice.BeginFrame(pal: false);
+    AssertEqual(0, vblankSelectDevice.DisplayFrameBufferIndex);
+    AssertTrue(vblankSelectDevice.FrameBufferSwapPending, "beginning the next frame should not complete a VBlank-time selection before the next VBlank edge");
+    vblankSelectDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    AssertEqual(1, vblankSelectDevice.DisplayFrameBufferIndex);
+    AssertTrue(!vblankSelectDevice.FrameBufferSwapPending, "the next VBlank edge should complete the deferred VBlank-time frame-buffer selection");
 
     ThirtyTwoXDevice readDevice = new();
     readDevice.Reset();

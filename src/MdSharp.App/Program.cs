@@ -3634,8 +3634,8 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
     int lines = 0;
     Dictionary<string, ushort> lastValues = new(StringComparer.Ordinal);
     using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
-    writer.WriteLine("frame,sequence,source,operation,address,value,masterPc,slavePc,m68kPc,masterCycle,scanline,lineCycle");
-    void WriteRow(string source, string operation, uint address, ushort value)
+    writer.WriteLine("frame,sequence,source,operation,address,value,context,masterPc,slavePc,m68kPc,masterCycle,scanline,lineCycle");
+    void WriteRow(string source, string operation, uint address, ushort value, string context = "")
     {
         if (lines >= maxLines)
         {
@@ -3671,6 +3671,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
             operation,
             $"${address:X8}",
             $"${value:X4}",
+            Csv(context),
             $"${device.MasterSh2.PC:X8}",
             $"${device.SlaveSh2.PC:X8}",
             $"${machine.MainCpu.PC:X8}",
@@ -3719,7 +3720,12 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
             uint address = baseAddress + access.Offset;
             if (AddressMatches(address))
             {
-                WriteRow(access.Source, access.Operation, address, access.Value);
+                WriteRow(
+                    access.Source,
+                    access.Operation,
+                    address,
+                    access.Value,
+                    $"fb{access.BufferIndex} display={access.DisplayBufferIndex} requested={access.RequestedDisplayBufferIndex} swap={access.SwapPending} pc=${access.Pc:X8} op=${access.Opcode:X4}");
             }
         };
     }
@@ -4014,7 +4020,7 @@ void TraceThirtyTwoXDiagnostic(string romPath, string outputCsv, int frames, int
         uint baseAddress = access.Operation.StartsWith("OW", StringComparison.Ordinal)
             ? ThirtyTwoXHardwareProfile.Sh2OverwriteImageStart
             : ThirtyTwoXHardwareProfile.Sh2FrameBufferStart;
-        WriteSnapshot("fb", access.Source, access.Operation, baseAddress + access.Offset, (ushort)(access.Offset & 0xFFFF), access.Value, $"fb{access.BufferIndex} pc=${access.Pc:X8} op=${access.Opcode:X4}");
+        WriteSnapshot("fb", access.Source, access.Operation, baseAddress + access.Offset, (ushort)(access.Offset & 0xFFFF), access.Value, $"fb{access.BufferIndex} display={access.DisplayBufferIndex} requested={access.RequestedDisplayBufferIndex} swap={access.SwapPending} pc=${access.Pc:X8} op=${access.Opcode:X4}");
     };
 
     Console.WriteLine($"32X diagnostic trace: {Path.GetFileName(romPath)}, {frames:N0} frame(s), {instructionsPerFrame:N0} instructions/frame, startFrame={startFrame:N0}, max {maxEvents:N0} event(s)");
@@ -4935,7 +4941,7 @@ void TraceThirtyTwoX(string romPath, string outputCsv, int frames, int instructi
             frameFrameBufferOverwriteWrites++;
         }
 
-        lastFrameBufferAccess = $"{access.Source} {access.Operation} fb{access.BufferIndex}:${access.Offset:X5}=${access.Value:X4} pc=${access.Pc:X8} op=${access.Opcode:X4}";
+        lastFrameBufferAccess = $"{access.Source} {access.Operation} fb{access.BufferIndex}/disp{access.DisplayBufferIndex}/req{access.RequestedDisplayBufferIndex}/swap{access.SwapPending}:${access.Offset:X5}=${access.Value:X4} pc=${access.Pc:X8} op=${access.Opcode:X4}";
     };
 
     using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
