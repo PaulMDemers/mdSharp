@@ -1179,6 +1179,17 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (nextOpcode == 0x3140 &&
+                cpu.TryFastForwardLongReloadCmpEqBfsPollLoop(
+                    Math.Min(cycleBudget, 3 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (nextOpcode == 0x6022 &&
                 cpu.TryFastForwardLongTstImmediateBtPollLoop(
                     Math.Min(cycleBudget, 3 * 4096),

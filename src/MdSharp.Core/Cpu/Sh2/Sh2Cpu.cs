@@ -1808,6 +1808,52 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardLongReloadCmpEqBfsPollLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 3;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesLongReloadCmpEqBfsPollPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint? current = TryReadBigEndianLong(readByte, R[0]);
+        if (current is null || current.Value == R[4])
+        {
+            return false;
+        }
+
+        int iterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        R[1] = current.Value;
+        SetT(false);
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = 0x8FFD;
+        LastOpcodePc = loopPc + 2;
+        PC = loopPc;
+        return true;
+    }
+
+    private static bool MatchesLongReloadCmpEqBfsPollPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        ReadOnlySpan<ushort> expected = [0x3140, 0x8FFD, 0x6102];
+        return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
     private static uint? TryReadBigEndianLong(Func<uint, byte?> readByte, uint address)
     {
         byte? b0 = readByte(address);

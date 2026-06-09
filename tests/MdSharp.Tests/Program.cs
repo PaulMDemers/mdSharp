@@ -35,6 +35,7 @@ Run("32X SH-2 MOV.B DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovBStoreD
 Run("32X SH-2 GBR word helper JSR BF/S poll loop fast-forward", ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward);
 Run("32X SH-2 long TST immediate BT poll loop fast-forward", ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward);
 Run("32X SH-2 DMA idle communication mismatch poll loop fast-forward", ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward);
+Run("32X SH-2 long reload CMP/EQ BF/S poll loop fast-forward", ThirtyTwoXSh2LongReloadCmpEqBfsPollLoopFastForward);
 Run("32X SH-2 byte displacement dual TST/BRA poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
 Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformOuterFastForward);
@@ -2779,6 +2780,37 @@ void ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward()
     AssertTrue(
         !cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(60, bus.TryReadByte, out _),
         "DMA idle communication mismatch loop should fall back once the signature matches");
+}
+
+void ThirtyTwoXSh2LongReloadCmpEqBfsPollLoopFastForward()
+{
+    const uint LoopPc = 0x0200_DD82;
+    const uint PollAddress = 0x2000_4100;
+    SyntheticSh2Bus bus = new();
+    ushort[] opcodes = [0x3140, 0x8FFD, 0x6102];
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+    }
+
+    bus.WriteLong(PollAddress, 1);
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[0] = PollAddress;
+    cpu.R[1] = 1;
+    cpu.R[4] = 2;
+    AssertTrue(
+        cpu.TryFastForwardLongReloadCmpEqBfsPollLoop(30, bus.TryReadByte, out int cycles),
+        "long reload CMP/EQ BF/S poll loop should fast-forward while the polled long mismatches");
+    AssertEqual(30, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[1]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    bus.WriteLong(PollAddress, 2);
+    AssertTrue(
+        !cpu.TryFastForwardLongReloadCmpEqBfsPollLoop(30, bus.TryReadByte, out _),
+        "long reload CMP/EQ BF/S poll loop should fall back once the polled long matches");
 }
 
 void ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward()
