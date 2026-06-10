@@ -55,6 +55,7 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2CacheDataArrayStart = 0xC000_0000;
     private const uint Sh2CacheDataArrayEnd = 0xE000_0000;
     private const uint Sh2CacheDataArrayBytes = ThirtyTwoXHardwareProfile.Sh2CacheBytes;
+    private const uint Sh2PrivateWorkRamBytes = 0x800;
     private const uint Sh2BootRomMappedBytes = 0x1000;
     private const uint Sh2CachePurgeStart = 0x4000_0000;
     private const uint Sh2CachePurgeEnd = 0x6000_0000;
@@ -216,6 +217,11 @@ public sealed class ThirtyTwoXDevice
     [
         new byte[ThirtyTwoXHardwareProfile.Sh2CacheBytes],
         new byte[ThirtyTwoXHardwareProfile.Sh2CacheBytes]
+    ];
+    private readonly byte[][] _sh2PrivateWorkRam =
+    [
+        new byte[Sh2PrivateWorkRamBytes],
+        new byte[Sh2PrivateWorkRamBytes]
     ];
     private readonly uint[][] _sh2CacheTags =
     [
@@ -503,6 +509,8 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sh2CacheDataArrays[1]);
         Array.Clear(_sh2CacheDataValid[0]);
         Array.Clear(_sh2CacheDataValid[1]);
+        Array.Clear(_sh2PrivateWorkRam[0]);
+        Array.Clear(_sh2PrivateWorkRam[1]);
         ResetSh2CacheTags();
         Array.Clear(_sh2DivisionRegisters[0]);
         Array.Clear(_sh2DivisionRegisters[1]);
@@ -3191,6 +3199,8 @@ public sealed class ThirtyTwoXDevice
             (byte[])_sh2CacheDataArrays[1].Clone(),
             (byte[])_sh2CacheDataValid[0].Clone(),
             (byte[])_sh2CacheDataValid[1].Clone(),
+            (byte[])_sh2PrivateWorkRam[0].Clone(),
+            (byte[])_sh2PrivateWorkRam[1].Clone(),
             (uint[])_sh2CacheTags[0].Clone(),
             (uint[])_sh2CacheTags[1].Clone(),
             (byte[])_sh2CacheLru[0].Clone(),
@@ -3274,6 +3284,8 @@ public sealed class ThirtyTwoXDevice
         Array.Clear(_sh2CacheDataArrays[1]);
         Array.Clear(_sh2CacheDataValid[0]);
         Array.Clear(_sh2CacheDataValid[1]);
+        Array.Clear(_sh2PrivateWorkRam[0]);
+        Array.Clear(_sh2PrivateWorkRam[1]);
         ResetSh2CacheTags();
         Array.Clear(_sh2DivisionRegisters[0]);
         Array.Clear(_sh2DivisionRegisters[1]);
@@ -3309,6 +3321,8 @@ public sealed class ThirtyTwoXDevice
         CopyStateArray(state.SlaveCacheDataArray, _sh2CacheDataArrays[1]);
         CopyStateArray(state.MasterCacheDataValid, _sh2CacheDataValid[0]);
         CopyStateArray(state.SlaveCacheDataValid, _sh2CacheDataValid[1]);
+        CopyStateArray(state.MasterPrivateWorkRam, _sh2PrivateWorkRam[0]);
+        CopyStateArray(state.SlavePrivateWorkRam, _sh2PrivateWorkRam[1]);
         CopyStateArray(state.MasterCacheTags, _sh2CacheTags[0]);
         CopyStateArray(state.SlaveCacheTags, _sh2CacheTags[1]);
         CopyStateArray(state.MasterCacheLru, _sh2CacheLru[0]);
@@ -3368,6 +3382,13 @@ public sealed class ThirtyTwoXDevice
         {
             byte value = ReadSh2DivisionUnitByte(address, cpuIndex);
             TraceSh2MemoryAccess(cpuIndex, "RI8", address, value);
+            return value;
+        }
+
+        if (TryMapSh2PrivateWorkRamAddress(address, cpuIndex, out int privateRamOffset))
+        {
+            byte value = _sh2PrivateWorkRam[cpuIndex & 1][privateRamOffset];
+            TraceSh2MemoryAccess(cpuIndex, "R8", address, value);
             return value;
         }
 
@@ -3521,6 +3542,15 @@ public sealed class ThirtyTwoXDevice
 
     internal ushort ReadSh2Word(uint address, int cpuIndex)
     {
+        if (TryMapSh2PrivateWorkRamAddress(address, cpuIndex, out int privateRamOffset))
+        {
+            byte[] ram = _sh2PrivateWorkRam[cpuIndex & 1];
+            ushort value = (ushort)((ram[privateRamOffset] << 8) |
+                ram[(privateRamOffset + 1) & ((int)Sh2PrivateWorkRamBytes - 1)]);
+            TraceSh2MemoryAccess(cpuIndex, "R16", address, value);
+            return value;
+        }
+
         if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
         {
             byte[] cacheData = _sh2CacheDataArrays[cpuIndex & 1];
@@ -3566,6 +3596,17 @@ public sealed class ThirtyTwoXDevice
 
     internal uint ReadSh2Long(uint address, int cpuIndex)
     {
+        if (TryMapSh2PrivateWorkRamAddress(address, cpuIndex, out int privateRamOffset))
+        {
+            byte[] ram = _sh2PrivateWorkRam[cpuIndex & 1];
+            uint value = (uint)((ram[privateRamOffset] << 24) |
+                (ram[(privateRamOffset + 1) & ((int)Sh2PrivateWorkRamBytes - 1)] << 16) |
+                (ram[(privateRamOffset + 2) & ((int)Sh2PrivateWorkRamBytes - 1)] << 8) |
+                ram[(privateRamOffset + 3) & ((int)Sh2PrivateWorkRamBytes - 1)]);
+            TraceSh2MemoryAccess(cpuIndex, "R32", address, value);
+            return value;
+        }
+
         if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
         {
             byte[] cacheData = _sh2CacheDataArrays[cpuIndex & 1];
@@ -3573,20 +3614,20 @@ public sealed class ThirtyTwoXDevice
                 (cacheData[(cacheDataOffset + 1) & (Sh2CacheDataArrayBytes - 1)] << 16) |
                 (cacheData[(cacheDataOffset + 2) & (Sh2CacheDataArrayBytes - 1)] << 8) |
                 cacheData[(cacheDataOffset + 3) & (Sh2CacheDataArrayBytes - 1)]);
-            TraceSh2MemoryAccess(cpuIndex, "R32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "R32", address, value);
             return value;
         }
 
         if (TryConsumeBootRomSixtyEightUpReadyLong(address, out uint bootRomSixtyEightUpReady))
         {
-            TraceSh2MemoryAccess(cpuIndex, "R32", address, (ushort)bootRomSixtyEightUpReady);
+            TraceSh2MemoryAccess(cpuIndex, "R32", address, bootRomSixtyEightUpReady);
             return bootRomSixtyEightUpReady;
         }
 
         if (IsSh2DivisionUnitRegisterAddress(address))
         {
             uint value = ReadSh2DivisionUnitLong(address, cpuIndex);
-            TraceSh2MemoryAccess(cpuIndex, "RI32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "RI32", address, value);
             return value;
         }
 
@@ -3596,14 +3637,14 @@ public sealed class ThirtyTwoXDevice
             uint value = IsSh2DataCacheEnabled(cpuIndex)
                 ? ReadSh2CachedCartridgeLong(alignedCacheOffset, alignedRomOffset, cpuIndex)
                 : ReadCartridgeLong(alignedRomOffset);
-            TraceSh2MemoryAccess(cpuIndex, "RC32A", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "RC32A", address, value);
             return value;
         }
 
         if (TryMapSh2CacheAddressArrayAddress(address, out int cacheAddressOffset))
         {
             uint value = ReadSh2CacheAddressArrayLong(address, cacheAddressOffset, cpuIndex);
-            TraceSh2MemoryAccess(cpuIndex, "RA32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "RA32", address, value);
             return value;
         }
 
@@ -3646,6 +3687,12 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
             value = _sdram[sdramOffset];
+            return true;
+        }
+
+        if (TryMapSh2PrivateWorkRamAddress(address, cpuIndex, out int privateRamOffset))
+        {
+            value = _sh2PrivateWorkRam[cpuIndex & 1][privateRamOffset];
             return true;
         }
 
@@ -3900,6 +3947,13 @@ public sealed class ThirtyTwoXDevice
 
         if (TrySignalSh2InputCapture(address, value, cpuIndex))
         {
+            return;
+        }
+
+        if (TryMapSh2PrivateWorkRamAddress(address, cpuIndex, out int privateRamOffset))
+        {
+            _sh2PrivateWorkRam[cpuIndex & 1][privateRamOffset] = value;
+            TraceSh2MemoryAccess(cpuIndex, "W8", address, value);
             return;
         }
 
@@ -4180,14 +4234,14 @@ public sealed class ThirtyTwoXDevice
         if (IsSh2DivisionUnitRegisterAddress(address))
         {
             WriteSh2DivisionUnitLong(address, value, cpuIndex);
-            TraceSh2MemoryAccess(cpuIndex, "WI32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "WI32", address, value);
             return;
         }
 
         if (TryMapSh2CacheAddressArrayAddress(address, out int cacheAddressOffset))
         {
             WriteSh2CacheAddressArrayLong(address, cacheAddressOffset, value, cpuIndex);
-            TraceSh2MemoryAccess(cpuIndex, "WA32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "WA32", address, value);
             return;
         }
 
@@ -4201,7 +4255,7 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2CachePurgeAddress(address))
         {
             PurgeSh2CacheLine(cpuIndex, address);
-            TraceSh2MemoryAccess(cpuIndex, "WP32", address, (ushort)value);
+            TraceSh2MemoryAccess(cpuIndex, "WP32", address, value);
             return;
         }
 
@@ -5346,7 +5400,7 @@ public sealed class ThirtyTwoXDevice
         SystemRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, operation, offset, value));
     }
 
-    private void TraceSh2MemoryAccess(int cpuIndex, string operation, uint address, ushort value)
+    private void TraceSh2MemoryAccess(int cpuIndex, string operation, uint address, uint value)
     {
         if (Sh2MemoryAccessObserver is null || Sh2MemoryAccessTraceFilter?.Invoke(address) != true)
         {
@@ -6660,7 +6714,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         SignalSh2InputCapture(targetCpuIndex);
-        TraceSh2MemoryAccess(sourceCpuIndex, "WIC", address, (ushort)value);
+        TraceSh2MemoryAccess(sourceCpuIndex, "WIC", address, value);
         return true;
     }
 
@@ -8547,6 +8601,22 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
+    private static bool TryMapSh2PrivateWorkRamAddress(uint address, int cpuIndex, out int offset)
+    {
+        if (address is >= Sh2CacheDataArrayStart and < Sh2CacheDataArrayEnd)
+        {
+            int cacheOffset = (int)(address & (Sh2CacheDataArrayBytes - 1));
+            if ((uint)cacheOffset < Sh2PrivateWorkRamBytes)
+            {
+                offset = cacheOffset;
+                return true;
+            }
+        }
+
+        offset = 0;
+        return false;
+    }
+
     private bool TryMapSh2CacheDataArrayAddress(uint address, int cpuIndex, out int offset)
     {
         if (address is >= Sh2CacheDataArrayStart and < Sh2CacheDataArrayEnd)
@@ -8729,6 +8799,8 @@ public sealed class ThirtyTwoXDevice
         byte[] SlaveCacheDataArray,
         byte[] MasterCacheDataValid,
         byte[] SlaveCacheDataValid,
+        byte[] MasterPrivateWorkRam,
+        byte[] SlavePrivateWorkRam,
         uint[] MasterCacheTags,
         uint[] SlaveCacheTags,
         byte[] MasterCacheLru,
@@ -8903,7 +8975,7 @@ public sealed class ThirtyTwoXDevice
 
     public readonly record struct SystemRegisterAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
-    public readonly record struct Sh2MemoryAccessTrace(string Source, string Operation, uint Address, ushort Value);
+    public readonly record struct Sh2MemoryAccessTrace(string Source, string Operation, uint Address, uint Value);
     public readonly record struct SdramWriteTrace(string Source, string Operation, uint Address, int Offset, ushort Value, uint Pc, ushort Opcode);
 
     public readonly record struct PaletteAccessTrace(string Source, string Operation, ushort Offset, ushort Value);

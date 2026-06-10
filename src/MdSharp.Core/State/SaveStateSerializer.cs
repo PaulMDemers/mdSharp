@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 66;
+    private const int Version = 67;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -347,6 +347,8 @@ public static class SaveStateSerializer
         WriteArray(writer, state.SlaveCacheDataArray);
         WriteArray(writer, state.MasterCacheDataValid);
         WriteArray(writer, state.SlaveCacheDataValid);
+        WriteArray(writer, state.MasterPrivateWorkRam);
+        WriteArray(writer, state.SlavePrivateWorkRam);
         WriteArray(writer, state.MasterCacheTags);
         WriteArray(writer, state.SlaveCacheTags);
         WriteArray(writer, state.MasterCacheLru);
@@ -451,6 +453,8 @@ public static class SaveStateSerializer
         byte[] slaveCacheDataArray = version >= 48 ? ReadByteArray(reader) : [];
         byte[] masterCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(masterCacheDataArray);
         byte[] slaveCacheDataValid = version >= 51 ? ReadByteArray(reader) : BuildLegacyCacheValid(slaveCacheDataArray);
+        byte[] masterPrivateWorkRam = version >= 67 ? ReadByteArray(reader) : BuildLegacyPrivateWorkRam(masterCacheDataArray);
+        byte[] slavePrivateWorkRam = version >= 67 ? ReadByteArray(reader) : BuildLegacyPrivateWorkRam(slaveCacheDataArray);
         uint[] masterCacheTags = version >= 52 ? ReadUIntArray(reader) : BuildLegacyCacheTags();
         uint[] slaveCacheTags = version >= 52 ? ReadUIntArray(reader) : BuildLegacyCacheTags();
         byte[] masterCacheLru = version >= 52 ? ReadByteArray(reader) : new byte[64];
@@ -639,6 +643,8 @@ public static class SaveStateSerializer
             slaveCacheDataArray,
             masterCacheDataValid,
             slaveCacheDataValid,
+            masterPrivateWorkRam,
+            slavePrivateWorkRam,
             masterCacheTags,
             slaveCacheTags,
             masterCacheLru,
@@ -1104,6 +1110,13 @@ public static class SaveStateSerializer
         }
 
         return valid;
+    }
+
+    private static byte[] BuildLegacyPrivateWorkRam(byte[] cacheDataArray)
+    {
+        byte[] ram = new byte[0x800];
+        Array.Copy(cacheDataArray, ram, Math.Min(cacheDataArray.Length, ram.Length));
+        return ram;
     }
 
     private static uint[] BuildLegacyCacheTags()

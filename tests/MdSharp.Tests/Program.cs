@@ -1933,6 +1933,21 @@ void ThirtyTwoXSh2CoreExecutesSyntheticCode()
     AssertEqual((ushort)0xA028, ReadSh2WordForTest(cacheDataDevice, 0xC000_0004));
     AssertEqual(0xA028_0009u, ReadSh2LongForTest(cacheDataDevice, 0xC000_0004));
 
+    byte[] privateRamRom = new byte[0x1000];
+    privateRamRom[0x7A0] = 0xB0;
+    privateRamRom[0x7A1] = 0x57;
+    privateRamRom[0x7A2] = 0x6C;
+    privateRamRom[0x7A3] = 0x73;
+    ThirtyTwoXDevice privateRamDevice = new(privateRamRom);
+    WriteSh2LongForTest(privateRamDevice, 0xC000_07A4, 0x0000_0670);
+    WriteSh2ByteForTest(privateRamDevice, 0xFFFF_FE92, 0x01);
+    AssertEqual((byte)0xB0, ReadSh2ByteForTest(privateRamDevice, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart + 0x7A0));
+    AssertEqual(0x0000_0670u, ReadSh2LongForTest(privateRamDevice, 0xC000_07A4));
+    ThirtyTwoXDevice.ThirtyTwoXState privateRamState = privateRamDevice.CaptureState();
+    privateRamDevice.Reset();
+    privateRamDevice.RestoreState(privateRamState);
+    AssertEqual(0x0000_0670u, ReadSh2LongForTest(privateRamDevice, 0xC000_07A4));
+
     byte[] cacheControlRom = new byte[0x100];
     cacheControlRom[0x20] = 0x42;
     ThirtyTwoXDevice cacheControlDevice = new(cacheControlRom);

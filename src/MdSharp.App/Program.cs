@@ -3632,10 +3632,17 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
 
     int currentFrame = 0;
     int lines = 0;
-    Dictionary<string, ushort> lastValues = new(StringComparer.Ordinal);
+    Dictionary<string, uint> lastValues = new(StringComparer.Ordinal);
     using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
     writer.WriteLine("frame,sequence,source,operation,address,value,context,masterPc,slavePc,m68kPc,masterCycle,scanline,lineCycle");
-    void WriteRow(string source, string operation, uint address, ushort value, string context = "")
+    static string FormatBusTraceValue(uint value)
+    {
+        return value <= 0xFFFFu
+            ? $"${value:X4}"
+            : $"${value:X8}";
+    }
+
+    void WriteRow(string source, string operation, uint address, uint value, string context = "")
     {
         if (lines >= maxLines)
         {
@@ -3655,7 +3662,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
         if (changesOnly)
         {
             string key = string.Concat(source, "|", operation, "|", address.ToString("X8", CultureInfo.InvariantCulture));
-            if (lastValues.TryGetValue(key, out ushort previous) && previous == value)
+            if (lastValues.TryGetValue(key, out uint previous) && previous == value)
             {
                 return;
             }
@@ -3670,7 +3677,7 @@ void TraceThirtyTwoXBus(string romPath, string outputCsv, int frames, int instru
             source,
             operation,
             $"${address:X8}",
-            $"${value:X4}",
+            FormatBusTraceValue(value),
             Csv(context),
             $"${device.MasterSh2.PC:X8}",
             $"${device.SlaveSh2.PC:X8}",
