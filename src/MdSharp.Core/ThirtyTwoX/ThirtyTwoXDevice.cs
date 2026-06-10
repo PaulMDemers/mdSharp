@@ -3371,7 +3371,7 @@ public sealed class ThirtyTwoXDevice
             return value;
         }
 
-        if (TryMapSh2CacheDataArrayAddress(address, out int cacheDataOffset))
+        if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
         {
             byte value = _sh2CacheDataArrays[cpuIndex][cacheDataOffset];
             TraceSh2MemoryAccess(cpuIndex, "R8", address, value);
@@ -3521,6 +3521,15 @@ public sealed class ThirtyTwoXDevice
 
     internal ushort ReadSh2Word(uint address, int cpuIndex)
     {
+        if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
+        {
+            byte[] cacheData = _sh2CacheDataArrays[cpuIndex & 1];
+            ushort value = (ushort)((cacheData[cacheDataOffset] << 8) |
+                cacheData[(cacheDataOffset + 1) & (Sh2CacheDataArrayBytes - 1)]);
+            TraceSh2MemoryAccess(cpuIndex, "R16", address, value);
+            return value;
+        }
+
         if (TryReadSh2BootRomServiceWord(address, cpuIndex, out ushort bootServiceWord))
         {
             TraceSh2MemoryAccess(cpuIndex, "RB16", address, bootServiceWord);
@@ -3557,6 +3566,17 @@ public sealed class ThirtyTwoXDevice
 
     internal uint ReadSh2Long(uint address, int cpuIndex)
     {
+        if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
+        {
+            byte[] cacheData = _sh2CacheDataArrays[cpuIndex & 1];
+            uint value = (uint)((cacheData[cacheDataOffset] << 24) |
+                (cacheData[(cacheDataOffset + 1) & (Sh2CacheDataArrayBytes - 1)] << 16) |
+                (cacheData[(cacheDataOffset + 2) & (Sh2CacheDataArrayBytes - 1)] << 8) |
+                cacheData[(cacheDataOffset + 3) & (Sh2CacheDataArrayBytes - 1)]);
+            TraceSh2MemoryAccess(cpuIndex, "R32", address, (ushort)value);
+            return value;
+        }
+
         if (TryConsumeBootRomSixtyEightUpReadyLong(address, out uint bootRomSixtyEightUpReady))
         {
             TraceSh2MemoryAccess(cpuIndex, "R32", address, (ushort)bootRomSixtyEightUpReady);
@@ -3626,6 +3646,12 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2SdramAddress(address, out int sdramOffset))
         {
             value = _sdram[sdramOffset];
+            return true;
+        }
+
+        if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
+        {
+            value = _sh2CacheDataArrays[cpuIndex & 1][cacheDataOffset];
             return true;
         }
 
@@ -3877,7 +3903,7 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        if (TryMapSh2CacheDataArrayAddress(address, out int cacheDataOffset))
+        if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
         {
             _sh2CacheDataArrays[cpuIndex][cacheDataOffset] = value;
             _sh2CacheDataValid[cpuIndex][cacheDataOffset] = 1;
@@ -8521,7 +8547,7 @@ public sealed class ThirtyTwoXDevice
         return false;
     }
 
-    private static bool TryMapSh2CacheDataArrayAddress(uint address, out int offset)
+    private bool TryMapSh2CacheDataArrayAddress(uint address, int cpuIndex, out int offset)
     {
         if (address is >= Sh2CacheDataArrayStart and < Sh2CacheDataArrayEnd)
         {

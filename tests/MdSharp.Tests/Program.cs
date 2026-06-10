@@ -1926,6 +1926,12 @@ void ThirtyTwoXSh2CoreExecutesSyntheticCode()
     AssertEqual(0x0000_0034u, cacheDataDevice.MasterSh2.R[2]);
     WriteSh2ByteForTest(cacheDataDevice, 0xDFFF_FFFF, 0x7B);
     AssertEqual((byte)0x7B, ReadSh2ByteForTest(cacheDataDevice, 0xC000_0FFF));
+    WriteSh2ByteForTest(cacheDataDevice, 0xC000_0004, 0xA0);
+    WriteSh2ByteForTest(cacheDataDevice, 0xC000_0005, 0x28);
+    WriteSh2ByteForTest(cacheDataDevice, 0xC000_0006, 0x00);
+    WriteSh2ByteForTest(cacheDataDevice, 0xC000_0007, 0x09);
+    AssertEqual((ushort)0xA028, ReadSh2WordForTest(cacheDataDevice, 0xC000_0004));
+    AssertEqual(0xA028_0009u, ReadSh2LongForTest(cacheDataDevice, 0xC000_0004));
 
     byte[] cacheControlRom = new byte[0x100];
     cacheControlRom[0x20] = 0x42;
