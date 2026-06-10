@@ -12,6 +12,11 @@ public sealed class ThirtyTwoXDevice
         EnableSh2FastPaths &&
         Environment.GetEnvironmentVariable("MDSHARP_ENABLE_SH2_LIST_FASTPATHS") == "1";
 
+    private static readonly int Sh2FastPathCycleBudgetCap = ParseSh2FastPathCycleBudgetCap();
+
+    private static readonly string Sh2DisabledFastPathGroups =
+        Environment.GetEnvironmentVariable("MDSHARP_DISABLE_SH2_FASTPATH_GROUPS") ?? string.Empty;
+
     private const int SystemRegisterBytes = 0x100;
     private const int VdpRegisterBytes = 0x100;
     private const int Sh2PeripheralRegisterBytes = 0x100;
@@ -899,6 +904,9 @@ public sealed class ThirtyTwoXDevice
             !cpu.DelaySlotActive &&
             cpu.InstructionObserver is null &&
             TryPeekSh2Word(cpu.PC, cpuIndex, out nextOpcode);
+        int fastPathCycleBudget = Sh2FastPathCycleBudgetCap <= 0
+            ? cycleBudget
+            : Math.Min(cycleBudget, Sh2FastPathCycleBudgetCap);
         Action<int, uint, ushort>? pcSampleObserver = Sh2PcSampleObserver;
         if (pcSampleObserver is not null)
         {
@@ -911,38 +919,45 @@ public sealed class ThirtyTwoXDevice
             pcSampleObserver(cpuIndex, cpu.PC, sampledOpcode);
         }
 
-        if (canProbeFastPath)
+        cycleBudget = fastPathCycleBudget;
+
+        if (canProbeFastPath && IsSh2FastPathGroupEnabled("early"))
         {
-            int braIdleBudget = IsPwmTimerActive()
-                ? Math.Min(cycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)
-                : cycleBudget;
-            if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0xA000) &&
-                cpu.TryFastForwardBraSelfNopIdleLoop(braIdleBudget, out fastCycles))
+            if (IsSh2FastPathGroupEnabled("idle"))
             {
-                RecordSh2FastPath(fastCycles);
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
-                return fastCycles;
+                int braIdleBudget = IsPwmTimerActive()
+                    ? Math.Min(fastPathCycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)
+                    : fastPathCycleBudget;
+                if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0xA000) &&
+                    cpu.TryFastForwardBraSelfNopIdleLoop(braIdleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
+                if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0x7000 || (nextOpcode & 0xF000) == 0xA000) &&
+                    cpu.TryFastForwardAddBraNopDelayLoop(fastPathCycleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
+                if (((nextOpcode & 0xF00F) == 0x6001 ||
+                        (nextOpcode & 0xF0FF) == 0x4011 ||
+                        (nextOpcode & 0xFF00) == 0x8900) &&
+                    cpu.TryFastForwardWordLoadCmpPzBtIdleLoop(cycleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
             }
 
-            if ((nextOpcode == 0x0009 || (nextOpcode & 0xF000) == 0x7000 || (nextOpcode & 0xF000) == 0xA000) &&
-                cpu.TryFastForwardAddBraNopDelayLoop(cycleBudget, out fastCycles))
-            {
-                RecordSh2FastPath(fastCycles);
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
-                return fastCycles;
-            }
-
-            if (((nextOpcode & 0xF00F) == 0x6001 ||
-                    (nextOpcode & 0xF0FF) == 0x4011 ||
-                    (nextOpcode & 0xFF00) == 0x8900) &&
-                cpu.TryFastForwardWordLoadCmpPzBtIdleLoop(cycleBudget, out fastCycles))
-            {
-                RecordSh2FastPath(fastCycles);
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
-                return fastCycles;
-            }
-
-            if ((nextOpcode & 0xF00F) == 0x2001)
+            if (IsSh2FastPathGroupEnabled("memory") &&
+                IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x2001)
             {
                 int fillLoopBudget = Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations);
                 if (cpu.TryFastForwardMovWStoreAddDtBfLoop(
@@ -957,22 +972,26 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (((nextOpcode & 0xF00F) == 0x2001 ||
-                    (nextOpcode & 0xF0FF) == 0x4010 ||
-                    (nextOpcode & 0xFF00) == 0x8F00 ||
-                    (nextOpcode & 0xF000) == 0x7000) &&
-                cpu.TryFastForwardMovWStoreDtBfSAddLoop(
-                    Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations),
-                    _sh2WordWriters[cpuIndex],
-                    Sh2FrameBufferWordFillLoopCycles,
-                    out fastCycles))
+            if (IsSh2FastPathGroupEnabled("memory"))
             {
-                RecordSh2FastPath(fastCycles);
-                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
-                return fastCycles;
-            }
+                if (IsSh2FastPathGroupEnabled("memstore") &&
+                    ((nextOpcode & 0xF00F) == 0x2001 ||
+                        (nextOpcode & 0xF0FF) == 0x4010 ||
+                        (nextOpcode & 0xFF00) == 0x8F00 ||
+                        (nextOpcode & 0xF000) == 0x7000) &&
+                    cpu.TryFastForwardMovWStoreDtBfSAddLoop(
+                        Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations),
+                        _sh2WordWriters[cpuIndex],
+                        Sh2FrameBufferWordFillLoopCycles,
+                        out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
 
-            if (((nextOpcode & 0xF00F) == 0x2001 ||
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                ((nextOpcode & 0xF00F) == 0x2001 ||
                     (nextOpcode & 0xF000) == 0x7000 ||
                     (nextOpcode & 0xF00F) == 0x300C ||
                     (nextOpcode & 0xF0FF) == 0x4010 ||
@@ -988,7 +1007,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF00F) == 0x2002)
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x2002)
             {
                 int longStoreBudget = Math.Min(cycleBudget, Sh2LongStoreFillLoopCycles * Sh2LongStoreFillLoopMaxBurstIterations);
                 if (cpu.TryFastForwardMovLStoreAddDtBfLoop(
@@ -1026,7 +1046,8 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (((nextOpcode & 0xF0FF) == 0x4010 ||
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                ((nextOpcode & 0xF0FF) == 0x4010 ||
                     (nextOpcode & 0xF00F) == 0x2002 ||
                     nextOpcode == 0x0009 ||
                     (nextOpcode & 0xFF00) == 0x8F00) &&
@@ -1041,7 +1062,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF00F) == 0x6005 &&
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x6005 &&
                 cpu.TryFastForwardMovWPostIncSwapPreDecDtBfSLoop(
                     cycleBudget,
                     _sh2WordReaders[cpuIndex],
@@ -1053,7 +1075,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF00F) == 0x6005 &&
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x6005 &&
                 TryFastForwardMovWordStridedCopy(
                     cpu,
                     cpuIndex,
@@ -1063,7 +1086,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF00F) == 0x6005 &&
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x6005 &&
                 cpu.TryFastForwardMovWPostIncStoreAddImmediateDtBfLoop(
                     Math.Min(cycleBudget, 7 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
                     _sh2WordReaders[cpuIndex],
@@ -1075,7 +1099,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x613F &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x613F &&
                 cpu.TryFastForwardWordTableSearchLoop(cycleBudget, _sh2WordReaders[cpuIndex], out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1083,7 +1108,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x613F &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x613F &&
                 cpu.TryFastForwardByteFillIndexedCmpGeLoop(cycleBudget, _sh2ByteWriters[cpuIndex], out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1091,7 +1117,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode == 0xE13F ||
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                (nextOpcode == 0xE13F ||
                     nextOpcode == 0x2129 ||
                     nextOpcode == 0x6013 ||
                     nextOpcode == 0x4008 ||
@@ -1113,7 +1140,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode == 0x5133 ||
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                (nextOpcode == 0x5133 ||
                     nextOpcode == 0x3160 ||
                     (nextOpcode & 0xFF00) == 0x8B00 ||
                     nextOpcode == 0xD708 ||
@@ -1132,7 +1160,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode == 0x6153 ||
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                (nextOpcode == 0x6153 ||
                     nextOpcode == 0x2411 ||
                     nextOpcode == 0x70FF ||
                     nextOpcode == 0x88FF ||
@@ -1148,7 +1177,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x2271 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x2271 &&
                 cpu.TryFastForwardWordFillAddCompareGtBfsLoop(
                     Math.Min(cycleBudget, 7 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
                     _sh2WordWriters[cpuIndex],
@@ -1159,11 +1189,13 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6150 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                IsSh2FastPathGroupEnabled("bytespancompare") &&
+                nextOpcode == 0x6150 &&
                 cpu.TryFastForwardByteSpanCompareLoop(
-                    Math.Min(cycleBudget, 58 * 4096),
+                    Math.Min(cycleBudget, 13 * 4096),
                     _sh2ByteReaders[cpuIndex],
-                    58,
+                    13,
                     out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1171,7 +1203,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6424 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6424 &&
                 cpu.TryFastForwardByteNibbleLookupExpandLoop(
                     Math.Min(cycleBudget, 45 * 4096),
                     _sh2ByteReaders[cpuIndex],
@@ -1183,7 +1216,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x2100 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x2100 &&
                 cpu.TryFastForwardMovBStoreDtBfsAddLoop(
                     Math.Min(cycleBudget, 4 * 4096),
                     _sh2ByteWriters[cpuIndex],
@@ -1195,7 +1229,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x480B &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x480B &&
                 cpu.TryFastForwardGbrWordHelperJsrBfsPollLoop(
                     Math.Min(cycleBudget, 12 * 4096),
                     _sh2WordReaders[cpuIndex],
@@ -1206,7 +1241,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6022 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6022 &&
                 cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(
                     Math.Min(cycleBudget, 6 * 4096),
                     _sh2ByteReaders[cpuIndex],
@@ -1217,7 +1253,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x3140 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x3140 &&
                 cpu.TryFastForwardLongReloadCmpEqBfsPollLoop(
                     Math.Min(cycleBudget, 3 * 4096),
                     _sh2ByteReaders[cpuIndex],
@@ -1228,7 +1265,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6022 &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6022 &&
                 cpu.TryFastForwardLongTstImmediateBtPollLoop(
                     Math.Min(cycleBudget, 3 * 4096),
                     _sh2ByteReaders[cpuIndex],
@@ -1239,7 +1277,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode == 0x8414 || nextOpcode == 0xC840) &&
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                (nextOpcode == 0x8414 || nextOpcode == 0xC840) &&
                 cpu.TryFastForwardByteDisplacementDualTstBraPollLoop(
                     Math.Min(cycleBudget, 8 * 4096),
                     _sh2ByteReaders[cpuIndex],
@@ -1250,7 +1289,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode == 0x1457 ||
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
+                (nextOpcode == 0x1457 ||
                     nextOpcode == 0x1456 ||
                     nextOpcode == 0x1455 ||
                     nextOpcode == 0x1454 ||
@@ -1272,7 +1312,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x64A3 &&
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
+                nextOpcode == 0x64A3 &&
                 cpu.TryFastForwardWordHighBitMaskTransformOuterLoop(
                     cycleBudget,
                     _sh2WordReaders[cpuIndex],
@@ -1286,7 +1327,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6033 &&
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
+                nextOpcode == 0x6033 &&
                 cpu.TryFastForwardWordHighBitMaskTransformLoop(
                     cycleBudget,
                     _sh2WordReaders[cpuIndex],
@@ -1300,7 +1342,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6084 &&
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
+                nextOpcode == 0x6084 &&
                 cpu.TryFastForwardByteLookupWordRowExpandLoop(
                     cycleBudget,
                     _sh2ByteReaders[cpuIndex],
@@ -1313,7 +1356,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0x6084 &&
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
+                nextOpcode == 0x6084 &&
                 cpu.TryFastForwardByteLookupWordStoreStep(
                     cycleBudget,
                     _sh2ByteReaders[cpuIndex],
@@ -1326,7 +1370,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (nextOpcode == 0xD42F || nextOpcode == 0x5046)
+            if (IsSh2FastPathGroupEnabled("memdescriptor") &&
+                (nextOpcode == 0xD42F || nextOpcode == 0x5046))
             {
                 EmptyDescriptorSpanFastPathAttempts++;
                 if (cpu.TryFastForwardEmptyDescriptorSpanFillLoop(
@@ -1341,7 +1386,8 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (nextOpcode == 0x77FF)
+            if (IsSh2FastPathGroupEnabled("memdescriptor") &&
+                nextOpcode == 0x77FF)
             {
                 EmptyDescriptorSpanTailFastPathAttempts++;
                 if (cpu.TryFastForwardEmptyDescriptorSpanFillTail(
@@ -1356,7 +1402,10 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (cpuIndex == 0 &&
+            }
+
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                cpuIndex == 0 &&
                 nextOpcode == 0xD235 &&
                 IsSlaveInInterruptDispatcherIdle() &&
                 TryPeekSh2Word(cpu.PC + 12, cpuIndex, out ushort pollBranchOpcode) &&
@@ -1375,34 +1424,39 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if (IsLikelySdramFlagTaskletDispatcher(cpuIndex, cpu.PC, nextOpcode) &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                IsLikelySdramFlagTaskletDispatcher(cpuIndex, cpu.PC, nextOpcode) &&
                 TryFastForwardSdramFlagTaskletDispatcher(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
             }
 
-            if (cpuIndex == 1 &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                cpuIndex == 1 &&
                 IsLikelyGbrBytePairInterruptIdle(cpuIndex, cpu.PC, nextOpcode) &&
                 TryFastForwardGbrBytePairInterruptIdle(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
             }
 
-            if (cpuIndex == 0 &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                cpuIndex == 0 &&
                 (nextOpcode == 0xC420 || nextOpcode == 0x2008 || (nextOpcode & 0xFF00) == 0x8900) &&
                 TryFastForwardGbrByteZeroComm20Poll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
             }
 
-            if (cpuIndex == 0 &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                cpuIndex == 0 &&
                 (((nextOpcode & 0xF000) == 0xD000) || ((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) || nextOpcode == 0x2018 || (nextOpcode & 0xFF00) == 0x8900) &&
                 TryFastForwardLiteralByteDisplacementTstRegisterPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
             }
 
-            if (IsLikelyByteDisplacementZeroWaitDtBfLoop(cpuIndex, cpu.PC, nextOpcode))
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                IsLikelyByteDisplacementZeroWaitDtBfLoop(cpuIndex, cpu.PC, nextOpcode))
             {
                 ByteDisplacementZeroWaitFastPathAttempts++;
                 if (cpu.TryFastForwardOuterWordZeroByteDisplacementWaitDtBfLoop(cycleBudget, out fastCycles) ||
@@ -1415,7 +1469,8 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
-            if ((nextOpcode & 0xF000) == 0xD000 &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                (nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramFlagTaskletReturn(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1423,7 +1478,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xFF00) == 0xC400 &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                (nextOpcode & 0xFF00) == 0xC400 &&
                 cpu.TryFastForwardGbrBytePairEqualTaskletReturn(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1431,7 +1487,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if (cycleBudget != int.MaxValue &&
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                cycleBudget != int.MaxValue &&
                 (nextOpcode & 0xF000) == 0xD000 &&
                 cpu.TryFastForwardSdramNullLinkedListIdleLoop(
                     cycleBudget,
@@ -1470,7 +1527,7 @@ public sealed class ThirtyTwoXDevice
             return fastCycles;
         }
 
-        if (canProbeFastPath)
+        if (canProbeFastPath && IsSh2FastPathGroupEnabled("poll"))
         {
             if ((nextOpcode & 0xF0FF) == 0x4010 &&
                 cpu.TryFastForwardDtBfLoop(cycleBudget, out fastCycles))
@@ -1927,6 +1984,22 @@ public sealed class ThirtyTwoXDevice
     {
         value &= 0x0FFF;
         return (value & 0x0800) != 0 ? value | unchecked((int)0xFFFFF000) : value;
+    }
+
+    private static int ParseSh2FastPathCycleBudgetCap()
+    {
+        string? value = Environment.GetEnvironmentVariable("MDSHARP_SH2_FASTPATH_CYCLE_CAP");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return 0;
+        }
+
+        return int.TryParse(value, out int parsed) && parsed > 0 ? parsed : 0;
+    }
+
+    private static bool IsSh2FastPathGroupEnabled(string group)
+    {
+        return Sh2DisabledFastPathGroups.IndexOf(group, StringComparison.OrdinalIgnoreCase) < 0;
     }
 
     private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
@@ -3701,6 +3774,14 @@ public sealed class ThirtyTwoXDevice
         if (TryMapSh2CacheDataArrayAddress(address, cpuIndex, out int cacheDataOffset))
         {
             value = _sh2CacheDataArrays[cpuIndex & 1][cacheDataOffset];
+            return true;
+        }
+
+        if (TryMapSh2FrameBufferAddress(address, out uint frameBufferOffset, out _))
+        {
+            value = IsSh2FrameBufferAccessDenied()
+                ? (byte)0xFF
+                : ReadFrameBufferByteCore(frameBufferOffset);
             return true;
         }
 
@@ -6234,6 +6315,11 @@ public sealed class ThirtyTwoXDevice
         }
 
         _activeDisplayFrameBufferIndex = _requestedDisplayFrameBufferIndex & 0x01;
+        if (!_vBlank)
+        {
+            _visibleDisplayFrameBufferIndex = _activeDisplayFrameBufferIndex;
+        }
+
         _pendingDrawFrameBufferIndex = DrawFrameBufferIndex;
         _frameBufferSwapPending = false;
         ushort control = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
@@ -7903,6 +7989,13 @@ public sealed class ThirtyTwoXDevice
         // not mutate the shared byte. Limit this compatibility behavior to the
         // BIOS/post-start handshake window; retail games also use these ports for
         // live command arguments and must see the newly published value.
+        if (previousValue == 0 && value != 0)
+        {
+            _m68kCommunicationStaleBytes[index] = previousValue;
+            _m68kCommunicationStaleValid[index] = true;
+            return;
+        }
+
         if (index < 2 ||
             offset is ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2 or
             ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3 ||
@@ -7925,7 +8018,6 @@ public sealed class ThirtyTwoXDevice
         }
 
         if (index == 8 &&
-            ShouldExposePreviousCommunicationValueToM68k(index, 2) &&
             previousValue != 0 &&
             value == 0)
         {
@@ -8066,6 +8158,15 @@ public sealed class ThirtyTwoXDevice
             value = even;
             _systemRegisters[oddRegisterIndex] = 0;
             _m68kCommunicationStaleValid[index + 1] = false;
+            _m68kCommunicationStaleWordValid[index >> 1] = false;
+            return true;
+        }
+
+        if ((index & 1) == 0 && index >= 4 && even != 0 && odd == 0)
+        {
+            value = 0;
+            _m68kCommunicationStaleBytes[index] = even;
+            _m68kCommunicationStaleValid[index] = true;
             _m68kCommunicationStaleWordValid[index >> 1] = false;
             return true;
         }

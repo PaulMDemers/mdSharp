@@ -3708,33 +3708,73 @@ void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()
         cpu.R[6] = 3;
     }
 
-    SyntheticSh2Bus interpretedBus = new();
-    WriteRoutine(interpretedBus);
-    SeedMemory(interpretedBus);
-    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
-    SeedState(interpreted);
-    interpreted.Run(256);
-    AssertTrue(interpreted.Halted, "interpreter byte span compare loop should reach SLEEP");
-
-    SyntheticSh2Bus fastBus = new();
-    WriteRoutine(fastBus);
-    SeedMemory(fastBus);
-    Sh2Cpu fast = new(fastBus, "fast");
-    SeedState(fast);
-    AssertTrue(
-        fast.TryFastForwardByteSpanCompareLoop(174, fastBus.TryReadByte, 58, out int cycles),
-        "byte span compare loop should fast-forward until the count is exhausted");
-    AssertEqual(126, cycles);
-    fast.Step();
-    AssertTrue(fast.Halted, "fast byte span compare loop should stop on the following SLEEP");
-
-    for (int i = 0; i < 16; i++)
+    void AssertSameCpuState(Sh2Cpu expected, Sh2Cpu actual)
     {
-        AssertEqual(interpreted.R[i], fast.R[i]);
+        for (int i = 0; i < 16; i++)
+        {
+            AssertEqual(expected.R[i], actual.R[i]);
+        }
+
+        AssertEqual(expected.PC, actual.PC);
+        AssertEqual(expected.SR, actual.SR);
+        AssertEqual(expected.Cycles, actual.Cycles);
     }
 
-    AssertEqual(interpreted.PC, fast.PC);
-    AssertEqual(interpreted.SR, fast.SR);
+    void CompareFastPath(string name, Action<SyntheticSh2Bus> seedMemory, Action<Sh2Cpu>? seedCpu = null, int expectedCycles = -1)
+    {
+        SyntheticSh2Bus interpretedBus = new();
+        WriteRoutine(interpretedBus);
+        seedMemory(interpretedBus);
+        Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+        SeedState(interpreted);
+        seedCpu?.Invoke(interpreted);
+        interpreted.Run(256);
+        AssertTrue(interpreted.Halted, $"interpreter byte span compare loop should reach SLEEP for {name}");
+
+        SyntheticSh2Bus fastBus = new();
+        WriteRoutine(fastBus);
+        seedMemory(fastBus);
+        Sh2Cpu fast = new(fastBus, "fast");
+        SeedState(fast);
+        seedCpu?.Invoke(fast);
+        AssertTrue(
+            fast.TryFastForwardByteSpanCompareLoop(174, fastBus.TryReadByte, 13, out int cycles),
+            $"byte span compare loop should fast-forward for {name}");
+        if (expectedCycles >= 0)
+        {
+            AssertEqual(expectedCycles, cycles);
+        }
+
+        fast.Step();
+        AssertTrue(fast.Halted, $"fast byte span compare loop should stop on the following SLEEP for {name}");
+        AssertSameCpuState(interpreted, fast);
+    }
+
+    CompareFastPath("count exhausted", SeedMemory, expectedCycles: 36);
+    CompareFastPath(
+        "source zero",
+        bus =>
+        {
+            bus.WriteByte(Source, 0);
+            bus.WriteByte(Destination, 0);
+        });
+    CompareFastPath(
+        "mismatch",
+        bus =>
+        {
+            bus.WriteByte(Source, 0x46);
+            bus.WriteByte(Destination, 0x47);
+        });
+    CompareFastPath(
+        "destination zero",
+        bus =>
+        {
+            bus.WriteByte(Source, 0x46);
+            bus.WriteByte(Source + 1, 0x5F);
+            bus.WriteByte(Destination, 0x46);
+            bus.WriteByte(Destination + 1, 0);
+        },
+        cpu => cpu.R[6] = 2);
 }
 
 void ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward()
@@ -4156,7 +4196,7 @@ void ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward()
     const uint PollAddress = 0x2402_0200;
     SyntheticSh2Bus bus = new();
     bus.WriteInstructionWord(LoopPc, 0x6011); // MOV.W @R1,R0
-    bus.WriteInstructionWord(LoopPc + 2, 0x4011); // CMP/PZ R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x4111); // CMP/PZ R1
     bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT LoopPc
     bus.WriteWord(PollAddress, 0x8123);
 
