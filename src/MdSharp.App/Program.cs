@@ -5471,6 +5471,7 @@ static uint ReadBigEndianLongSpan(ReadOnlySpan<byte> data, int offset)
 
 string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int nonBackground, int maxNonBackground)
 {
+    const int MinimumVisibleThirtyTwoXPixels = 1024;
     string exceptions = FormatExceptions(machine.MainCpu);
     string exceptionSuffix = ThirtyTwoXExceptionStatusSuffix(exceptions);
     int displayFbNonzero = CountNonzeroBytes(device.DisplayFrameBuffer);
@@ -5489,7 +5490,9 @@ string ClassifyThirtyTwoXSweep(MegaDrive machine, ThirtyTwoXDevice device, int n
         return "sh2-reset-wait";
     }
 
-    if (device.LastCompositeMode != 0 && device.LastCompositeWrittenPixels > 0 && nonBackground > 0)
+    if (device.LastCompositeMode != 0 &&
+        device.LastCompositeWrittenPixels >= MinimumVisibleThirtyTwoXPixels &&
+        nonBackground >= MinimumVisibleThirtyTwoXPixels)
     {
         string visible = device.LastCompositeUsedFallback ? "visible-32x-fallback" : "visible-32x";
         return WithThirtyTwoXExceptionSuffix(visible, exceptionSuffix);
