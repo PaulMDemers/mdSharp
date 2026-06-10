@@ -4832,6 +4832,12 @@ public sealed class ThirtyTwoXDevice
             return false;
         }
 
+        if (_systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative] == 0xFF)
+        {
+            _bootRomPostStartHostClearProtectMask &= (byte)~bit;
+            return false;
+        }
+
         _bootRomPostStartHostClearProtectMask &= (byte)~bit;
         return true;
     }
@@ -4901,7 +4907,20 @@ public sealed class ThirtyTwoXDevice
         }
 
         int relative = (offset & (SystemRegisterBytes - 1)) - ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        return relative >= 0 && relative + bytes <= BootRomCommunicationSignature.Length;
+        if (relative < 0 || relative + bytes > BootRomCommunicationSignature.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < bytes; i++)
+        {
+            if (_systemRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + relative + i] == 0xFF)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool HasPendingBootRomSignatureWrite(ushort offset)
@@ -7638,6 +7657,8 @@ public sealed class ThirtyTwoXDevice
         }
 
         _m68kCommunicationPendingHostBytes[index] = value != 0;
+        _m68kCommunicationStaleValid[index] = false;
+        _m68kCommunicationStaleWordValid[index >> 1] = false;
         if (value != 0)
         {
             _m68kCommunicationDeferredSh2ClearBytes[index] = false;

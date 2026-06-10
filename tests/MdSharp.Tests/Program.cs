@@ -566,6 +566,33 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(staleCommDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0054, cpuIndex: 1);
     AssertEqual((ushort)0x50D4, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
     AssertEqual((ushort)0x0054, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
+    ThirtyTwoXDevice staleHostClearDevice = new();
+    staleHostClearDevice.Reset();
+    ThirtyTwoXDevice.ThirtyTwoXState staleHostClearState = staleHostClearDevice.CaptureState();
+    staleHostClearDevice.RestoreState(staleHostClearState with
+    {
+        BootRomHandshakePending = true,
+    });
+    WriteSh2WordForTest(staleHostClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset), 0xFFFF);
+    WriteSh2WordForTest(staleHostClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset), 0x0000);
+    staleHostClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
+    AssertEqual((ushort)0x0000, staleHostClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    ThirtyTwoXDevice postStartSentinelSh2ClearDevice = new();
+    postStartSentinelSh2ClearDevice.Reset();
+    ThirtyTwoXDevice.ThirtyTwoXState postStartSentinelSh2ClearState = postStartSentinelSh2ClearDevice.CaptureState();
+    byte[] postStartSentinelSh2ClearRegisters = (byte[])postStartSentinelSh2ClearState.SystemRegisters.Clone();
+    postStartSentinelSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0] = 0xFF;
+    postStartSentinelSh2ClearRegisters[ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1] = 0xFF;
+    postStartSentinelSh2ClearDevice.RestoreState(postStartSentinelSh2ClearState with
+    {
+        SystemRegisters = postStartSentinelSh2ClearRegisters,
+        BootRomPostStartSignaturePending = true,
+    });
+    WriteSh2WordForTest(
+        postStartSentinelSh2ClearDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset),
+        0);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(postStartSentinelSh2ClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset)));
     ThirtyTwoXDevice postBootTokenClearDevice = new();
     postBootTokenClearDevice.Reset();
     WriteSh2WordForTest(postBootTokenClearDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x534C, cpuIndex: 1);
@@ -6163,6 +6190,25 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     }
 
     AssertEqual((ushort)0x0080, postStartMailboxDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
+
+    ThirtyTwoXDevice postStartSentinelClearDevice = new(sh2ReadyRom);
+    postStartSentinelClearDevice.Reset();
+    postStartSentinelClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    for (ushort offset = 0; offset < 8; offset += 2)
+    {
+        postStartSentinelClearDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + offset), 0x0000);
+    }
+
+    WriteSh2WordForTest(
+        postStartSentinelClearDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset),
+        0xFFFF);
+    _ = postStartSentinelClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset);
+    _ = postStartSentinelClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2);
+    _ = postStartSentinelClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4);
+    _ = postStartSentinelClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6);
+    postStartSentinelClearDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset, 0x0000);
+    AssertEqual((ushort)0x0000, postStartSentinelClearDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
 
     ThirtyTwoXDevice postStartSh2MailboxDevice = new(sh2ReadyRom);
     postStartSh2MailboxDevice.Reset();
