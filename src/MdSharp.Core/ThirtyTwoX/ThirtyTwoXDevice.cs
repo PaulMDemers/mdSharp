@@ -274,6 +274,7 @@ public sealed class ThirtyTwoXDevice
     private bool _frameBufferSwapPending;
     private int _pendingDrawFrameBufferIndex;
     private int _activeDisplayFrameBufferIndex;
+    private int _visibleDisplayFrameBufferIndex;
     private int _requestedDisplayFrameBufferIndex;
     private ushort _latchedBitmapMode;
     private ushort _latchedScreenShiftControl;
@@ -517,6 +518,7 @@ public sealed class ThirtyTwoXDevice
         ResetSh2DmaDefaults();
         Array.Clear(_sh2DmaRequestSelect);
         _activeDisplayFrameBufferIndex = 0;
+        _visibleDisplayFrameBufferIndex = 0;
         _requestedDisplayFrameBufferIndex = 0;
         _pendingDrawFrameBufferIndex = DrawFrameBufferIndex;
         _frameBufferSwapPending = false;
@@ -581,6 +583,7 @@ public sealed class ThirtyTwoXDevice
 
     public void BeginFrame(bool pal)
     {
+        _visibleDisplayFrameBufferIndex = _activeDisplayFrameBufferIndex;
         _vBlank = false;
         _hBlank = false;
         _currentScanline = 0;
@@ -3304,6 +3307,7 @@ public sealed class ThirtyTwoXDevice
         CopyStateArray(state.SlaveDivisionRegisters, _sh2DivisionRegisters[1]);
         Array.Copy(state.DmaRequestSelect, _sh2DmaRequestSelect, Math.Min(_sh2DmaRequestSelect.Length, state.DmaRequestSelect.Length));
         _activeDisplayFrameBufferIndex = state.ActiveDisplayFrameBufferIndex & 0x01;
+        _visibleDisplayFrameBufferIndex = _activeDisplayFrameBufferIndex;
         _m68kCartridgeBank = (ushort)(ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.BankSetOffset) & 0x0003);
         _adapterEnabled = state.AdapterEnabled;
         _sh2ResetEnabled = state.Sh2ResetEnabled;
@@ -5395,7 +5399,7 @@ public sealed class ThirtyTwoXDevice
         _lastCompositeUsedFallback = false;
         _lastCompositeMode = 0;
         _lastCompositeWrittenPixels = 0;
-        ReadOnlySpan<byte> source = DisplayFrameBuffer;
+        ReadOnlySpan<byte> source = _frameBuffers[_visibleDisplayFrameBufferIndex & 0x01];
         if (IsAllZero(source) && !IsAllZero(DrawFrameBuffer))
         {
             source = DrawFrameBuffer;
@@ -5749,6 +5753,14 @@ public sealed class ThirtyTwoXDevice
 
     private void SelectFrameBuffer(int requestedDisplayFrameBuffer)
     {
+        if (_frameBufferSwapPending)
+        {
+            ushort control = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+            control = (ushort)((control & ~0x0001) | _requestedDisplayFrameBufferIndex);
+            WriteBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset, control);
+            return;
+        }
+
         _requestedDisplayFrameBufferIndex = requestedDisplayFrameBuffer & 0x01;
         _pendingDrawFrameBufferIndex = _requestedDisplayFrameBufferIndex ^ 1;
         _frameBufferSwapPending = _requestedDisplayFrameBufferIndex != _activeDisplayFrameBufferIndex;

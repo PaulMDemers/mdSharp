@@ -1416,9 +1416,13 @@ void ThirtyTwoXDeviceShell()
     swapDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
     AssertEqual(1, swapDevice.DrawFrameBufferIndex);
     AssertTrue(swapDevice.FrameBufferSwapPending, "display-time frame buffer writes should wait for VBlank");
+    swapDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000);
+    AssertEqual(1, swapDevice.RequestedDisplayFrameBufferIndex);
+    AssertTrue(swapDevice.FrameBufferSwapPending, "later active-display FS writes should not replace a queued swap before VBlank");
     AssertTrue((swapDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should report active-display frame-buffer engagement");
     swapDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
     AssertEqual(0, swapDevice.DrawFrameBufferIndex);
+    AssertEqual(1, swapDevice.DisplayFrameBufferIndex);
     AssertTrue(!swapDevice.FrameBufferSwapPending, "VBlank should complete the pending 32X frame buffer swap");
     ushort frameBufferStatus = swapDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
     AssertTrue((frameBufferStatus & 0x8000) != 0, "32X VBlank status should be visible in frame buffer control reads");
@@ -1432,6 +1436,9 @@ void ThirtyTwoXDeviceShell()
     AssertEqual(0, vblankSelectDevice.DisplayFrameBufferIndex);
     AssertEqual(1, vblankSelectDevice.RequestedDisplayFrameBufferIndex);
     AssertTrue(vblankSelectDevice.FrameBufferSwapPending, "active-mode frame-buffer selections written during VBlank should wait for the next VBlank edge");
+    vblankSelectDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000);
+    AssertEqual(1, vblankSelectDevice.RequestedDisplayFrameBufferIndex);
+    AssertTrue(vblankSelectDevice.FrameBufferSwapPending, "later VBlank FS writes should not replace a queued swap before the next VBlank edge");
     vblankSelectDevice.BeginFrame(pal: false);
     AssertEqual(0, vblankSelectDevice.DisplayFrameBufferIndex);
     AssertTrue(vblankSelectDevice.FrameBufferSwapPending, "beginning the next frame should not complete a VBlank-time selection before the next VBlank edge");
@@ -1493,6 +1500,23 @@ void ThirtyTwoXDeviceShell()
     AssertEqual(0, vblankLatchFrame[2]);
     AssertEqual(1, vblankLatchDevice.LastCompositeMode);
     AssertTrue(!vblankLatchDevice.LastCompositeUsedFallback, "VBlank entry should latch nonblank bitmap mode before compositing");
+
+    ThirtyTwoXDevice frameLatchDevice = new();
+    frameLatchDevice.Reset();
+    frameLatchDevice.WriteFrameBufferWord(0, 0x0100);
+    frameLatchDevice.WriteFrameBufferWord(0x200, 0x001F);
+    frameLatchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    frameLatchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0002);
+    LatchThirtyTwoXVdp(frameLatchDevice);
+    frameLatchDevice.BeginFrame(pal: false);
+    frameLatchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000);
+    frameLatchDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    byte[] frameLatchFrame = new byte[ThirtyTwoXHardwareProfile.NominalWidth * ThirtyTwoXHardwareProfile.NtscVisibleLines * 3];
+    frameLatchDevice.CompositeFrameRgbInto(frameLatchFrame);
+    AssertEqual(255, frameLatchFrame[0]);
+    AssertEqual(0, frameLatchFrame[1]);
+    AssertEqual(0, frameLatchFrame[2]);
+    AssertTrue(!frameLatchDevice.LastCompositeUsedFallback, "compositing after VBlank should use the buffer that was visible during the completed frame");
 
     ThirtyTwoXDevice fastOverflowMirrorDevice = new();
     fastOverflowMirrorDevice.Reset();
