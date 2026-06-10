@@ -7766,10 +7766,18 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (!ShouldExposePreviousCommunicationValueToM68k(index, 1))
+        {
+            _m68kCommunicationStaleValid[index] = false;
+            return;
+        }
+
         // 32X communication ports are shared mailbox bytes; Sega documents same-port
         // cross-side read/write timing as undefined. Keep the old byte visible to
         // the 68000 for one read when an SH-2 publishes a new nonzero byte, but do
-        // not mutate the shared byte. The other SH-2 may be polling the same mailbox.
+        // not mutate the shared byte. Limit this compatibility behavior to the
+        // BIOS/post-start handshake window; retail games also use these ports for
+        // live command arguments and must see the newly published value.
         if (index < 2 ||
             offset is ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2 or
             ThirtyTwoXHardwareProfile.CommunicationPortOffset + 3 ||
@@ -7792,6 +7800,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         if (index == 8 &&
+            ShouldExposePreviousCommunicationValueToM68k(index, 2) &&
             previousValue != 0 &&
             value == 0)
         {
@@ -7819,9 +7828,30 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (!ShouldExposePreviousCommunicationValueToM68k(index, 2))
+        {
+            int clearIndex = index >> 1;
+            _m68kCommunicationStaleWordValid[clearIndex] = false;
+            _m68kCommunicationStaleValid[index] = false;
+            _m68kCommunicationStaleValid[index + 1] = false;
+            return;
+        }
+
         int wordIndex = index >> 1;
         _m68kCommunicationStaleWords[wordIndex] = previousValue;
         _m68kCommunicationStaleWordValid[wordIndex] = true;
+    }
+
+    private bool ShouldExposePreviousCommunicationValueToM68k(int index, int bytes)
+    {
+        if (index < 0 || index + bytes > 16)
+        {
+            return false;
+        }
+
+        return _bootRomHandshakePending ||
+            _bootRomSignatureReadbackActive ||
+            _bootRomPostStartSignaturePending;
     }
 
     private bool ClearPostStartReadyTokenStale(int index, int bytes)

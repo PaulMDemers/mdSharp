@@ -100,6 +100,7 @@ Run("32X cached framebuffer bytes map before cartridge ROM", ThirtyTwoXCachedFra
 Run("32X fixed cartridge cache tags use SH-2 address", ThirtyTwoXFixedCartridgeCacheTagsUseSh2Address);
 Run("32X packed palette zero is transparent", ThirtyTwoXPackedPaletteZeroIsTransparent);
 Run("32X communication byte read/write edge", ThirtyTwoXCommunicationByteReadWriteEdge);
+Run("32X runtime communication words publish current values", ThirtyTwoXRuntimeCommunicationWordsPublishCurrentValues);
 Run("32X 68000 system handshakes sync SH-2", ThirtyTwoXM68kSystemHandshakesSyncSh2);
 Run("32X SH-2 watchdog keyed writes", ThirtyTwoXSh2WatchdogKeyedWrites);
 Run("32X SH-2 watchdog interval interrupt", ThirtyTwoXSh2WatchdogIntervalInterrupt);
@@ -556,6 +557,11 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x0002, byteCommandDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
     ThirtyTwoXDevice staleCommDevice = new();
     staleCommDevice.Reset();
+    ThirtyTwoXDevice.ThirtyTwoXState staleCommState = staleCommDevice.CaptureState();
+    staleCommDevice.RestoreState(staleCommState with
+    {
+        BootRomHandshakePending = true,
+    });
     staleCommDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x50D4);
     WriteSh2WordForTest(staleCommDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8), 0x0054, cpuIndex: 1);
     AssertEqual((ushort)0x50D4, staleCommDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8)));
@@ -1656,6 +1662,18 @@ void ThirtyTwoXDeviceShell()
     acceptedPwmInterruptDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.PwmLeftPulseWidthOffset, 0x0200);
     acceptedPwmInterruptDevice.RunSh2Cycles(40);
     AssertEqual(0x0000_0058u, acceptedPwmInterruptDevice.MasterSh2.R[1]);
+}
+
+void ThirtyTwoXRuntimeCommunicationWordsPublishCurrentValues()
+{
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+    device.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4), 0x0204);
+    WriteSh2WordForTest(
+        device,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4),
+        0x00C8);
+    AssertEqual((ushort)0x00C8, device.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4)));
 }
 
 void ThirtyTwoXSh2FrtInputCaptureSignal()
