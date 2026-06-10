@@ -58,6 +58,7 @@ Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPo
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
+Run("32X SH-2 word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
 Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
@@ -4120,6 +4121,36 @@ void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()
 
     bus.WriteWord(FlagAddress, 0);
     AssertTrue(!cpu.TryFastForwardWordCmpEqBfPollLoop(300, out _), "matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward()
+{
+    const uint LoopPc = 0x0600_2000;
+    const uint PollAddress = 0x2402_0200;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x4011); // CMP/PZ R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT LoopPc
+    bus.WriteWord(PollAddress, 0x8123);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = PollAddress;
+    AssertTrue(cpu.TryFastForwardWordLoadCmpPzBtIdleLoop(301, out int cycles), "MOV.W/CMP-PZ/BT idle loop should fast-forward while the compare register is positive");
+    AssertEqual(300, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0xFFFF_8123u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1u);
+
+    Sh2Cpu branchEntry = new(bus, "test");
+    branchEntry.Reset(LoopPc + 4);
+    branchEntry.R[1] = PollAddress;
+    AssertTrue(branchEntry.TryFastForwardWordLoadCmpPzBtIdleLoop(300, out _), "MOV.W/CMP-PZ/BT idle loop should fast-forward from the branch instruction");
+
+    Sh2Cpu negativeCompare = new(bus, "test");
+    negativeCompare.Reset(LoopPc);
+    negativeCompare.R[1] = 0xF402_0200;
+    AssertTrue(!negativeCompare.TryFastForwardWordLoadCmpPzBtIdleLoop(300, out _), "negative compare register should fall back so the loop can exit normally");
 }
 
 void ThirtyTwoXSh2WordTstBtPollLoopFastForward()

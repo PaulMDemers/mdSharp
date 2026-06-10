@@ -922,6 +922,16 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (((nextOpcode & 0xF00F) == 0x6001 ||
+                    (nextOpcode & 0xF0FF) == 0x4011 ||
+                    (nextOpcode & 0xFF00) == 0x8900) &&
+                cpu.TryFastForwardWordLoadCmpPzBtIdleLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x2001)
             {
                 int fillLoopBudget = Math.Min(cycleBudget, Sh2FrameBufferWordFillLoopCycles * Sh2FrameBufferWordFillLoopMaxBurstIterations);
