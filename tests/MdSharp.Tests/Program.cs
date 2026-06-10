@@ -45,6 +45,8 @@ Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStrided
 Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
 Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
+Run("32X SH-2 Doom record pair scan loop fast-forward", ThirtyTwoXSh2DoomRecordPairScanLoopFastForward);
+Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward);
 Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
 Run("32X SH-2 byte nibble lookup expand loop fast-forward", ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
@@ -451,6 +453,13 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x1FE, paletteEvents[0].Offset);
     AssertEqual((ushort)0x2468, paletteEvents[0].Value);
     AssertEqual("R16", paletteEvents[1].Operation);
+    paletteEvents.Clear();
+    device.WritePaletteWord(0x0040, 0x1357, "M68K");
+    AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
+    WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8000);
+    device.WritePaletteWord(0x0040, 0x0000, "M68K");
+    AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
+    AssertTrue(paletteEvents.Any(evt => evt.Operation == "DENY-W16"), "M68K palette writes should be denied while SH-2 owns VDP access");
     ThirtyTwoXDevice ntscFormatDevice = new();
     ntscFormatDevice.Reset();
     ntscFormatDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
@@ -3664,6 +3673,159 @@ void ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward()
     AssertEqual(0u, partial.SR & 1);
     AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination));
     AssertEqual((ushort)0x3456, partialBus.ReadWord(Destination + 2));
+}
+
+void ThirtyTwoXSh2DoomRecordPairScanLoopFastForward()
+{
+    const uint LoopPc = 0x0204_07E6;
+    const uint Records = 0x0601_8000;
+    const uint LimitAddress = 0x0600_8964;
+    const uint Needle = 0x0601_0194;
+    const int RecordStride = 0x44;
+    ushort[] opcodes =
+    [
+        0x518C, 0x31A0, 0x8902, 0x518D, 0x31A0, 0x8B0C, 0x001B, 0x0009,
+        0x0009, 0x0009, 0x0009, 0x0009, 0x0009, 0x0009, 0x0009, 0x0009,
+        0x0009, 0x0009, 0x0009, 0x7901, 0xD116, 0x6112, 0x3913, 0x8FE7,
+        0x7844, 0x001B
+    ];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        uint literalAddress = ((LoopPc + 0x28 + 4) & 0xFFFF_FFFCu) + 0x16u * 4u;
+        bus.WriteLong(literalAddress, LimitAddress);
+    }
+
+    static void SeedRecords(SyntheticSh2Bus bus, uint limit, int matchIndex)
+    {
+        bus.WriteLong(LimitAddress, limit);
+        for (int i = 0; i < limit; i++)
+        {
+            uint record = Records + (uint)(i * RecordStride);
+            bus.WriteLong(record + 0x30, 0x1111_0000u + (uint)i);
+            bus.WriteLong(record + 0x34, 0x2222_0000u + (uint)i);
+        }
+
+        if (matchIndex >= 0)
+        {
+            bus.WriteLong(Records + (uint)(matchIndex * RecordStride) + 0x34, Needle);
+        }
+    }
+
+    static void SeedCpu(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[8] = Records;
+        cpu.R[9] = 0;
+        cpu.R[10] = Needle;
+    }
+
+    void AssertSameArchitecturalState(Sh2Cpu expected, Sh2Cpu actual)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            AssertEqual(expected.R[i], actual.R[i]);
+        }
+
+        AssertEqual(expected.PC, actual.PC);
+        AssertEqual(expected.SR, actual.SR);
+        AssertEqual(expected.Halted, actual.Halted);
+    }
+
+    void Compare(string name, uint limit, int matchIndex)
+    {
+        SyntheticSh2Bus interpretedBus = new();
+        WriteRoutine(interpretedBus);
+        SeedRecords(interpretedBus, limit, matchIndex);
+        Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+        SeedCpu(interpreted);
+        interpreted.Run(512);
+        AssertTrue(interpreted.Halted, $"Doom record scan interpreter should halt for {name}");
+
+        SyntheticSh2Bus fastBus = new();
+        WriteRoutine(fastBus);
+        SeedRecords(fastBus, limit, matchIndex);
+        Sh2Cpu fast = new(fastBus, "fast");
+        SeedCpu(fast);
+        AssertTrue(fast.TryFastForwardDoomRecordPairScanLoop(14 * 64, out int cycles), $"Doom record scan should fast-forward for {name}");
+        AssertTrue(cycles > 0, $"Doom record scan should consume cycles for {name}");
+        fast.Run(512);
+        AssertTrue(fast.Halted, $"Doom record scan fast path should halt for {name}");
+        AssertSameArchitecturalState(interpreted, fast);
+    }
+
+    Compare("skip to later match", limit: 6, matchIndex: 4);
+    Compare("skip to exhausted limit", limit: 6, matchIndex: -1);
+}
+
+void ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward()
+{
+    const uint LoopPc = 0x0204_6DB0;
+    const uint Source = 0x0600_9000;
+    const uint Destination = 0x0600_A000;
+    ushort[] opcodes = [0x6174, 0x7201, 0x3203, 0x2410, 0x8FFA, 0x7401, 0x001B];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        for (uint i = 0; i < 9; i++)
+        {
+            bus.WriteByte(Source + i, (byte)(0x40 + i));
+        }
+    }
+
+    static void SeedCpu(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[0] = 9;
+        cpu.R[2] = 0;
+        cpu.R[4] = Destination;
+        cpu.R[7] = Source;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    SeedMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedCpu(interpreted);
+    interpreted.Run(128);
+    AssertTrue(interpreted.Halted, "interpreter MOV.B postincrement copy loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    SeedMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedCpu(fast);
+    AssertTrue(
+        fast.TryFastForwardMovBPostIncStoreAddCmpGeBfsLoop(8 * 16, fastBus.TryReadByte, fastBus.TryWriteByte, out int cycles),
+        "MOV.B postincrement copy loop should fast-forward through completion");
+    AssertEqual(8 * 9, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast MOV.B postincrement copy loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint i = 0; i < 9; i++)
+    {
+        AssertEqual(interpretedBus.ReadByte(Destination + i), fastBus.ReadByte(Destination + i));
+    }
 }
 
 void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()

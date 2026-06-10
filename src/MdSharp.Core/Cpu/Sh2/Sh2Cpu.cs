@@ -8154,6 +8154,180 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardDoomRecordPairScanLoop(int maxCycles, out int cycles)
+    {
+        const int CyclesPerUnmatchedRecord = 14;
+        cycles = 0;
+        if (maxCycles < CyclesPerUnmatchedRecord ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0x00, out ushort loadFirst) ||
+            loadFirst != 0x518C ||
+            !peekBus.TryPeekWord(loopPc + 0x02, out ushort compareFirst) ||
+            compareFirst != 0x31A0 ||
+            !peekBus.TryPeekWord(loopPc + 0x04, out ushort branchFirstEqual) ||
+            branchFirstEqual != 0x8902 ||
+            !peekBus.TryPeekWord(loopPc + 0x06, out ushort loadSecond) ||
+            loadSecond != 0x518D ||
+            !peekBus.TryPeekWord(loopPc + 0x08, out ushort compareSecond) ||
+            compareSecond != 0x31A0 ||
+            !peekBus.TryPeekWord(loopPc + 0x0A, out ushort branchSecondNotEqual) ||
+            branchSecondNotEqual != 0x8B0C ||
+            !peekBus.TryPeekWord(loopPc + 0x26, out ushort incrementIndex) ||
+            incrementIndex != 0x7901 ||
+            !peekBus.TryPeekWord(loopPc + 0x28, out ushort loadLimitAddress) ||
+            loadLimitAddress != 0xD116 ||
+            !peekBus.TryPeekWord(loopPc + 0x2A, out ushort loadLimit) ||
+            loadLimit != 0x6112 ||
+            !peekBus.TryPeekWord(loopPc + 0x2C, out ushort compareLimit) ||
+            compareLimit != 0x3913 ||
+            !peekBus.TryPeekWord(loopPc + 0x2E, out ushort loopBranch) ||
+            loopBranch != 0x8FE7 ||
+            !peekBus.TryPeekWord(loopPc + 0x30, out ushort advanceRecord) ||
+            advanceRecord != 0x7844)
+        {
+            return false;
+        }
+
+        uint limitLiteralAddress = ((loopPc + 0x28 + 4) & 0xFFFF_FFFCu) + 0x16u * 4u;
+        if (!TryPeekLong(peekBus, limitLiteralAddress, out uint limitAddress) ||
+            !TryPeekLong(peekBus, limitAddress, out uint limit))
+        {
+            return false;
+        }
+
+        uint record = R[8];
+        uint index = R[9];
+        uint needle = R[10];
+        if (index >= limit)
+        {
+            return false;
+        }
+
+        int maxIterations = Math.Max(1, maxCycles / CyclesPerUnmatchedRecord);
+        int iterations = 0;
+        while (iterations < maxIterations && index < limit)
+        {
+            if (!TryPeekLong(peekBus, record + 0x30, out uint first) ||
+                !TryPeekLong(peekBus, record + 0x34, out uint second))
+            {
+                break;
+            }
+
+            if (first == needle || second == needle)
+            {
+                break;
+            }
+
+            index++;
+            record += 0x44;
+            iterations++;
+        }
+
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        R[8] = record;
+        R[9] = index;
+        R[1] = limit;
+        cycles = iterations * CyclesPerUnmatchedRecord;
+        Cycles += cycles;
+        if (index >= limit)
+        {
+            SetT(true);
+            PC = loopPc + 0x32;
+        }
+        else
+        {
+            SetT(false);
+            PC = loopPc;
+        }
+
+        LastOpcode = advanceRecord;
+        LastOpcodePc = loopPc + 0x30;
+        return true;
+    }
+
+    public bool TryFastForwardMovBPostIncStoreAddCmpGeBfsLoop(int maxCycles, Func<uint, byte?> readByte, Func<uint, byte, bool> writeByte, out int cycles)
+    {
+        const int CyclesPerIteration = 8;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0, out ushort loadOpcode) ||
+            loadOpcode != 0x6174 ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort incrementCountOpcode) ||
+            incrementCountOpcode != 0x7201 ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort compareOpcode) ||
+            compareOpcode != 0x3203 ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort storeOpcode) ||
+            storeOpcode != 0x2410 ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort branchOpcode) ||
+            branchOpcode != 0x8FFA ||
+            !peekBus.TryPeekWord(loopPc + 10, out ushort incrementDestinationOpcode) ||
+            incrementDestinationOpcode != 0x7401)
+        {
+            return false;
+        }
+
+        uint limit = R[0];
+        uint count = R[2];
+        if (count >= limit)
+        {
+            return false;
+        }
+
+        int maxIterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        int iterations = 0;
+        while (iterations < maxIterations && count < limit)
+        {
+            byte? value = readByte(R[7]);
+            if (!value.HasValue || !writeByte(R[4], value.Value))
+            {
+                break;
+            }
+
+            R[1] = value.Value;
+            R[7]++;
+            R[2] = ++count;
+            R[4]++;
+            iterations++;
+        }
+
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        bool complete = count >= limit;
+        SetT(complete);
+        PC = complete ? loopPc + 12 : loopPc;
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = incrementDestinationOpcode;
+        LastOpcodePc = loopPc + 10;
+        return true;
+    }
+
     public int Step()
     {
         uint pc = PC;

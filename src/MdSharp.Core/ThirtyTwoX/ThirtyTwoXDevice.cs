@@ -1178,6 +1178,30 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x518C &&
+                cpu.TryFastForwardDoomRecordPairScanLoop(
+                    Math.Min(cycleBudget, 14 * 4096),
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6174 &&
+                cpu.TryFastForwardMovBPostIncStoreAddCmpGeBfsLoop(
+                    Math.Min(cycleBudget, 8 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2ByteWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memscan") &&
                 nextOpcode == 0x2271 &&
                 cpu.TryFastForwardWordFillAddCompareGtBfsLoop(
                     Math.Min(cycleBudget, 7 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
@@ -3043,6 +3067,12 @@ public sealed class ThirtyTwoXDevice
 
     public void WritePaletteByte(ushort offset, byte value, string source)
     {
+        if (IsM68kPaletteAccessDenied(source))
+        {
+            PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "DENY-W8", offset, value));
+            return;
+        }
+
         _palette[offset & (_palette.Length - 1)] = value;
         _paletteByteWriteCount++;
         PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "W8", offset, value));
@@ -3055,9 +3085,20 @@ public sealed class ThirtyTwoXDevice
 
     public void WritePaletteWord(ushort offset, ushort value, string source)
     {
+        if (IsM68kPaletteAccessDenied(source))
+        {
+            PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "DENY-W16", offset, value));
+            return;
+        }
+
         WriteBigEndianWord(_palette, offset & (_palette.Length - 1), value);
         _paletteByteWriteCount += 2;
         PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "W16", offset, value));
+    }
+
+    private bool IsM68kPaletteAccessDenied(string source)
+    {
+        return source == "M68K" && _vdpAccessGrantedToSh2;
     }
 
     public byte ReadFrameBufferByte(uint offset)
