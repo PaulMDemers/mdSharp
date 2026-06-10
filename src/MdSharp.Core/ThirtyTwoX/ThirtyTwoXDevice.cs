@@ -1202,6 +1202,20 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6830 &&
+                cpu.TryFastForwardDoomMaskedColumnWordStoreLoop(
+                    Math.Min(cycleBudget, 10 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memscan") &&
                 nextOpcode == 0x2271 &&
                 cpu.TryFastForwardWordFillAddCompareGtBfsLoop(
                     Math.Min(cycleBudget, 7 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
@@ -3067,7 +3081,7 @@ public sealed class ThirtyTwoXDevice
 
     public void WritePaletteByte(ushort offset, byte value, string source)
     {
-        if (IsM68kPaletteAccessDenied(source))
+        if (IsM68kPaletteByteAccessDenied(source, offset, value))
         {
             PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "DENY-W8", offset, value));
             return;
@@ -3085,7 +3099,7 @@ public sealed class ThirtyTwoXDevice
 
     public void WritePaletteWord(ushort offset, ushort value, string source)
     {
-        if (IsM68kPaletteAccessDenied(source))
+        if (IsM68kPaletteWordAccessDenied(source, value))
         {
             PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "DENY-W16", offset, value));
             return;
@@ -3096,9 +3110,23 @@ public sealed class ThirtyTwoXDevice
         PaletteAccessObserver?.Invoke(new PaletteAccessTrace(source, "W16", offset, value));
     }
 
-    private bool IsM68kPaletteAccessDenied(string source)
+    private bool IsM68kPaletteWordAccessDenied(string source, ushort value)
     {
-        return source == "M68K" && _vdpAccessGrantedToSh2;
+        return source == "M68K" &&
+            _vdpAccessGrantedToSh2 &&
+            value == 0 &&
+            !IsAllZero(_palette);
+    }
+
+    private bool IsM68kPaletteByteAccessDenied(string source, ushort offset, byte value)
+    {
+        if (source != "M68K" || !_vdpAccessGrantedToSh2 || value != 0 || IsAllZero(_palette))
+        {
+            return false;
+        }
+
+        int paired = (offset ^ 1) & (_palette.Length - 1);
+        return _palette[paired] == 0;
     }
 
     public byte ReadFrameBufferByte(uint offset)

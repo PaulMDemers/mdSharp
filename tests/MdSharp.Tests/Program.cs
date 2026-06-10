@@ -47,6 +47,7 @@ Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFill
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
 Run("32X SH-2 Doom record pair scan loop fast-forward", ThirtyTwoXSh2DoomRecordPairScanLoopFastForward);
 Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward);
+Run("32X SH-2 Doom masked column word store loop fast-forward", ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
 Run("32X SH-2 byte nibble lookup expand loop fast-forward", ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
@@ -457,9 +458,11 @@ void ThirtyTwoXDeviceShell()
     device.WritePaletteWord(0x0040, 0x1357, "M68K");
     AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
     WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8000);
+    device.WritePaletteWord(0x0042, 0x8000, "M68K");
+    AssertEqual((ushort)0x8000, device.ReadPaletteWord(0x0042));
     device.WritePaletteWord(0x0040, 0x0000, "M68K");
     AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
-    AssertTrue(paletteEvents.Any(evt => evt.Operation == "DENY-W16"), "M68K palette writes should be denied while SH-2 owns VDP access");
+    AssertTrue(paletteEvents.Any(evt => evt.Operation == "DENY-W16"), "M68K zero palette clears should be denied while SH-2 owns VDP access and palette data is active");
     ThirtyTwoXDevice ntscFormatDevice = new();
     ntscFormatDevice.Reset();
     ntscFormatDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
@@ -3825,6 +3828,82 @@ void ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward()
     for (uint i = 0; i < 9; i++)
     {
         AssertEqual(interpretedBus.ReadByte(Destination + i), fastBus.ReadByte(Destination + i));
+    }
+}
+
+void ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward()
+{
+    const uint LoopPc = 0x0204_9084;
+    const uint Source = 0x0600_9000;
+    const uint Lookup = 0x0600_A000;
+    const uint Destination = 0x0600_B000;
+    ushort[] opcodes = [0x6830, 0x3D7E, 0x33AE, 0x4800, 0x088D, 0x4C10, 0x2981, 0x8FF7, 0x395C, 0x001B];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        byte[] source = [0x01, 0x02, 0x03, 0x04, 0x05];
+        for (uint i = 0; i < source.Length; i++)
+        {
+            bus.WriteByte(Source + i, source[i]);
+        }
+
+        for (uint i = 0; i < 16; i++)
+        {
+            bus.WriteWord(Lookup + (i * 2), (ushort)(0x1100 + i));
+        }
+    }
+
+    static void SeedCpu(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[0] = Lookup;
+        cpu.R[3] = Source;
+        cpu.R[5] = 2;
+        cpu.R[7] = 0xFFFF_FFFF;
+        cpu.R[9] = Destination;
+        cpu.R[10] = 1;
+        cpu.R[12] = 5;
+        cpu.R[13] = 0;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    SeedMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedCpu(interpreted);
+    interpreted.Run(128);
+    AssertTrue(interpreted.Halted, "interpreter Doom masked column loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    SeedMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedCpu(fast);
+    AssertTrue(
+        fast.TryFastForwardDoomMaskedColumnWordStoreLoop(10 * 16, fastBus.TryReadByte, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+        "Doom masked column loop should fast-forward through completion");
+    AssertEqual(10 * 5, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast Doom masked column loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint i = 0; i < 5; i++)
+    {
+        AssertEqual(interpretedBus.ReadWord(Destination + (i * 2)), fastBus.ReadWord(Destination + (i * 2)));
     }
 }
 
