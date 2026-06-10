@@ -55,6 +55,8 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2CacheDataArrayStart = 0xC000_0000;
     private const uint Sh2CacheDataArrayEnd = 0xE000_0000;
     private const uint Sh2CacheDataArrayBytes = ThirtyTwoXHardwareProfile.Sh2CacheBytes;
+    private const uint Sh2PrivateWorkRamLowMirrorStart = 0xBFFF_F800;
+    private const uint Sh2PrivateWorkRamLowMirrorEnd = 0xC000_0000;
     private const uint Sh2PrivateWorkRamBytes = 0x800;
     private const uint Sh2BootRomMappedBytes = 0x1000;
     private const uint Sh2CachePurgeStart = 0x4000_0000;
@@ -8603,6 +8605,12 @@ public sealed class ThirtyTwoXDevice
 
     private static bool TryMapSh2PrivateWorkRamAddress(uint address, int cpuIndex, out int offset)
     {
+        if (address is >= Sh2PrivateWorkRamLowMirrorStart and < Sh2PrivateWorkRamLowMirrorEnd)
+        {
+            offset = (int)(address & (Sh2PrivateWorkRamBytes - 1));
+            return true;
+        }
+
         if (address is >= Sh2CacheDataArrayStart and < Sh2CacheDataArrayEnd)
         {
             int cacheOffset = (int)(address & (Sh2CacheDataArrayBytes - 1));
