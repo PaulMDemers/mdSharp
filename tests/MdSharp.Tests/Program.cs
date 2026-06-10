@@ -1946,6 +1946,9 @@ void ThirtyTwoXSh2CoreExecutesSyntheticCode()
     WriteSh2LongForTest(privateRamDevice, 0xBFFF_FBFA, 0x0600_3838);
     AssertEqual(0x0600_3838u, ReadSh2LongForTest(privateRamDevice, 0xC000_03FA));
     AssertEqual(0x0600_3838u, ReadSh2LongForTest(privateRamDevice, 0xBFFF_FBFA));
+    WriteSh2LongForTest(privateRamDevice, 0xC000_07FC, 0x0600_08F2);
+    WriteSh2LongForTest(privateRamDevice, 0xBFFF_FFFC, 0x2402_8200);
+    AssertEqual(0x0600_08F2u, ReadSh2LongForTest(privateRamDevice, 0xC000_07FC));
     ThirtyTwoXDevice.ThirtyTwoXState privateRamState = privateRamDevice.CaptureState();
     privateRamDevice.Reset();
     privateRamDevice.RestoreState(privateRamState);

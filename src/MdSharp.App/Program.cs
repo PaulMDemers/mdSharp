@@ -37,6 +37,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
+    Console.WriteLine("  mdsharp --32x-pr-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-irq-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-fill-loop-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame]");
     Console.WriteLine("  mdsharp --32x-runlength-list-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
@@ -211,6 +212,23 @@ if (args[0].Equals("--32x-live-sh2-trace-state", StringComparison.OrdinalIgnoreC
     uint? pcEnd = args.Length > 8 ? ParseNumber(args[8]) : pcStart;
     int maxLines = args.Length > 9 && int.TryParse(args[9], out int parsedMaxLines) ? parsedMaxLines : 250_000;
     TraceThirtyTwoXLiveSh2(args[1], args[3], frames, instructionsPerFrame, cpu, pcStart, pcEnd, maxLines, startFrame: 0, statePath: args[2]);
+    return;
+}
+
+if (args[0].Equals("--32x-pr-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-pr-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [start-frame] [max-lines]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 600_000;
+    string cpu = args.Length > 5 ? args[5] : "both";
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? Math.Max(0, parsedStartFrame) : 0;
+    int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? Math.Max(1, parsedMaxLines) : 20_000;
+    TraceThirtyTwoXPrChanges(args[1], args[2], frames, instructionsPerFrame, cpu, startFrame, maxLines);
     return;
 }
 
@@ -2947,6 +2965,120 @@ void TraceThirtyTwoXLiveSh2(string romPath, string outputCsv, int frames, int in
     DisableObservers();
     Console.WriteLine($"Wrote {sequence:N0} SH-2 trace row(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8} SR=${device.MasterSh2.SR:X8}; slave PC=${device.SlaveSh2.PC:X8} SR=${device.SlaveSh2.SR:X8}");
+}
+
+void TraceThirtyTwoXPrChanges(string romPath, string outputCsv, int frames, int instructionsPerFrame, string cpuFilter, int startFrame, int maxLines)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    bool traceMaster = cpuFilter.Equals("both", StringComparison.OrdinalIgnoreCase) || cpuFilter.Equals("master", StringComparison.OrdinalIgnoreCase);
+    bool traceSlave = cpuFilter.Equals("both", StringComparison.OrdinalIgnoreCase) || cpuFilter.Equals("slave", StringComparison.OrdinalIgnoreCase);
+    int currentFrame = 0;
+    int sequence = 0;
+    bool limitReached = false;
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,cpu,pc,opcode,asm,nextPc,beforePr,pr,beforeR0,beforeR1,beforeR14,beforeR15,r0,r1,r14,r15,sr,masterCycle,scanline,lineCycle");
+
+    bool ShouldTraceCpu(string cpuName)
+    {
+        return traceMaster && cpuName.Contains("master", StringComparison.OrdinalIgnoreCase) ||
+            traceSlave && cpuName.Contains("slave", StringComparison.OrdinalIgnoreCase);
+    }
+
+    void DisableObservers()
+    {
+        device.MasterSh2.InstructionObserver = null;
+        device.SlaveSh2.InstructionObserver = null;
+    }
+
+    void Observe(Sh2Cpu.Sh2InstructionTrace trace)
+    {
+        if (limitReached || trace.BeforePr == trace.Pr || !ShouldTraceCpu(trace.Cpu))
+        {
+            return;
+        }
+
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            Csv(trace.Cpu),
+            $"${trace.Pc:X8}",
+            $"${trace.Opcode:X4}",
+            Csv(DisassembleSh2(trace.Opcode, trace.Pc)),
+            $"${trace.NextPc:X8}",
+            $"${trace.BeforePr:X8}",
+            $"${trace.Pr:X8}",
+            $"${trace.BeforeR0:X8}",
+            $"${trace.BeforeR1:X8}",
+            $"${trace.BeforeR14:X8}",
+            $"${trace.BeforeR15:X8}",
+            $"${trace.R0:X8}",
+            $"${trace.R1:X8}",
+            $"${trace.R14:X8}",
+            $"${trace.R15:X8}",
+            $"${trace.Sr:X8}",
+            machine.Bus.CurrentMasterCycle.ToString(CultureInfo.InvariantCulture),
+            machine.Vdp.CurrentScanline.ToString(CultureInfo.InvariantCulture),
+            machine.Bus.CurrentScanlineMasterCycleOffset.ToString(CultureInfo.InvariantCulture)));
+
+        if (sequence >= maxLines)
+        {
+            limitReached = true;
+            DisableObservers();
+        }
+    }
+
+    device.MasterSh2.InstructionObserver = Observe;
+    device.SlaveSh2.InstructionObserver = Observe;
+
+    int endFrame = startFrame + frames;
+    Console.WriteLine($"32X PR trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, cpu={cpuFilter}");
+    for (currentFrame = 0; currentFrame < endFrame && !limitReached; currentFrame++)
+    {
+        try
+        {
+            if (currentFrame == 0 && startFrame > 0)
+            {
+                DisableObservers();
+            }
+
+            if (currentFrame == startFrame)
+            {
+                device.MasterSh2.InstructionObserver = Observe;
+                device.SlaveSh2.InstructionObserver = Observe;
+            }
+
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+        catch (Exception ex) when (ex is M68kException or Sh2Exception or InvalidOperationException)
+        {
+            writer.WriteLine(string.Join(
+                ',',
+                currentFrame.ToString(CultureInfo.InvariantCulture),
+                (++sequence).ToString(CultureInfo.InvariantCulture),
+                Csv(ex.GetType().Name),
+                string.Empty,
+                string.Empty,
+                Csv(ex.Message)));
+            break;
+        }
+    }
+
+    DisableObservers();
+    Console.WriteLine($"Wrote {sequence:N0} PR trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
 }
 
 void TraceThirtyTwoXInterrupts(string romPath, string outputCsv, int frames, int instructionsPerFrame, string cpuFilter, int startFrame, int maxLines)

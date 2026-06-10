@@ -56,7 +56,7 @@ public sealed class ThirtyTwoXDevice
     private const uint Sh2CacheDataArrayEnd = 0xE000_0000;
     private const uint Sh2CacheDataArrayBytes = ThirtyTwoXHardwareProfile.Sh2CacheBytes;
     private const uint Sh2PrivateWorkRamLowMirrorStart = 0xBFFF_F800;
-    private const uint Sh2PrivateWorkRamLowMirrorEnd = 0xC000_0000;
+    private const uint Sh2PrivateWorkRamLowMirrorEnd = 0xBFFF_FC00;
     private const uint Sh2PrivateWorkRamBytes = 0x800;
     private const uint Sh2BootRomMappedBytes = 0x1000;
     private const uint Sh2CachePurgeStart = 0x4000_0000;
