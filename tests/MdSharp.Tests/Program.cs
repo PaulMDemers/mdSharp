@@ -4521,6 +4521,14 @@ void ThirtyTwoXSh2ByteDisplacementZeroWaitDtBfLoopFastForward()
     AssertEqual(LoopPc, cpu.PC);
     AssertTrue(cpu.R[2] < 1000, "branch-entry byte wait loop should consume at least one countdown iteration");
 
+    cpu.Reset(LoopPc + 6);
+    cpu.R[1] = ByteAddress - 1;
+    cpu.R[2] = 0x0007_4860;
+    AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(1_000_000, out int largeCycles), "byte displacement zero wait loop should use a large safe burst for long timeout loops");
+    AssertEqual(196608, largeCycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0006_C860u, cpu.R[2]);
+
     cpu.R[2] = 2;
     AssertTrue(cpu.TryFastForwardByteDisplacementZeroWaitDtBfLoop(4096, out _), "byte displacement zero wait loop should finish when DT reaches zero");
     AssertEqual(LoopPc + 10, cpu.PC);

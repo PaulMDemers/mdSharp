@@ -6366,7 +6366,7 @@ Done:
     public bool TryFastForwardByteDisplacementZeroWaitDtBfLoop(int maxCycles, out int cycles)
     {
         const int CyclesPerIteration = 6;
-        const int MaxBurstCycles = 4096;
+        const int MaxBurstCycles = CyclesPerIteration * 32_768;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
