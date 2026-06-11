@@ -8427,6 +8427,106 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardDoomSteppedMaskedColumnWordStoreLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 10;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0x00, out ushort loadByte) ||
+            loadByte != 0x6810 ||
+            !peekBus.TryPeekWord(loopPc + 0x02, out ushort addCarryX) ||
+            addCarryX != 0x334E ||
+            !peekBus.TryPeekWord(loopPc + 0x04, out ushort addCarrySource) ||
+            addCarrySource != 0x315E ||
+            !peekBus.TryPeekWord(loopPc + 0x06, out ushort shiftIndex) ||
+            shiftIndex != 0x4800 ||
+            !peekBus.TryPeekWord(loopPc + 0x08, out ushort lookupWord) ||
+            lookupWord != 0x088D ||
+            !peekBus.TryPeekWord(loopPc + 0x0A, out ushort decrementCount) ||
+            decrementCount != 0x4610 ||
+            !peekBus.TryPeekWord(loopPc + 0x0C, out ushort storeWord) ||
+            storeWord != 0x2281 ||
+            !peekBus.TryPeekWord(loopPc + 0x0E, out ushort branch) ||
+            branch != 0x8FF7 ||
+            !peekBus.TryPeekWord(loopPc + 0x10, out ushort advanceDestination) ||
+            advanceDestination != 0x327C)
+        {
+            return false;
+        }
+
+        if (R[6] == 0)
+        {
+            return false;
+        }
+
+        int maxIterations = Math.Max(1, maxCycles / CyclesPerIteration);
+        int iterations = 0;
+        while (iterations < maxIterations && R[6] != 0)
+        {
+            byte? source = readByte(R[1]);
+            if (!source.HasValue)
+            {
+                break;
+            }
+
+            R[8] = SignExtend8(source.Value);
+            ExecuteAddc(n: 3, m: 4);
+            ExecuteAddc(n: 1, m: 5);
+            SetT((R[8] & 0x8000_0000u) != 0);
+            R[8] <<= 1;
+
+            ushort? mapped = readWord(R[0] + R[8]);
+            if (!mapped.HasValue)
+            {
+                break;
+            }
+
+            R[8] = SignExtend16(mapped.Value);
+            R[6]--;
+            bool complete = R[6] == 0;
+            SetT(complete);
+            if (!writeWord(R[2], (ushort)R[8]))
+            {
+                break;
+            }
+
+            R[2] += R[7];
+            iterations++;
+            if (complete)
+            {
+                break;
+            }
+        }
+
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        bool completed = R[6] == 0;
+        PC = completed ? loopPc + 0x12 : loopPc;
+        cycles = iterations * CyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = branch;
+        LastOpcodePc = loopPc + 0x0E;
+        return true;
+    }
+
     public bool TryFastForwardDoomSwappedMaskedColumnWordStoreLoop(
         int maxCycles,
         Func<uint, byte?> readByte,

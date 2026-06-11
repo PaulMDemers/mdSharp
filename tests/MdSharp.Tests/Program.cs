@@ -48,6 +48,7 @@ Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFil
 Run("32X SH-2 Doom record pair scan loop fast-forward", ThirtyTwoXSh2DoomRecordPairScanLoopFastForward);
 Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward);
 Run("32X SH-2 Doom masked column word store loop fast-forward", ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward);
+Run("32X SH-2 Doom stepped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSteppedMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 Doom swapped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 repeated SHAR R4 RTS helper fast-forward", ThirtyTwoXSh2RepeatedSharR4RtsFastForward);
 Run("32X SH-2 Doom byte lookup span loop fast-forward", ThirtyTwoXSh2DoomByteLookupSpanLoopFastForward);
@@ -3925,6 +3926,96 @@ void ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward()
     {
         AssertEqual(interpretedBus.ReadWord(Destination + (i * 2)), fastBus.ReadWord(Destination + (i * 2)));
     }
+}
+
+void ThirtyTwoXSh2DoomSteppedMaskedColumnWordStoreLoopFastForward()
+{
+    const uint LoopPc = 0x0204_910C;
+    const uint Source = 0x0600_9000;
+    const uint Lookup = 0x0600_A000;
+    const uint Destination = 0x0600_B000;
+    ushort[] opcodes = [0x6810, 0x334E, 0x315E, 0x4800, 0x088D, 0x4610, 0x2281, 0x8FF7, 0x327C, 0x001B];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        byte[] source = [0x01, 0x02, 0x03, 0x04, 0x05];
+        for (uint i = 0; i < source.Length; i++)
+        {
+            bus.WriteByte(Source + i, source[i]);
+        }
+
+        for (uint i = 0; i < 16; i++)
+        {
+            bus.WriteWord(Lookup + (i * 2), (ushort)(0x2100 + i));
+        }
+    }
+
+    static void SeedCpu(Sh2Cpu cpu)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[0] = Lookup;
+        cpu.R[1] = Source;
+        cpu.R[2] = Destination;
+        cpu.R[3] = 0;
+        cpu.R[4] = 0;
+        cpu.R[5] = 1;
+        cpu.R[6] = 5;
+        cpu.R[7] = 2;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    WriteRoutine(interpretedBus);
+    SeedMemory(interpretedBus);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    SeedCpu(interpreted);
+    interpreted.Run(128);
+    AssertTrue(interpreted.Halted, "interpreter Doom stepped masked column loop should reach SLEEP");
+
+    SyntheticSh2Bus fastBus = new();
+    WriteRoutine(fastBus);
+    SeedMemory(fastBus);
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedCpu(fast);
+    AssertTrue(
+        fast.TryFastForwardDoomSteppedMaskedColumnWordStoreLoop(10 * 16, fastBus.TryReadByte, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+        "Doom stepped masked column loop should fast-forward through completion");
+    AssertEqual(10 * 5, cycles);
+    fast.Step();
+    AssertTrue(fast.Halted, "fast Doom stepped masked column loop should stop on the following SLEEP");
+
+    for (int i = 0; i < 16; i++)
+    {
+        AssertEqual(interpreted.R[i], fast.R[i]);
+    }
+
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (uint i = 0; i < 5; i++)
+    {
+        AssertEqual(interpretedBus.ReadWord(Destination + (i * 2)), fastBus.ReadWord(Destination + (i * 2)));
+    }
+
+    SyntheticSh2Bus partialBus = new();
+    WriteRoutine(partialBus);
+    SeedMemory(partialBus);
+    Sh2Cpu partial = new(partialBus, "partial");
+    SeedCpu(partial);
+    AssertTrue(
+        partial.TryFastForwardDoomSteppedMaskedColumnWordStoreLoop(20, partialBus.TryReadByte, partialBus.TryReadWord, partialBus.TryWriteWord, out int partialCycles),
+        "Doom stepped masked column loop should respect the cycle budget");
+    AssertEqual(20, partialCycles);
+    AssertEqual(LoopPc, partial.PC);
+    AssertEqual(Source + 2, partial.R[1]);
+    AssertEqual(Destination + 4, partial.R[2]);
+    AssertEqual(3u, partial.R[6]);
 }
 
 void ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward()
