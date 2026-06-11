@@ -945,6 +945,17 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (((nextOpcode & 0xF000) == 0xD000 ||
+                        (nextOpcode & 0xF00F) == 0x6001 ||
+                        (nextOpcode & 0xF0FF) == 0x4011 ||
+                        (nextOpcode & 0xFF00) == 0x8900) &&
+                    cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(cycleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 if (((nextOpcode & 0xF00F) == 0x6001 ||
                         (nextOpcode & 0xF0FF) == 0x4011 ||
                         (nextOpcode & 0xFF00) == 0x8900) &&

@@ -66,6 +66,7 @@ Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2S
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward);
+Run("32X SH-2 literal word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
 Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
@@ -4828,6 +4829,30 @@ void ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward()
     negativeCompare.Reset(LoopPc);
     negativeCompare.R[1] = 0xF402_0200;
     AssertTrue(!negativeCompare.TryFastForwardWordLoadCmpPzBtIdleLoop(300, out _), "negative compare register should fall back so the loop can exit normally");
+}
+
+void ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward()
+{
+    const uint LoopPc = 0x0600_311E;
+    const uint PollAddress = 0x2000_410A;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD00C); // MOV.L @(literal,PC),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x6001); // MOV.W @R0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x4011); // CMP/PZ R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x89FB); // BT LoopPc
+    bus.WriteLong(0x0600_3150, PollAddress);
+    bus.WriteWord(PollAddress, 0x0012);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 6);
+    AssertTrue(cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(303, out int cycles), "literal MOV.L/MOV.W/CMP-PZ/BT idle loop should coalesce one safe poll iteration while the loaded word is nonnegative");
+    AssertEqual(4, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0000_0012u, cpu.R[0]);
+    AssertEqual(1u, cpu.SR & 1u);
+
+    bus.WriteWord(PollAddress, 0xFFFF);
+    AssertTrue(!cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(300, out _), "negative loaded word should fall back so the loop can exit normally");
 }
 
 void ThirtyTwoXSh2WordTstBtPollLoopFastForward()

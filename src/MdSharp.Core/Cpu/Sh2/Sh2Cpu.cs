@@ -7185,6 +7185,73 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(int maxCycles, out int cycles)
+    {
+        const int CyclesPerIteration = 4;
+        const int MaxBurstCycles = CyclesPerIteration;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFourWordPollLoop(
+                peekBus,
+                [0, -2, -4, -6],
+                out uint loopPc,
+                out ushort literalOpcode,
+                out ushort loadOpcode,
+                out ushort compareOpcode,
+                out ushort branchOpcode) ||
+            (literalOpcode & 0xF000) != 0xD000 ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            (compareOpcode & 0xF0FF) != 0x4011 ||
+            (branchOpcode & 0xFF00) != 0x8900 ||
+            BranchByteTarget(loopPc + 6, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        int literalDestination = (literalOpcode >> 8) & 0x0F;
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int compareRegister = (compareOpcode >> 8) & 0x0F;
+        if (literalDestination != loadSource ||
+            loadDestination != loadSource ||
+            compareRegister != loadDestination)
+        {
+            return false;
+        }
+
+        uint address = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        if (!peekBus.TryPeekWord(address, out ushort wordValue))
+        {
+            return false;
+        }
+
+        uint extendedValue = (uint)(int)(short)wordValue;
+        if ((extendedValue & 0x8000_0000u) != 0)
+        {
+            return false;
+        }
+
+        R[literalDestination] = address;
+        R[loadDestination] = extendedValue;
+        SetT(true);
+        PC = loopPc;
+        int burstBudget = Math.Min(maxCycles, MaxBurstCycles);
+        cycles = burstBudget - (burstBudget % CyclesPerIteration);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
     public bool TryFastForwardWordDisplacementTstBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -10514,6 +10581,42 @@ Done:
         loopPc = 0;
         firstOpcode = 0;
         secondOpcode = 0;
+        branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindFourWordPollLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort firstOpcode,
+        out ushort secondOpcode,
+        out ushort thirdOpcode,
+        out ushort branchOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out firstOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out secondOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out thirdOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out branchOpcode) &&
+                BranchByteTarget(candidate + 6, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        firstOpcode = 0;
+        secondOpcode = 0;
+        thirdOpcode = 0;
         branchOpcode = 0;
         return false;
     }
