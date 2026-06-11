@@ -276,6 +276,22 @@ public sealed class MegaDrive
             }
 
             if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardMoveBytePostIncrementCopyDbfLoop(
+                    cycleBudget - consumed,
+                    IsM68kFastByteCopyAddress,
+                    out int byteCopyCycles,
+                    out int byteCopyInstructions))
+            {
+                int byteCopyWaitCycles = Bus.ConsumeM68kWaitCycles();
+                MainCpu.AddWaitCycles(byteCopyWaitCycles);
+                int elapsedCycles = byteCopyCycles + byteCopyWaitCycles;
+                RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider);
+                consumed += elapsedCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - byteCopyInstructions);
+                continue;
+            }
+
+            if (_pendingM68kInterruptLevels == 0 &&
                 MainCpu.TryFastForwardMoveWordAbsoluteDbfLoop(
                     cycleBudget - consumed,
                     IsM68kVdpDataPortAddress,
@@ -383,6 +399,12 @@ public sealed class MegaDrive
     private static bool IsM68kWorkRamAddress(uint address)
     {
         return (address & 0x00FF_0000u) == 0x00FF_0000u;
+    }
+
+    private static bool IsM68kFastByteCopyAddress(uint address)
+    {
+        address &= 0x00FF_FFFFu;
+        return address < 0x00A0_0000u || address >= 0x00E0_0000u;
     }
 
     private static bool IsM68kVdpDataPortAddress(uint address)

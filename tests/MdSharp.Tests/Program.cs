@@ -221,6 +221,7 @@ Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
+Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementCopyDbfLoopFastForward);
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
@@ -10951,6 +10952,71 @@ void M68kMoveByteDbfFillLoopFastForward()
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1002));
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1003));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the fill loop");
+}
+
+void M68kMoveBytePostIncrementCopyDbfLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #4,D0
+    EmitWord(rom, ref pc, 0x0004);
+    EmitWord(rom, ref pc, 0x43F9); // LEA $00FF2000,A1
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x4BF9); // LEA $00FF2100,A5
+    EmitLong(rom, ref pc, 0x00FF_2100);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x1AD9); // MOVE.B (A1)+,(A5)+
+    EmitWord(rom, ref pc, 0x51C8); // DBF D0,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    byte[] source = [0x10, 0x22, 0x34, 0x46, 0x58];
+    for (int i = 0; i < source.Length; i++)
+    {
+        machine.Bus.WriteByte((uint)(0x00FF_2000 + i), source[i]);
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardMoveBytePostIncrementCopyDbfLoop(
+            54,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "fast-forward should recognize the postincrement byte copy loop");
+    AssertEqual(54, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(1u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual(0x00FF_2003u, machine.MainCpu.A[1]);
+    AssertEqual(0x00FF_2103u, machine.MainCpu.A[5]);
+    for (int i = 0; i < 3; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadByte((uint)(0x00FF_2100 + i)));
+    }
+
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFFFu, machine.MainCpu.D[0] & 0xFFFF);
+    for (int i = 0; i < source.Length; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadByte((uint)(0x00FF_2100 + i)));
+    }
+
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the copy loop");
 }
 
 void M68kMoveWordAbsoluteDbfFillLoopFastForward()
