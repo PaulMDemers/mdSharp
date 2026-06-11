@@ -8604,6 +8604,177 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardDoomByteLookupSpanLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, byte, bool> writeByte,
+        out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 13 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0x00, out ushort compareFirst) ||
+            compareFirst != 0x3546 ||
+            !peekBus.TryPeekWord(loopPc + 0x02, out ushort branchFirst) ||
+            branchFirst != 0x8D07 ||
+            !peekBus.TryPeekWord(loopPc + 0x04, out ushort copyIndex) ||
+            copyIndex != 0x6233 ||
+            !peekBus.TryPeekWord(loopPc + 0x06, out ushort subtractWindow) ||
+            subtractWindow != 0x72E1 ||
+            !peekBus.TryPeekWord(loopPc + 0x08, out ushort loadWindowLimit) ||
+            loadWindowLimit != 0x911D ||
+            !peekBus.TryPeekWord(loopPc + 0x0A, out ushort compareWindow) ||
+            compareWindow != 0x3216 ||
+            !peekBus.TryPeekWord(loopPc + 0x0C, out ushort branchWrite) ||
+            branchWrite != 0x8D02 ||
+            !peekBus.TryPeekWord(loopPc + 0x0E, out ushort setOne) ||
+            setOne != 0xE101 ||
+            !peekBus.TryPeekWord(loopPc + 0x10, out ushort branchSkipWrite) ||
+            branchSkipWrite != 0xA009 ||
+            !peekBus.TryPeekWord(loopPc + 0x12, out ushort nop) ||
+            nop != 0x0009 ||
+            !peekBus.TryPeekWord(loopPc + 0x14, out ushort setMask) ||
+            setMask != 0xE13F ||
+            !peekBus.TryPeekWord(loopPc + 0x16, out ushort maskIndex) ||
+            maskIndex != 0x2139 ||
+            !peekBus.TryPeekWord(loopPc + 0x18, out ushort copyMaskedIndex) ||
+            copyMaskedIndex != 0x6013 ||
+            !peekBus.TryPeekWord(loopPc + 0x1A, out ushort shift0) ||
+            shift0 != 0x4008 ||
+            !peekBus.TryPeekWord(loopPc + 0x1C, out ushort shift1) ||
+            shift1 != 0x4008 ||
+            !peekBus.TryPeekWord(loopPc + 0x1E, out ushort shift2) ||
+            shift2 != 0x4008 ||
+            !peekBus.TryPeekWord(loopPc + 0x20, out ushort loadLookup) ||
+            loadLookup != 0x006C ||
+            !peekBus.TryPeekWord(loopPc + 0x22, out ushort orOne) ||
+            orOne != 0xCB01 ||
+            !peekBus.TryPeekWord(loopPc + 0x24, out ushort storeByte) ||
+            storeByte != 0x2800 ||
+            !peekBus.TryPeekWord(loopPc + 0x26, out ushort incrementIndex) ||
+            incrementIndex != 0x7301 ||
+            !peekBus.TryPeekWord(loopPc + 0x28, out ushort loadLoopLimit) ||
+            loadLoopLimit != 0x910E ||
+            !peekBus.TryPeekWord(loopPc + 0x2A, out ushort compareLoopLimit) ||
+            compareLoopLimit != 0x3317 ||
+            !peekBus.TryPeekWord(loopPc + 0x2C, out ushort branchLoop) ||
+            branchLoop != 0x8FE8 ||
+            !peekBus.TryPeekWord(loopPc + 0x2E, out ushort advanceDestination) ||
+            advanceDestination != 0x7801)
+        {
+            return false;
+        }
+
+        uint windowLimitLiteralAddress = PcRelativeBase(loopPc + 0x08) + 0x1Du * 2u;
+        uint loopLimitLiteralAddress = PcRelativeBase(loopPc + 0x28) + 0x0Eu * 2u;
+        if (!peekBus.TryPeekWord(windowLimitLiteralAddress, out ushort windowLimitWord) ||
+            !peekBus.TryPeekWord(loopLimitLiteralAddress, out ushort loopLimitWord))
+        {
+            return false;
+        }
+
+        uint windowLimit = SignExtend16(windowLimitWord);
+        uint loopLimit = SignExtend16(loopLimitWord);
+        int iterations = 0;
+        while (cycles < maxCycles)
+        {
+            bool firstWritePath = R[5] > R[4];
+            uint nextR2 = R[3];
+            uint nextR1 = R[1];
+            bool writePixel;
+            int prefixCycles;
+            if (firstWritePath)
+            {
+                writePixel = true;
+                prefixCycles = 3;
+            }
+            else
+            {
+                nextR2 = R[3] + SignExtend8(0xE1);
+                nextR1 = windowLimit;
+                writePixel = nextR2 > nextR1;
+                prefixCycles = writePixel ? 8 : 10;
+                if (writePixel)
+                {
+                    nextR1 = 1;
+                }
+                else
+                {
+                    nextR1 = 1;
+                }
+            }
+
+            uint incrementedR3 = R[3] + 1;
+            bool continueLoop = (int)incrementedR3 <= (int)loopLimit;
+            int iterationCycles = prefixCycles + (writePixel ? 9 : 0) + 3 + (continueLoop ? 2 : 1);
+            if (cycles + iterationCycles > maxCycles)
+            {
+                break;
+            }
+
+            byte output = 0;
+            if (writePixel)
+            {
+                uint maskedIndex = R[3] & 0x3Fu;
+                uint lookupOffset = maskedIndex << 6;
+                byte? lookup = readByte(R[6] + lookupOffset);
+                if (!lookup.HasValue ||
+                    !writeByte(R[8], (byte)(lookup.Value | 0x01)))
+                {
+                    break;
+                }
+
+                output = (byte)(lookup.Value | 0x01);
+            }
+
+            SetT(firstWritePath);
+            R[2] = nextR2;
+            R[1] = writePixel ? 0x3Fu : nextR1;
+            if (writePixel)
+            {
+                R[1] &= R[3];
+                R[0] = R[1] << 6;
+                R[0] = SignExtend8(output);
+            }
+
+            R[3] = incrementedR3;
+            R[1] = loopLimit;
+            SetT((int)R[3] > (int)R[1]);
+            cycles += iterationCycles;
+            iterations++;
+
+            if (continueLoop)
+            {
+                R[8]++;
+                PC = loopPc;
+                continue;
+            }
+
+            PC = loopPc + 0x2E;
+            break;
+        }
+
+        if (iterations == 0)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        Cycles += cycles;
+        LastOpcode = branchLoop;
+        LastOpcodePc = loopPc + 0x2C;
+        return true;
+    }
+
     public int Step()
     {
         uint pc = PC;

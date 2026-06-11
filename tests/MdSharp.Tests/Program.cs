@@ -50,6 +50,7 @@ Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2M
 Run("32X SH-2 Doom masked column word store loop fast-forward", ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 Doom swapped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 repeated SHAR R4 RTS helper fast-forward", ThirtyTwoXSh2RepeatedSharR4RtsFastForward);
+Run("32X SH-2 Doom byte lookup span loop fast-forward", ThirtyTwoXSh2DoomByteLookupSpanLoopFastForward);
 Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
 Run("32X SH-2 byte nibble lookup expand loop fast-forward", ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
@@ -4073,6 +4074,94 @@ void ThirtyTwoXSh2RepeatedSharR4RtsFastForward()
     Sh2Cpu shortBudget = new(shortBudgetBus, "short-budget");
     SeedCpu(shortBudget, RoutinePc, 0x4000_0000u);
     AssertTrue(!shortBudget.TryFastForwardRepeatedSharR4Rts(6, out _), "repeated SHAR helper should reject a short cycle budget");
+}
+
+void ThirtyTwoXSh2DoomByteLookupSpanLoopFastForward()
+{
+    const uint LoopPc = 0x0203_733A;
+    const uint Lookup = 0x0600_9000;
+    const uint Destination = 0x0600_A000;
+    ushort[] opcodes =
+    [
+        0x3546, 0x8D07, 0x6233, 0x72E1, 0x911D, 0x3216, 0x8D02, 0xE101,
+        0xA009, 0x0009, 0xE13F, 0x2139, 0x6013, 0x4008, 0x4008, 0x4008,
+        0x006C, 0xCB01, 0x2800, 0x7301, 0x910E, 0x3317, 0x8FE8, 0x7801,
+        0x001B
+    ];
+
+    void WriteRoutine(SyntheticSh2Bus bus, ushort windowLimit, ushort loopLimit)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteWord(LoopPc + 0x46, windowLimit);
+        bus.WriteWord(LoopPc + 0x48, loopLimit);
+    }
+
+    static void SeedMemory(SyntheticSh2Bus bus)
+    {
+        for (uint i = 0; i < 64; i++)
+        {
+            bus.WriteByte(Lookup + (i << 6), (byte)(0x20 + i));
+        }
+    }
+
+    static void SeedCpu(Sh2Cpu cpu, uint r3, uint r4, uint r5)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[3] = r3;
+        cpu.R[4] = r4;
+        cpu.R[5] = r5;
+        cpu.R[6] = Lookup;
+        cpu.R[8] = Destination;
+    }
+
+    void AssertSameArchitecturalState(Sh2Cpu expected, Sh2Cpu actual)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            AssertEqual(expected.R[i], actual.R[i]);
+        }
+
+        AssertEqual(expected.PC, actual.PC);
+        AssertEqual(expected.SR, actual.SR);
+        AssertEqual(expected.Halted, actual.Halted);
+    }
+
+    void Compare(string name, uint r3, uint r4, uint r5, ushort windowLimit, ushort loopLimit)
+    {
+        SyntheticSh2Bus interpretedBus = new();
+        WriteRoutine(interpretedBus, windowLimit, loopLimit);
+        SeedMemory(interpretedBus);
+        Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+        SeedCpu(interpreted, r3, r4, r5);
+        interpreted.Run(512);
+        AssertTrue(interpreted.Halted, $"interpreter Doom byte lookup span loop should halt for {name}");
+
+        SyntheticSh2Bus fastBus = new();
+        WriteRoutine(fastBus, windowLimit, loopLimit);
+        SeedMemory(fastBus);
+        Sh2Cpu fast = new(fastBus, "fast");
+        SeedCpu(fast, r3, r4, r5);
+        AssertTrue(
+            fast.TryFastForwardDoomByteLookupSpanLoop(22 * 64, fastBus.TryReadByte, fastBus.TryWriteByte, out int cycles),
+            $"Doom byte lookup span loop should fast-forward for {name}");
+        AssertTrue(cycles > 0, $"Doom byte lookup span loop should consume cycles for {name}");
+        fast.Run(512);
+        AssertTrue(fast.Halted, $"fast Doom byte lookup span loop should halt for {name}");
+        AssertSameArchitecturalState(interpreted, fast);
+
+        for (uint i = 0; i < 8; i++)
+        {
+            AssertEqual(interpretedBus.ReadByte(Destination + i), fastBus.ReadByte(Destination + i));
+        }
+    }
+
+    Compare("first branch write path", r3: 4, r4: 1, r5: 8, windowLimit: 8, loopLimit: 7);
+    Compare("second branch write path", r3: 40, r4: 8, r5: 1, windowLimit: 8, loopLimit: 43);
+    Compare("skip path before write window", r3: 34, r4: 8, r5: 1, windowLimit: 8, loopLimit: 42);
 }
 
 void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()
