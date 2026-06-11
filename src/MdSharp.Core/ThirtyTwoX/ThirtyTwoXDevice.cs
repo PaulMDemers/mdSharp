@@ -5721,6 +5721,16 @@ public sealed class ThirtyTwoXDevice
         _lastCompositeMode = mode;
         CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
         if ((_lastCompositeWrittenPixels == 0 || !HasNonZeroPalettePixels(source, mode)) &&
+            !source.SequenceEqual(DisplayFrameBuffer) &&
+            !IsAllZero(DisplayFrameBuffer) &&
+            HasNonZeroPalettePixels(DisplayFrameBuffer, mode))
+        {
+            source = DisplayFrameBuffer;
+            _lastCompositeUsedFallback = true;
+            CompositeSourceFrame(framebuffer, source, mode, blueFirst, shiftLeft, thirtyTwoXPriority, mdOpaquePixels);
+        }
+
+        if ((_lastCompositeWrittenPixels == 0 || !HasNonZeroPalettePixels(source, mode)) &&
             !source.SequenceEqual(DrawFrameBuffer) &&
             !IsAllZero(DrawFrameBuffer) &&
             HasNonZeroPalettePixels(DrawFrameBuffer, mode))

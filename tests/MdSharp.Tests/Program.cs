@@ -1544,6 +1544,23 @@ void ThirtyTwoXDeviceShell()
     AssertEqual(1, vblankLatchDevice.LastCompositeMode);
     AssertTrue(!vblankLatchDevice.LastCompositeUsedFallback, "VBlank entry should latch nonblank bitmap mode before compositing");
 
+    ThirtyTwoXDevice activeDisplayFallbackDevice = new();
+    activeDisplayFallbackDevice.Reset();
+    activeDisplayFallbackDevice.WriteFrameBufferWord(0, 0x0100);
+    activeDisplayFallbackDevice.WriteFrameBufferByte(0x200, 2);
+    activeDisplayFallbackDevice.WritePaletteWord(4, 0x001F);
+    activeDisplayFallbackDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(activeDisplayFallbackDevice);
+    activeDisplayFallbackDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    activeDisplayFallbackDevice.StepScanline(ThirtyTwoXHardwareProfile.NtscVisibleLines, pal: false);
+    AssertEqual(1, activeDisplayFallbackDevice.DisplayFrameBufferIndex);
+    byte[] activeDisplayFallbackFrame = new byte[ThirtyTwoXHardwareProfile.NominalWidth * ThirtyTwoXHardwareProfile.NtscVisibleLines * 3];
+    activeDisplayFallbackDevice.CompositeFrameRgbInto(activeDisplayFallbackFrame);
+    AssertEqual(255, activeDisplayFallbackFrame[0]);
+    AssertEqual(0, activeDisplayFallbackFrame[1]);
+    AssertEqual(0, activeDisplayFallbackFrame[2]);
+    AssertTrue(activeDisplayFallbackDevice.LastCompositeUsedFallback, "VBlank composite should fall back from stale visible buffer to the active display buffer");
+
     ThirtyTwoXDevice frameLatchDevice = new();
     frameLatchDevice.Reset();
     frameLatchDevice.WriteFrameBufferWord(0, 0x0100);
