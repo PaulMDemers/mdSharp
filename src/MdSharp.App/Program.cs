@@ -1831,6 +1831,7 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
             $"byteFillDbf={machine.M68kMoveByteFillDbfFastPathHits:N0}/{machine.M68kMoveByteFillDbfFastPathCycles:N0} " +
             $"byteCopyDbf={machine.M68kMoveByteCopyDbfFastPathHits:N0}/{machine.M68kMoveByteCopyDbfFastPathCycles:N0} " +
             $"wordVdpFillDbf={machine.M68kMoveWordVdpFillDbfFastPathHits:N0}/{machine.M68kMoveWordVdpFillDbfFastPathCycles:N0}");
+        PrintThirtyTwoXFastPathDiagnostics(thirtyTwoX);
         Console.WriteLine($"32X sys={FormatThirtyTwoXWords(thirtyTwoX, system: true, 0x00, 0x40)}");
         Console.WriteLine($"32X vdp={FormatThirtyTwoXWords(thirtyTwoX, system: false, 0x00, 0x10)}");
         Console.WriteLine($"32X masterRegs={FormatSh2Registers(thirtyTwoX.MasterSh2)}");
@@ -4429,10 +4430,7 @@ void InspectThirtyTwoX(string romPath, int frames, int instructionsPerFrame, uin
     Console.WriteLine($"32X slaveRegs: {FormatSh2Registers(device.SlaveSh2)}");
     Console.WriteLine($"32X irq: mask=${device.MasterInterruptMask:X4}/${device.SlaveInterruptMask:X4} raw=${state.MasterInterruptMask:X4}/${state.SlaveInterruptMask:X4} pendingLevel={device.MasterSh2.PendingInterruptLevel}/{device.SlaveSh2.PendingInterruptLevel} pendingVector={device.MasterSh2.PendingInterruptVectorNumber}/{device.SlaveSh2.PendingInterruptVectorNumber} vPending={state.MasterVerticalInterruptPending}/{state.SlaveVerticalInterruptPending} hPending={state.MasterHorizontalInterruptPending}/{state.SlaveHorizontalInterruptPending} vblank={state.VBlank} hblank={state.HBlank}");
     Console.WriteLine($"32X boot: pending={device.BootRomHandshakePending} read={device.BootRomSignatureRead} launch={device.BootRomLaunchPending} post={device.BootRomPostStartSignaturePending} hidden={device.BootRomPostStartSignatureHiddenFromSh2} mask=${device.BootRomPostStartSignatureReadMask:X2}");
-    Console.WriteLine($"32X fastPaths: emptyDescriptorSpan={device.EmptyDescriptorSpanFastPathHits:N0}/{device.EmptyDescriptorSpanFastPathAttempts:N0} emptyDescriptorTail={device.EmptyDescriptorSpanTailFastPathHits:N0}/{device.EmptyDescriptorSpanTailFastPathAttempts:N0} movWStrided={device.MovWordStridedCopyFastPathHits:N0}/{device.MovWordStridedCopyFastPathAttempts:N0} longDiffPoll={device.LongDifferencePollFastPathHits:N0}/{device.LongDifferencePollFastPathAttempts:N0} sdramTaskletDispatcher={device.SdramFlagTaskletDispatcherFastPathHits:N0}/{device.SdramFlagTaskletDispatcherFastPathAttempts:N0} gbrBytePairIdle={device.GbrBytePairInterruptIdleFastPathHits:N0}/{device.GbrBytePairInterruptIdleFastPathAttempts:N0} gbrByteZero20={device.GbrByteZeroComm20PollFastPathHits:N0}/{device.GbrByteZeroComm20PollFastPathAttempts:N0} literalByteTstReg={device.LiteralByteDisplacementTstRegisterPollFastPathHits:N0}/{device.LiteralByteDisplacementTstRegisterPollFastPathAttempts:N0} byteDispZeroWait={device.ByteDisplacementZeroWaitFastPathHits:N0}/{device.ByteDisplacementZeroWaitFastPathAttempts:N0} twoStageWordZero={device.TwoStageWordZeroPollRingFastPathHits:N0}/{device.TwoStageWordZeroPollRingFastPathAttempts:N0} stableWordPair={device.StableWordPairPollFastPathHits:N0}/{device.StableWordPairPollFastPathAttempts:N0} gbrLongMaskOr={device.GbrLongMaskedOrComparePollFastPathHits:N0}/{device.GbrLongMaskedOrComparePollFastPathAttempts:N0}");
-    long averageBudget = device.Sh2RunCycleCalls == 0 ? 0 : device.Sh2RunCycleBudgetTotal / device.Sh2RunCycleCalls;
-    long averageFastCycles = device.Sh2FastPathHits == 0 ? 0 : device.Sh2FastPathCycles / device.Sh2FastPathHits;
-    Console.WriteLine($"32X scheduler: cycleRuns={device.Sh2RunCycleCalls:N0} avgBudget={averageBudget:N0} minBudget={device.Sh2RunCycleBudgetMin:N0} maxBudget={device.Sh2RunCycleBudgetMax:N0} stepCalls={device.Sh2RunCycleStepCalls:N0} fastHits={device.Sh2FastPathHits:N0} fastCycles={device.Sh2FastPathCycles:N0} avgFast={averageFastCycles:N0} maxFast={device.Sh2FastPathMaxCycles:N0}");
+    PrintThirtyTwoXFastPathDiagnostics(device);
     Console.WriteLine($"32X sys: {FormatThirtyTwoXWords(device, system: true, 0x00, 0x40)}");
     for (int i = 0; i < words; i += 8)
     {
@@ -13759,6 +13757,31 @@ string FormatThirtyTwoXWords(ThirtyTwoXDevice device, bool system, int start, in
     }
 
     return builder.ToString();
+}
+
+static void PrintThirtyTwoXFastPathDiagnostics(ThirtyTwoXDevice device)
+{
+    Console.WriteLine(
+        $"32X fastPaths: emptyDescriptorSpan={device.EmptyDescriptorSpanFastPathHits:N0}/{device.EmptyDescriptorSpanFastPathAttempts:N0} " +
+        $"emptyDescriptorTail={device.EmptyDescriptorSpanTailFastPathHits:N0}/{device.EmptyDescriptorSpanTailFastPathAttempts:N0} " +
+        $"movWStrided={device.MovWordStridedCopyFastPathHits:N0}/{device.MovWordStridedCopyFastPathAttempts:N0} " +
+        $"longDiffPoll={device.LongDifferencePollFastPathHits:N0}/{device.LongDifferencePollFastPathAttempts:N0} " +
+        $"sdramTaskletDispatcher={device.SdramFlagTaskletDispatcherFastPathHits:N0}/{device.SdramFlagTaskletDispatcherFastPathAttempts:N0} " +
+        $"gbrBytePairIdle={device.GbrBytePairInterruptIdleFastPathHits:N0}/{device.GbrBytePairInterruptIdleFastPathAttempts:N0} " +
+        $"gbrByteZero20={device.GbrByteZeroComm20PollFastPathHits:N0}/{device.GbrByteZeroComm20PollFastPathAttempts:N0} " +
+        $"literalByteTstReg={device.LiteralByteDisplacementTstRegisterPollFastPathHits:N0}/{device.LiteralByteDisplacementTstRegisterPollFastPathAttempts:N0} " +
+        $"byteDispZeroWait={device.ByteDisplacementZeroWaitFastPathHits:N0}/{device.ByteDisplacementZeroWaitFastPathAttempts:N0} " +
+        $"twoStageWordZero={device.TwoStageWordZeroPollRingFastPathHits:N0}/{device.TwoStageWordZeroPollRingFastPathAttempts:N0} " +
+        $"stableWordPair={device.StableWordPairPollFastPathHits:N0}/{device.StableWordPairPollFastPathAttempts:N0} " +
+        $"gbrLongMaskOr={device.GbrLongMaskedOrComparePollFastPathHits:N0}/{device.GbrLongMaskedOrComparePollFastPathAttempts:N0}");
+
+    long averageBudget = device.Sh2RunCycleCalls == 0 ? 0 : device.Sh2RunCycleBudgetTotal / device.Sh2RunCycleCalls;
+    long averageFastCycles = device.Sh2FastPathHits == 0 ? 0 : device.Sh2FastPathCycles / device.Sh2FastPathHits;
+    Console.WriteLine(
+        $"32X scheduler: cycleRuns={device.Sh2RunCycleCalls:N0} avgBudget={averageBudget:N0} " +
+        $"minBudget={device.Sh2RunCycleBudgetMin:N0} maxBudget={device.Sh2RunCycleBudgetMax:N0} " +
+        $"stepCalls={device.Sh2RunCycleStepCalls:N0} fastHits={device.Sh2FastPathHits:N0} " +
+        $"fastCycles={device.Sh2FastPathCycles:N0} avgFast={averageFastCycles:N0} maxFast={device.Sh2FastPathMaxCycles:N0}");
 }
 
 string FormatThirtyTwoXCodeWindow(ThirtyTwoXDevice device, CartridgeImage cartridge, uint pc)
