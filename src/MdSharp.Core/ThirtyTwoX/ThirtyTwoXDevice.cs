@@ -465,6 +465,7 @@ public sealed class ThirtyTwoXDevice
     public Action<Sh2Cpu.Sh2LinkedListTrace>? Sh2LinkedListObserver { get; set; }
     public Action<Sh2Cpu.Sh2RechainTrace>? Sh2RechainObserver { get; set; }
     public Action<int, uint, ushort>? Sh2PcSampleObserver { get; set; }
+    public Action<Sh2FastPathProbeTrace>? Sh2FastPathProbeObserver { get; set; }
     public Func<uint, bool>? Sh2MemoryAccessTraceFilter { get; set; }
     public Action<SdramWriteTrace>? SdramWriteObserver { get; set; }
     public Func<int, bool>? SdramWriteTraceFilter { get; set; }
@@ -1086,6 +1087,7 @@ public sealed class ThirtyTwoXDevice
 
             if (IsSh2FastPathGroupEnabled("memstore") &&
                 (nextOpcode & 0xF00F) == 0x6005 &&
+                IsMovWordStridedCopyCandidate(cpuIndex, cpu.PC) &&
                 TryFastForwardMovWordStridedCopy(
                     cpu,
                     cpuIndex,
@@ -1795,6 +1797,7 @@ public sealed class ThirtyTwoXDevice
                     ((nextOpcode & 0xFF00) == 0xCB00) ||
                     ((nextOpcode & 0xF00F) == 0x3000) ||
                     ((nextOpcode & 0xFF00) == 0x8B00)) &&
+                IsGbrLongMaskedOrComparePollCandidate(cpuIndex, cpu.PC) &&
                 TryFastForwardGbrLongMaskedOrComparePoll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
@@ -1803,6 +1806,7 @@ public sealed class ThirtyTwoXDevice
             if ((((nextOpcode & 0xF00F) == 0x6001) ||
                     ((nextOpcode & 0xF00F) == 0x3000) ||
                     ((nextOpcode & 0xFF00) == 0x8900)) &&
+                IsStableWordPairPollCandidate(cpuIndex, cpu.PC) &&
                 TryFastForwardStableWordPairPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
@@ -2093,12 +2097,16 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         SdramFlagTaskletDispatcherFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         if (!cpu.TryFastForwardSdramFlagTaskletDispatcherLoop(cycleBudget, out cycles))
         {
+            RecordSh2FastPathProbe("sdramTaskletDispatcher", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         SdramFlagTaskletDispatcherFastPathHits++;
+        RecordSh2FastPathProbe("sdramTaskletDispatcher", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2107,12 +2115,16 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardLiteralByteDisplacementTstRegisterPoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         LiteralByteDisplacementTstRegisterPollFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         if (!cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(cycleBudget, out cycles))
         {
+            RecordSh2FastPathProbe("literalByteTstReg", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         LiteralByteDisplacementTstRegisterPollFastPathHits++;
+        RecordSh2FastPathProbe("literalByteTstReg", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2121,12 +2133,16 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardGbrByteZeroComm20Poll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         GbrByteZeroComm20PollFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         if (!cpu.TryFastForwardGbrByteZeroTstBtPollLoop(cycleBudget, displacement: 0x20, out cycles))
         {
+            RecordSh2FastPathProbe("gbrByteZero20", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         GbrByteZeroComm20PollFastPathHits++;
+        RecordSh2FastPathProbe("gbrByteZero20", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2135,12 +2151,16 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardGbrBytePairInterruptIdle(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         GbrBytePairInterruptIdleFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         if (!cpu.TryFastForwardGbrBytePairEqualInterruptIdleLoop(cycleBudget, out cycles))
         {
+            RecordSh2FastPathProbe("gbrBytePairIdle", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         GbrBytePairInterruptIdleFastPathHits++;
+        RecordSh2FastPathProbe("gbrBytePairIdle", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2149,13 +2169,17 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardStableWordPairPoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         StableWordPairPollFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         int stablePollBudget = Math.Min(Math.Max(cycleBudget, 512), 4096);
         if (!cpu.TryFastForwardStableWordPairCmpEqBtPollLoop(stablePollBudget, out cycles))
         {
+            RecordSh2FastPathProbe("stableWordPair", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         StableWordPairPollFastPathHits++;
+        RecordSh2FastPathProbe("stableWordPair", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2164,13 +2188,17 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardGbrLongMaskedOrComparePoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         GbrLongMaskedOrComparePollFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         int pollBudget = Math.Min(Math.Max(cycleBudget, 512), 4096);
         if (!cpu.TryFastForwardGbrLongMaskedOrCompareBfPollLoop(pollBudget, out cycles))
         {
+            RecordSh2FastPathProbe("gbrLongMaskOr", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         GbrLongMaskedOrComparePollFastPathHits++;
+        RecordSh2FastPathProbe("gbrLongMaskOr", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
@@ -2179,19 +2207,123 @@ public sealed class ThirtyTwoXDevice
     private bool TryFastForwardMovWordStridedCopy(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         MovWordStridedCopyFastPathAttempts++;
+        uint pc = cpu.PC;
+        ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
         if (!cpu.TryFastForwardMovWPostIncStoreAddRegDtBfLoop(
                 cycleBudget,
                 _sh2FastCopyWordReaders[cpuIndex],
                 _sh2FastCopyWordWriters[cpuIndex],
                 out cycles))
         {
+            RecordSh2FastPathProbe("movWStrided", cpuIndex, pc, opcode, hit: false);
             return false;
         }
 
         MovWordStridedCopyFastPathHits++;
+        RecordSh2FastPathProbe("movWStrided", cpuIndex, pc, opcode, hit: true);
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
+    }
+
+    private bool IsMovWordStridedCopyCandidate(int cpuIndex, uint pc)
+    {
+        return TryPeekSh2Word(pc + 2, cpuIndex, out ushort storeOpcode) &&
+            TryPeekSh2Word(pc + 4, cpuIndex, out ushort addOpcode) &&
+            TryPeekSh2Word(pc + 6, cpuIndex, out ushort dtOpcode) &&
+            TryPeekSh2Word(pc + 8, cpuIndex, out ushort branchOpcode) &&
+            (storeOpcode & 0xF00F) == 0x2001 &&
+            (addOpcode & 0xF00F) == 0x300C &&
+            (dtOpcode & 0xF0FF) == 0x4010 &&
+            (branchOpcode & 0xFF00) == 0x8B00;
+    }
+
+    private bool IsStableWordPairPollCandidate(int cpuIndex, uint pc)
+    {
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = (uint)(pc + offset);
+            if (!TryPeekSh2Word(candidate, cpuIndex, out ushort loadOpcode) ||
+                !TryPeekSh2Word(candidate + 2, cpuIndex, out ushort compareOpcode) ||
+                !TryPeekSh2Word(candidate + 4, cpuIndex, out ushort branchOpcode))
+            {
+                continue;
+            }
+
+            if ((loadOpcode & 0xF00F) != 0x6001 ||
+                (compareOpcode & 0xF00F) != 0x3000 ||
+                (branchOpcode & 0xFF00) != 0x8900)
+            {
+                continue;
+            }
+
+            int displacement = (sbyte)branchOpcode;
+            uint target = candidate + 8 + (uint)(displacement * 2);
+            if (target == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsGbrLongMaskedOrComparePollCandidate(int cpuIndex, uint pc)
+    {
+        ReadOnlySpan<int> offsets = [0, -2, -4, -6, -8, -10];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = (uint)(pc + offset);
+            if (!TryPeekSh2Word(candidate, cpuIndex, out ushort loadOpcode) ||
+                !TryPeekSh2Word(candidate + 2, cpuIndex, out ushort copyOpcode) ||
+                !TryPeekSh2Word(candidate + 4, cpuIndex, out ushort andOpcode) ||
+                !TryPeekSh2Word(candidate + 6, cpuIndex, out ushort orOpcode) ||
+                !TryPeekSh2Word(candidate + 8, cpuIndex, out ushort compareOpcode) ||
+                !TryPeekSh2Word(candidate + 10, cpuIndex, out ushort branchOpcode))
+            {
+                continue;
+            }
+
+            if ((loadOpcode & 0xFF00) != 0xC600 ||
+                (copyOpcode & 0xF00F) != 0x6003 ||
+                (andOpcode & 0xF00F) != 0x2009 ||
+                (orOpcode & 0xFF00) != 0xCB00 ||
+                (compareOpcode & 0xF00F) != 0x3000 ||
+                (branchOpcode & 0xFF00) != 0x8B00)
+            {
+                continue;
+            }
+
+            int displacement = (sbyte)branchOpcode;
+            uint target = candidate + 14 + (uint)(displacement * 2);
+            if (target == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private ushort PeekSh2ProbeOpcode(int cpuIndex, uint pc)
+    {
+        return TryPeekSh2Word(pc, cpuIndex, out ushort opcode) ? opcode : (ushort)0;
+    }
+
+    private void RecordSh2FastPathProbe(string name, int cpuIndex, uint pc, ushort opcode, bool hit)
+    {
+        Sh2FastPathProbeObserver?.Invoke(new Sh2FastPathProbeTrace(name, cpuIndex, pc, opcode, hit));
     }
 
     private bool TryReadSh2WordForFastCopy(uint address, int cpuIndex, out ushort value)
@@ -9214,6 +9346,7 @@ public sealed class ThirtyTwoXDevice
     public readonly record struct SystemRegisterAccessTrace(string Source, string Operation, ushort Offset, ushort Value);
 
     public readonly record struct Sh2MemoryAccessTrace(string Source, string Operation, uint Address, uint Value);
+    public readonly record struct Sh2FastPathProbeTrace(string Name, int CpuIndex, uint Pc, ushort Opcode, bool Hit);
     public readonly record struct SdramWriteTrace(string Source, string Operation, uint Address, int Offset, ushort Value, uint Pc, ushort Opcode);
 
     public readonly record struct PaletteAccessTrace(string Source, string Operation, ushort Offset, ushort Value);

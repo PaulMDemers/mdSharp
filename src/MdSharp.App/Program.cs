@@ -52,6 +52,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
+    Console.WriteLine("  mdsharp --32x-fastpath-miss-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
     Console.WriteLine("  mdsharp --32x-dump-sdram <rom-file> <output.bin> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-fb-summary <rom-file> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-rle-dump <rom-file> [frames] [instructions-per-frame] [line] [max-spans]");
@@ -484,6 +485,22 @@ if (args[0].Equals("--32x-pc-profile", StringComparison.OrdinalIgnoreCase))
     int top = args.Length > 5 && int.TryParse(args[5], out int parsedTop) ? parsedTop : 80;
     int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
     ProfileThirtyTwoXHotPcs(args[1], args[2], frames, instructionsPerFrame, top, startFrame);
+    return;
+}
+
+if (args[0].Equals("--32x-fastpath-miss-profile", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-fastpath-miss-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int top = args.Length > 5 && int.TryParse(args[5], out int parsedTop) ? parsedTop : 80;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    ProfileThirtyTwoXFastPathMisses(args[1], args[2], frames, instructionsPerFrame, top, startFrame);
     return;
 }
 
@@ -4566,6 +4583,103 @@ void ProfileThirtyTwoXHotPcs(string romPath, string outputCsv, int frames, int i
 
     Console.WriteLine($"Profiled {Path.GetFileName(romPath)} for {frames:N0} frame(s), startFrame={startFrame:N0}, samples={totalSamples:N0}, elapsed={stopwatch.Elapsed.TotalSeconds:0.###}s");
     Console.WriteLine($"Wrote top {Math.Min(top, samples.Count):N0} SH-2 PC sample row(s) to {Path.GetFullPath(outputCsv)}");
+}
+
+void ProfileThirtyTwoXFastPathMisses(string romPath, string outputCsv, int frames, int instructionsPerFrame, int top, int startFrame)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Dictionary<(string Name, int CpuIndex, uint Pc, ushort Opcode), (long Attempts, long Hits)> probes = [];
+    int currentFrame = 0;
+    long totalAttempts = 0;
+    long totalHits = 0;
+    device.Sh2FastPathProbeObserver = trace =>
+    {
+        if (currentFrame < startFrame)
+        {
+            return;
+        }
+
+        var key = (trace.Name, trace.CpuIndex, trace.Pc, trace.Opcode);
+        probes.TryGetValue(key, out var aggregate);
+        aggregate.Attempts++;
+        if (trace.Hit)
+        {
+            aggregate.Hits++;
+            totalHits++;
+        }
+
+        probes[key] = aggregate;
+        totalAttempts++;
+    };
+
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        for (currentFrame = 0; currentFrame < frames; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        device.Sh2FastPathProbeObserver = null;
+        stopwatch.Stop();
+    }
+
+    string? directory = Path.GetDirectoryName(outputCsv);
+    if (!string.IsNullOrEmpty(directory))
+    {
+        Directory.CreateDirectory(directory);
+    }
+
+    int rank = 0;
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8);
+    writer.WriteLine("rank,name,cpu,pc,opcode,attempts,hits,misses,missPercent");
+    foreach (var entry in probes
+        .Select(pair => new
+        {
+            pair.Key.Name,
+            pair.Key.CpuIndex,
+            pair.Key.Pc,
+            pair.Key.Opcode,
+            pair.Value.Attempts,
+            pair.Value.Hits,
+            Misses = pair.Value.Attempts - pair.Value.Hits
+        })
+        .Where(row => row.Misses > 0)
+        .OrderByDescending(row => row.Misses)
+        .ThenBy(row => row.Name, StringComparer.Ordinal)
+        .ThenBy(row => row.CpuIndex)
+        .ThenBy(row => row.Pc)
+        .Take(Math.Max(0, top)))
+    {
+        rank++;
+        double missPercent = entry.Attempts == 0 ? 0.0 : (entry.Misses * 100.0) / entry.Attempts;
+        writer.WriteLine(string.Join(
+            ',',
+            rank.ToString(CultureInfo.InvariantCulture),
+            Csv(entry.Name),
+            Csv(entry.CpuIndex == 0 ? "master" : "slave"),
+            $"${entry.Pc:X8}",
+            $"${entry.Opcode:X4}",
+            entry.Attempts.ToString(CultureInfo.InvariantCulture),
+            entry.Hits.ToString(CultureInfo.InvariantCulture),
+            entry.Misses.ToString(CultureInfo.InvariantCulture),
+            missPercent.ToString("0.0000", CultureInfo.InvariantCulture)));
+    }
+
+    long totalMisses = totalAttempts - totalHits;
+    Console.WriteLine($"Profiled {Path.GetFileName(romPath)} for {frames:N0} frame(s), startFrame={startFrame:N0}, fastPathAttempts={totalAttempts:N0}, hits={totalHits:N0}, misses={totalMisses:N0}, elapsed={stopwatch.Elapsed.TotalSeconds:0.###}s");
+    Console.WriteLine($"Wrote top {rank:N0} SH-2 fast-path miss row(s) to {Path.GetFullPath(outputCsv)}");
 }
 
 void DumpThirtyTwoXSdram(string romPath, string outputPath, int frames, int instructionsPerFrame)
