@@ -4931,6 +4931,25 @@ void ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x0001);
     AssertTrue(!cpu.TryFastForwardWordDisplacementTstBtPollLoop(300, out _), "nonzero displacement poll value should fall back to normal execution");
+
+    SyntheticSh2Bus maskedBus = new();
+    maskedBus.WriteInstructionWord(LoopPc + 0, 0x8580); // MOV.W @(0,R8),R0
+    maskedBus.WriteInstructionWord(LoopPc + 2, 0x2018); // TST R1,R0
+    maskedBus.WriteInstructionWord(LoopPc + 4, 0x89FC); // BT loop
+    maskedBus.WriteWord(0x2000_4020, 0x00F0);
+
+    Sh2Cpu maskedCpu = new(maskedBus, "test");
+    maskedCpu.Reset(LoopPc + 4);
+    maskedCpu.R[1] = 0x0000_0F00;
+    maskedCpu.R[8] = 0x2000_4020;
+    AssertTrue(maskedCpu.TryFastForwardWordDisplacementTstBtPollLoop(300, out int maskedCycles), "MOV.W displacement/TST mask/BT zero poll should fast-forward while the mask is clear");
+    AssertEqual(300, maskedCycles);
+    AssertEqual(LoopPc, maskedCpu.PC);
+    AssertEqual(0x0000_00F0u, maskedCpu.R[0]);
+    AssertEqual(1u, maskedCpu.SR & 1);
+
+    maskedBus.WriteWord(0x2000_4020, 0x0100);
+    AssertTrue(!maskedCpu.TryFastForwardWordDisplacementTstBtPollLoop(300, out _), "set masked bit should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward()

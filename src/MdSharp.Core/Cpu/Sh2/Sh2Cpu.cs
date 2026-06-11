@@ -7245,11 +7245,12 @@ Done:
         int loadSource = (loadOpcode >> 4) & 0x0F;
         int testLeft = (testOpcode >> 8) & 0x0F;
         int testRight = (testOpcode >> 4) & 0x0F;
-        if (testLeft != 0 || testRight != 0)
+        if (testLeft != 0 && testRight != 0)
         {
             return false;
         }
 
+        int maskRegister = testLeft == 0 ? testRight : testLeft;
         int displacement = (sbyte)branchOpcode;
         uint target = loopPc + 8 + (uint)(displacement * 2);
         if (target != loopPc)
@@ -7258,13 +7259,19 @@ Done:
         }
 
         uint address = R[loadSource] + (uint)((loadOpcode & 0x0F) * 2);
-        if (!peekBus.TryPeekWord(address, out ushort wordValue) ||
-            wordValue != 0)
+        if (!peekBus.TryPeekWord(address, out ushort wordValue))
         {
             return false;
         }
 
-        R[0] = 0;
+        uint loadedValue = (uint)(int)(short)wordValue;
+        uint maskValue = maskRegister == 0 ? loadedValue : R[maskRegister];
+        if ((loadedValue & maskValue) != 0)
+        {
+            return false;
+        }
+
+        R[0] = loadedValue;
         SetT(true);
         PC = loopPc;
         cycles = maxCycles;
