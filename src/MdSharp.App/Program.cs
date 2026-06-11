@@ -1822,7 +1822,15 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
             $"fbNonzero={CountNonzeroBytes(thirtyTwoX.DisplayFrameBuffer):N0}/{CountNonzeroBytes(thirtyTwoX.DrawFrameBuffer):N0} " +
             $"palNonzero={CountNonzeroBytes(thirtyTwoX.Palette):N0} " +
             $"sh2Sched={machine.ThirtyTwoXScheduledInstructionRequests:N0} sh2Exec={machine.ThirtyTwoXExecutedInstructionSteps:N0} " +
+            $"m68kFast={machine.M68kFastPathHits:N0}/{machine.M68kFastPathCycles:N0} " +
             $"master=${thirtyTwoX.MasterSh2.PC:X8} slave=${thirtyTwoX.SlaveSh2.PC:X8}");
+        Console.WriteLine(
+            $"68K fastPaths: sysWordPoll={machine.M68kThirtyTwoXSystemWordPollFastPathHits:N0}/{machine.M68kThirtyTwoXSystemWordPollFastPathCycles:N0} " +
+            $"tstBneWait={machine.M68kLongTstBneWaitFastPathHits:N0}/{machine.M68kLongTstBneWaitFastPathCycles:N0} " +
+            $"cmpBeqWait={machine.M68kLongCmpBeqWaitFastPathHits:N0}/{machine.M68kLongCmpBeqWaitFastPathCycles:N0} " +
+            $"byteFillDbf={machine.M68kMoveByteFillDbfFastPathHits:N0}/{machine.M68kMoveByteFillDbfFastPathCycles:N0} " +
+            $"byteCopyDbf={machine.M68kMoveByteCopyDbfFastPathHits:N0}/{machine.M68kMoveByteCopyDbfFastPathCycles:N0} " +
+            $"wordVdpFillDbf={machine.M68kMoveWordVdpFillDbfFastPathHits:N0}/{machine.M68kMoveWordVdpFillDbfFastPathCycles:N0}");
         Console.WriteLine($"32X sys={FormatThirtyTwoXWords(thirtyTwoX, system: true, 0x00, 0x40)}");
         Console.WriteLine($"32X vdp={FormatThirtyTwoXWords(thirtyTwoX, system: false, 0x00, 0x10)}");
         Console.WriteLine($"32X masterRegs={FormatSh2Registers(thirtyTwoX.MasterSh2)}");

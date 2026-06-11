@@ -56,6 +56,20 @@ public sealed class MegaDrive
     public FramePerformanceCounters LastFramePerformance { get; private set; }
     public long ThirtyTwoXScheduledInstructionRequests => _thirtyTwoXScheduledInstructionRequests;
     public long ThirtyTwoXExecutedInstructionSteps => _thirtyTwoXExecutedInstructionSteps;
+    public long M68kFastPathHits => _m68kFastPathHits;
+    public long M68kFastPathCycles => _m68kFastPathCycles;
+    public long M68kThirtyTwoXSystemWordPollFastPathHits => _m68kThirtyTwoXSystemWordPollFastPathHits;
+    public long M68kThirtyTwoXSystemWordPollFastPathCycles => _m68kThirtyTwoXSystemWordPollFastPathCycles;
+    public long M68kLongTstBneWaitFastPathHits => _m68kLongTstBneWaitFastPathHits;
+    public long M68kLongTstBneWaitFastPathCycles => _m68kLongTstBneWaitFastPathCycles;
+    public long M68kMoveByteFillDbfFastPathHits => _m68kMoveByteFillDbfFastPathHits;
+    public long M68kMoveByteFillDbfFastPathCycles => _m68kMoveByteFillDbfFastPathCycles;
+    public long M68kLongCmpBeqWaitFastPathHits => _m68kLongCmpBeqWaitFastPathHits;
+    public long M68kLongCmpBeqWaitFastPathCycles => _m68kLongCmpBeqWaitFastPathCycles;
+    public long M68kMoveByteCopyDbfFastPathHits => _m68kMoveByteCopyDbfFastPathHits;
+    public long M68kMoveByteCopyDbfFastPathCycles => _m68kMoveByteCopyDbfFastPathCycles;
+    public long M68kMoveWordVdpFillDbfFastPathHits => _m68kMoveWordVdpFillDbfFastPathHits;
+    public long M68kMoveWordVdpFillDbfFastPathCycles => _m68kMoveWordVdpFillDbfFastPathCycles;
     private byte _pendingM68kInterruptLevels;
     private double _audioSampleCarry;
     private double _psgFilter;
@@ -72,6 +86,20 @@ public sealed class MegaDrive
     private double _thirtyTwoXInstructionCarry;
     private long _thirtyTwoXScheduledInstructionRequests;
     private long _thirtyTwoXExecutedInstructionSteps;
+    private long _m68kFastPathHits;
+    private long _m68kFastPathCycles;
+    private long _m68kThirtyTwoXSystemWordPollFastPathHits;
+    private long _m68kThirtyTwoXSystemWordPollFastPathCycles;
+    private long _m68kLongTstBneWaitFastPathHits;
+    private long _m68kLongTstBneWaitFastPathCycles;
+    private long _m68kMoveByteFillDbfFastPathHits;
+    private long _m68kMoveByteFillDbfFastPathCycles;
+    private long _m68kLongCmpBeqWaitFastPathHits;
+    private long _m68kLongCmpBeqWaitFastPathCycles;
+    private long _m68kMoveByteCopyDbfFastPathHits;
+    private long _m68kMoveByteCopyDbfFastPathCycles;
+    private long _m68kMoveWordVdpFillDbfFastPathHits;
+    private long _m68kMoveWordVdpFillDbfFastPathCycles;
 
     public void Reset()
     {
@@ -95,6 +123,20 @@ public sealed class MegaDrive
         _thirtyTwoXInstructionCarry = 0.0;
         _thirtyTwoXScheduledInstructionRequests = 0;
         _thirtyTwoXExecutedInstructionSteps = 0;
+        _m68kFastPathHits = 0;
+        _m68kFastPathCycles = 0;
+        _m68kThirtyTwoXSystemWordPollFastPathHits = 0;
+        _m68kThirtyTwoXSystemWordPollFastPathCycles = 0;
+        _m68kLongTstBneWaitFastPathHits = 0;
+        _m68kLongTstBneWaitFastPathCycles = 0;
+        _m68kMoveByteFillDbfFastPathHits = 0;
+        _m68kMoveByteFillDbfFastPathCycles = 0;
+        _m68kLongCmpBeqWaitFastPathHits = 0;
+        _m68kLongCmpBeqWaitFastPathCycles = 0;
+        _m68kMoveByteCopyDbfFastPathHits = 0;
+        _m68kMoveByteCopyDbfFastPathCycles = 0;
+        _m68kMoveWordVdpFillDbfFastPathHits = 0;
+        _m68kMoveWordVdpFillDbfFastPathCycles = 0;
     }
 
     public void StepInstruction()
@@ -241,6 +283,7 @@ public sealed class MegaDrive
 
             if (TryFastForwardThirtyTwoXSystemWordPollLoop(cycleBudget - consumed, out int pollCycles))
             {
+                RecordM68kFastPath(pollCycles, ref _m68kThirtyTwoXSystemWordPollFastPathHits, ref _m68kThirtyTwoXSystemWordPollFastPathCycles);
                 ThirtyTwoXDevice thirtyTwoX = Bus.ThirtyTwoX!;
                 MainCpu.AddWaitCycles(pollCycles);
                 RunThirtyTwoXForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider);
@@ -260,6 +303,7 @@ public sealed class MegaDrive
                     out int waitLoopCycles,
                     out int waitLoopInstructions))
             {
+                RecordM68kFastPath(waitLoopCycles, ref _m68kLongTstBneWaitFastPathHits, ref _m68kLongTstBneWaitFastPathCycles);
                 RunThirtyTwoXForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider);
                 consumed += waitLoopCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - waitLoopInstructions);
@@ -269,6 +313,7 @@ public sealed class MegaDrive
             if (Bus.ThirtyTwoX is null &&
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
+                RecordM68kFastPath(fastCycles, ref _m68kMoveByteFillDbfFastPathHits, ref _m68kMoveByteFillDbfFastPathCycles);
                 RunThirtyTwoXForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider);
                 consumed += fastCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - fastInstructions);
@@ -282,6 +327,7 @@ public sealed class MegaDrive
                     out int cmpWaitLoopCycles,
                     out int cmpWaitLoopInstructions))
             {
+                RecordM68kFastPath(cmpWaitLoopCycles, ref _m68kLongCmpBeqWaitFastPathHits, ref _m68kLongCmpBeqWaitFastPathCycles);
                 RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider);
                 consumed += cmpWaitLoopCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - cmpWaitLoopInstructions);
@@ -298,6 +344,7 @@ public sealed class MegaDrive
                 int byteCopyWaitCycles = Bus.ConsumeM68kWaitCycles();
                 MainCpu.AddWaitCycles(byteCopyWaitCycles);
                 int elapsedCycles = byteCopyCycles + byteCopyWaitCycles;
+                RecordM68kFastPath(elapsedCycles, ref _m68kMoveByteCopyDbfFastPathHits, ref _m68kMoveByteCopyDbfFastPathCycles);
                 RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider);
                 consumed += elapsedCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - byteCopyInstructions);
@@ -314,6 +361,7 @@ public sealed class MegaDrive
                 int wordFillWaitCycles = Bus.ConsumeM68kWaitCycles();
                 MainCpu.AddWaitCycles(wordFillWaitCycles);
                 int elapsedCycles = wordFillCycles + wordFillWaitCycles;
+                RecordM68kFastPath(elapsedCycles, ref _m68kMoveWordVdpFillDbfFastPathHits, ref _m68kMoveWordVdpFillDbfFastPathCycles);
                 RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider);
                 consumed += elapsedCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - wordFillInstructions);
@@ -364,6 +412,14 @@ public sealed class MegaDrive
         Bus.CurrentMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
         Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
         return consumed;
+    }
+
+    private void RecordM68kFastPath(int cycles, ref long hits, ref long accumulatedCycles)
+    {
+        hits++;
+        accumulatedCycles += cycles;
+        _m68kFastPathHits++;
+        _m68kFastPathCycles += cycles;
     }
 
     private bool TryFastForwardThirtyTwoXSystemWordPollLoop(int cycleBudget, out int cycles)

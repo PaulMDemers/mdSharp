@@ -220,6 +220,7 @@ Run("synthetic Genesis startup ROM", SyntheticGenesisStartupRom);
 Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
+Run("MegaDrive records 68000 fast-path counters", MegaDriveRecordsM68kFastPathCounters);
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
 Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementCopyDbfLoopFastForward);
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
@@ -10953,6 +10954,41 @@ void M68kMoveByteDbfFillLoopFastForward()
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1002));
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1003));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the fill loop");
+}
+
+void MegaDriveRecordsM68kFastPathCounters()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x343C); // MOVE.W #$005A,D2
+    EmitWord(rom, ref pc, 0x005A);
+    EmitWord(rom, ref pc, 0x323C); // MOVE.W #32,D1
+    EmitWord(rom, ref pc, 0x0020);
+    EmitWord(rom, ref pc, 0x43F9); // LEA $00FF2000,A1
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x12C2); // MOVE.B D2,(A1)+
+    EmitWord(rom, ref pc, 0x51C9); // DBF D1,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.RunFrame(4_000);
+
+    AssertTrue(machine.M68kFastPathHits > 0, "scheduler should record total 68000 fast-path hits");
+    AssertTrue(machine.M68kFastPathCycles > 0, "scheduler should record total 68000 fast-path cycles");
+    AssertTrue(machine.M68kMoveByteFillDbfFastPathHits > 0, "scheduler should record MOVE.B DBF fill hits");
+    AssertTrue(machine.M68kMoveByteFillDbfFastPathCycles > 0, "scheduler should record MOVE.B DBF fill cycles");
+    AssertEqual(machine.M68kMoveByteFillDbfFastPathHits, machine.M68kFastPathHits);
+    AssertEqual(machine.M68kMoveByteFillDbfFastPathCycles, machine.M68kFastPathCycles);
+
+    machine.Reset();
+    AssertEqual(0L, machine.M68kFastPathHits);
+    AssertEqual(0L, machine.M68kMoveByteFillDbfFastPathHits);
 }
 
 void M68kMoveBytePostIncrementCopyDbfLoopFastForward()
