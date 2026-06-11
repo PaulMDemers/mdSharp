@@ -8427,6 +8427,132 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardDoomSwappedMaskedColumnWordStoreLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        const int TakenCyclesPerIteration = 13;
+        const int FinalCycles = 12;
+        cycles = 0;
+        if (maxCycles < FinalCycles ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0x00, out ushort swapX) ||
+            swapX != 0x6099 ||
+            !peekBus.TryPeekWord(loopPc + 0x02, out ushort maskX) ||
+            maskX != 0x2049 ||
+            !peekBus.TryPeekWord(loopPc + 0x04, out ushort maskY) ||
+            maskY != 0x2B59 ||
+            !peekBus.TryPeekWord(loopPc + 0x06, out ushort combine) ||
+            combine != 0x20BB ||
+            !peekBus.TryPeekWord(loopPc + 0x08, out ushort loadByte) ||
+            loadByte != 0x001C ||
+            !peekBus.TryPeekWord(loopPc + 0x0A, out ushort stepX) ||
+            stepX != 0x39AC ||
+            !peekBus.TryPeekWord(loopPc + 0x0C, out ushort stepY) ||
+            stepY != 0x378C ||
+            !peekBus.TryPeekWord(loopPc + 0x0E, out ushort shiftIndex) ||
+            shiftIndex != 0x4000 ||
+            !peekBus.TryPeekWord(loopPc + 0x10, out ushort lookupWord) ||
+            lookupWord != 0x003D ||
+            !peekBus.TryPeekWord(loopPc + 0x12, out ushort decrementCount) ||
+            decrementCount != 0x4610 ||
+            !peekBus.TryPeekWord(loopPc + 0x14, out ushort storeWord) ||
+            storeWord != 0x2205 ||
+            !peekBus.TryPeekWord(loopPc + 0x16, out ushort branch) ||
+            branch != 0x8FF3 ||
+            !peekBus.TryPeekWord(loopPc + 0x18, out ushort delaySwapY) ||
+            delaySwapY != 0x6B79)
+        {
+            return false;
+        }
+
+        if (R[6] == 0)
+        {
+            return false;
+        }
+
+        int iterations = 0;
+        while (R[6] != 0)
+        {
+            bool finalIteration = R[6] == 1;
+            int iterationCycles = finalIteration ? FinalCycles : TakenCyclesPerIteration;
+            if (cycles + iterationCycles > maxCycles)
+            {
+                break;
+            }
+
+            R[0] = (R[9] << 16) | (R[9] >> 16);
+            R[0] &= R[4];
+            R[11] &= R[5];
+            R[0] |= R[11];
+
+            byte? source = readByte(R[0] + R[1]);
+            if (!source.HasValue)
+            {
+                break;
+            }
+
+            R[0] = SignExtend8(source.Value);
+            R[9] += R[10];
+            R[7] += R[8];
+            SetT((R[0] & 0x8000_0000u) != 0);
+            R[0] <<= 1;
+
+            ushort? mapped = readWord(R[0] + R[3]);
+            if (!mapped.HasValue)
+            {
+                break;
+            }
+
+            R[0] = SignExtend16(mapped.Value);
+            R[6]--;
+            bool complete = R[6] == 0;
+            SetT(complete);
+
+            uint destination = R[2] - 2;
+            if (!writeWord(destination, (ushort)R[0]))
+            {
+                break;
+            }
+
+            R[2] = destination;
+            cycles += iterationCycles;
+            iterations++;
+
+            if (complete)
+            {
+                PC = loopPc + 0x18;
+                break;
+            }
+
+            R[11] = (R[7] << 16) | (R[7] >> 16);
+            PC = loopPc;
+        }
+
+        if (iterations == 0)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        Cycles += cycles;
+        LastOpcode = branch;
+        LastOpcodePc = loopPc + 0x16;
+        return true;
+    }
+
     public int Step()
     {
         uint pc = PC;
