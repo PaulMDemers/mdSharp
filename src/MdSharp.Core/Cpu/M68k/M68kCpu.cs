@@ -242,6 +242,72 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardMoveWordAbsoluteDbfLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 18;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        ushort move = _bus.ReadWord(PC);
+        if ((move & 0xF1F8) != 0x31C0)
+        {
+            return false;
+        }
+
+        uint address = _bus.ReadLong(PC + 2) & AddressMask;
+        if (!canFastForwardAddress(address))
+        {
+            return false;
+        }
+
+        ushort dbcc = _bus.ReadWord(PC + 6);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(PC + 8);
+        if (NormalizePc(unchecked(PC + 8u + (uint)displacement)) != PC)
+        {
+            return false;
+        }
+
+        int counterRegister = dbcc & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        int maxTakenIterations = cycleBudget / CyclesPerIteration;
+        int iterations = Math.Min(counter, maxTakenIterations);
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        int sourceRegister = move & 0x07;
+        ushort value = (ushort)D[sourceRegister];
+        for (int i = 0; i < iterations; i++)
+        {
+            _bus.WriteWord(address, value);
+        }
+
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | (ushort)(counter - iterations);
+        cycles = iterations * CyclesPerIteration;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
     public bool TryFastForwardLongAbsoluteTstBneWaitLoop(
         int cycleBudget,
         Func<uint, bool> canFastForwardAddress,

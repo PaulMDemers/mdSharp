@@ -221,6 +221,7 @@ Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
+Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
 Run("68000 multiply instructions", MultiplyInstructions);
@@ -10950,6 +10951,55 @@ void M68kMoveByteDbfFillLoopFastForward()
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1002));
     AssertEqual((byte)0x7F, machine.Bus.ReadByte(0x00FF_1003));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the fill loop");
+}
+
+void M68kMoveWordAbsoluteDbfFillLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x343C); // MOVE.W #$55AA,D2
+    EmitWord(rom, ref pc, 0x55AA);
+    EmitWord(rom, ref pc, 0x323C); // MOVE.W #4,D1
+    EmitWord(rom, ref pc, 0x0004);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x33C2); // MOVE.W D2,$00FF2000
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x51C9); // DBF D1,loop
+    EmitWord(rom, ref pc, 0xFFF8);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 2; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardMoveWordAbsoluteDbfLoop(
+            54,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "fast-forward should recognize the absolute word fill loop");
+    AssertEqual(54, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(1u, machine.MainCpu.D[1] & 0xFFFF);
+    AssertEqual((ushort)0x55AA, machine.Bus.ReadWord(0x00FF_2000));
+
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFFFu, machine.MainCpu.D[1] & 0xFFFF);
+    AssertEqual((ushort)0x55AA, machine.Bus.ReadWord(0x00FF_2000));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the absolute word fill loop");
 }
 
 void M68kTstLongBneWaitLoopFastForward()
