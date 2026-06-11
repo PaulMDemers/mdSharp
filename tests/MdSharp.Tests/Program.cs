@@ -224,6 +224,7 @@ Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForwar
 Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementCopyDbfLoopFastForward);
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
+Run("68000 CMP.L BEQ wait loop fast-forward", M68kCmpLongBeqWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
 Run("68000 multiply instructions", MultiplyInstructions);
 Run("68000 EOR and CMPM instructions", EorAndCmpmInstructions);
@@ -11100,6 +11101,50 @@ void M68kTstLongBneWaitLoopFastForward()
     AssertTrue(
         !machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(56, _ => true, out _, out _),
         "zero wait flag should fall back to the interpreter so the branch can exit");
+}
+
+void M68kCmpLongBeqWaitLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x203C); // MOVE.L #$12345678,D0
+    EmitLong(rom, ref pc, 0x1234_5678);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0xB0B9); // CMP.L $00FF2000,D0
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x67F8); // BEQ loop
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteLong(0x00FF_2000, 0x1234_5678);
+    machine.StepInstruction();
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardLongAbsoluteCmpBeqWaitLoop(
+            48,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "fast-forward should recognize the long compare/equal wait loop");
+    AssertEqual(48, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertEqual((ushort)0x0004, (ushort)(machine.MainCpu.SR & 0x000F));
+
+    machine.Bus.WriteLong(0x00FF_2000, 0x1234_5679);
+    AssertTrue(
+        !machine.MainCpu.TryFastForwardLongAbsoluteCmpBeqWaitLoop(
+            48,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out _,
+            out _),
+        "changed wait flag should fall back to the interpreter so the branch can exit");
 }
 
 void MovemPredecrementStoresOriginalAddressRegister()

@@ -276,6 +276,19 @@ public sealed class MegaDrive
             }
 
             if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardLongAbsoluteCmpBeqWaitLoop(
+                    cycleBudget - consumed,
+                    IsM68kWorkRamAddress,
+                    out int cmpWaitLoopCycles,
+                    out int cmpWaitLoopInstructions))
+            {
+                RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider);
+                consumed += cmpWaitLoopCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - cmpWaitLoopInstructions);
+                continue;
+            }
+
+            if (_pendingM68kInterruptLevels == 0 &&
                 MainCpu.TryFastForwardMoveBytePostIncrementCopyDbfLoop(
                     cycleBudget - consumed,
                     IsM68kFastByteCopyAddress,

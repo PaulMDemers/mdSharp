@@ -438,6 +438,61 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardLongAbsoluteCmpBeqWaitLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 16;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        ushort compare = _bus.ReadWord(pc);
+        if ((compare & 0xF1FF) != 0xB0B9)
+        {
+            return false;
+        }
+
+        uint address = _bus.ReadLong(pc + 2) & AddressMask;
+        if (!canFastForwardAddress(address))
+        {
+            return false;
+        }
+
+        ushort branch = _bus.ReadWord(pc + 6);
+        if ((branch & 0xFF00) != 0x6700)
+        {
+            return false;
+        }
+
+        sbyte displacement = unchecked((sbyte)(branch & 0x00FF));
+        if (displacement == 0 || NormalizePc(pc + 8 + (uint)displacement) != pc)
+        {
+            return false;
+        }
+
+        int register = (compare >> 9) & 0x07;
+        uint value = _bus.ReadLong(address);
+        if (value != D[register])
+        {
+            return false;
+        }
+
+        SR = (ushort)(SR & ~0x000F);
+        SR |= 0x0004;
+        int iterations = cycleBudget / CyclesPerIteration;
+        cycles = iterations * CyclesPerIteration;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
     public void ClearAllocationProfile()
     {
         EnsureAllocationProfile();
