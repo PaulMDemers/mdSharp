@@ -1532,6 +1532,7 @@ public sealed class ThirtyTwoXDevice
             if (IsSh2FastPathGroupEnabled("sync") &&
                 cpuIndex == 0 &&
                 (nextOpcode == 0xC420 || nextOpcode == 0x2008 || (nextOpcode & 0xFF00) == 0x8900) &&
+                IsGbrByteZeroComm20PollCandidate(cpuIndex, cpu.PC) &&
                 TryFastForwardGbrByteZeroComm20Poll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
@@ -1540,6 +1541,7 @@ public sealed class ThirtyTwoXDevice
             if (IsSh2FastPathGroupEnabled("sync") &&
                 cpuIndex == 0 &&
                 (((nextOpcode & 0xF000) == 0xD000) || ((nextOpcode & 0xFF00) >= 0x8400 && (nextOpcode & 0xFF00) <= 0x84F0) || nextOpcode == 0x2018 || (nextOpcode & 0xFF00) == 0x8900) &&
+                IsLiteralByteDisplacementTstRegisterPollCandidate(cpuIndex, cpu.PC) &&
                 TryFastForwardLiteralByteDisplacementTstRegisterPoll(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
                 return fastCycles;
@@ -2314,6 +2316,103 @@ public sealed class ThirtyTwoXDevice
         }
 
         return false;
+    }
+
+    private bool IsGbrByteZeroComm20PollCandidate(int cpuIndex, uint pc)
+    {
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = (uint)(pc + offset);
+            if (!TryPeekSh2Word(candidate, cpuIndex, out ushort loadOpcode) ||
+                !TryPeekSh2Word(candidate + 2, cpuIndex, out ushort testOpcode) ||
+                !TryPeekSh2Word(candidate + 4, cpuIndex, out ushort branchOpcode))
+            {
+                continue;
+            }
+
+            if (loadOpcode != 0xC420 ||
+                testOpcode != 0x2008 ||
+                (branchOpcode & 0xFF00) != 0x8900)
+            {
+                continue;
+            }
+
+            int displacement = (sbyte)branchOpcode;
+            uint target = candidate + 8 + (uint)(displacement * 2);
+            if (target == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsLiteralByteDisplacementTstRegisterPollCandidate(int cpuIndex, uint pc)
+    {
+        if (IsLiteralByteDisplacementTstRegisterPollLoadCandidate(cpuIndex, pc + 4))
+        {
+            return true;
+        }
+
+        ReadOnlySpan<int> offsets = [0, -2, -4, -6, -8];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            if (IsLiteralByteDisplacementTstRegisterPollLoadCandidate(cpuIndex, (uint)(pc + offset)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsLiteralByteDisplacementTstRegisterPollLoadCandidate(int cpuIndex, uint loadPc)
+    {
+        if (loadPc < 4 ||
+            !TryPeekSh2Word(loadPc - 4, cpuIndex, out ushort baseLiteralOpcode) ||
+            !TryPeekSh2Word(loadPc - 2, cpuIndex, out ushort maskLiteralOpcode) ||
+            !TryPeekSh2Word(loadPc, cpuIndex, out ushort loadOpcode) ||
+            !TryPeekSh2Word(loadPc + 2, cpuIndex, out ushort testOpcode) ||
+            !TryPeekSh2Word(loadPc + 4, cpuIndex, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        if ((baseLiteralOpcode & 0xF000) != 0xD000 ||
+            (maskLiteralOpcode & 0xF000) != 0xD000 ||
+            (loadOpcode & 0xFF00) < 0x8400 ||
+            (loadOpcode & 0xFF00) > 0x84F0 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        int baseRegister = (loadOpcode >> 4) & 0x0F;
+        int maskRegister = (testOpcode >> 4) & 0x0F;
+        if (((baseLiteralOpcode >> 8) & 0x0F) != baseRegister ||
+            ((maskLiteralOpcode >> 8) & 0x0F) != maskRegister ||
+            ((testOpcode >> 8) & 0x0F) != 0 ||
+            maskRegister == 0)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loadPc + 8 + (uint)(displacement * 2);
+        return target == loadPc;
     }
 
     private ushort PeekSh2ProbeOpcode(int cpuIndex, uint pc)
