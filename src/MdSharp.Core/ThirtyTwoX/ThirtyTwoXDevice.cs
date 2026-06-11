@@ -955,6 +955,15 @@ public sealed class ThirtyTwoXDevice
                 }
             }
 
+            if (IsSh2FastPathGroupEnabled("compute") &&
+                nextOpcode == 0x4421 &&
+                cpu.TryFastForwardRepeatedSharR4Rts(fastPathCycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (IsSh2FastPathGroupEnabled("memory") &&
                 IsSh2FastPathGroupEnabled("memstore") &&
                 (nextOpcode & 0xF00F) == 0x2001)

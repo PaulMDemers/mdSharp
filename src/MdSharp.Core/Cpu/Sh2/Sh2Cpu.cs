@@ -8553,6 +8553,57 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardRepeatedSharR4Rts(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 3 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        int shiftCount = 0;
+        while (shiftCount < 32 &&
+            peekBus.TryPeekWord(pc + (uint)(shiftCount * 2), out ushort shiftOpcode) &&
+            shiftOpcode == 0x4421)
+        {
+            shiftCount++;
+        }
+
+        if (shiftCount == 0 ||
+            !peekBus.TryPeekWord(pc + (uint)(shiftCount * 2), out ushort rtsOpcode) ||
+            rtsOpcode != 0x000B ||
+            !peekBus.TryPeekWord(pc + (uint)((shiftCount + 1) * 2), out ushort delayOpcode) ||
+            delayOpcode != 0x4421)
+        {
+            return false;
+        }
+
+        int requiredCycles = shiftCount + 2;
+        if (maxCycles < requiredCycles)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < shiftCount + 1; i++)
+        {
+            SetT((R[4] & 0x8000_0000u) != 0);
+            R[4] = (uint)((int)R[4] >> 1);
+        }
+
+        PC = PR;
+        cycles = requiredCycles;
+        Cycles += cycles;
+        LastOpcode = rtsOpcode;
+        LastOpcodePc = pc + (uint)(shiftCount * 2);
+        return true;
+    }
+
     public int Step()
     {
         uint pc = PC;

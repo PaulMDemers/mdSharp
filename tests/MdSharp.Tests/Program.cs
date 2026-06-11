@@ -49,6 +49,7 @@ Run("32X SH-2 Doom record pair scan loop fast-forward", ThirtyTwoXSh2DoomRecordP
 Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward);
 Run("32X SH-2 Doom masked column word store loop fast-forward", ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 Doom swapped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward);
+Run("32X SH-2 repeated SHAR R4 RTS helper fast-forward", ThirtyTwoXSh2RepeatedSharR4RtsFastForward);
 Run("32X SH-2 byte span compare loop fast-forward", ThirtyTwoXSh2ByteSpanCompareLoopFastForward);
 Run("32X SH-2 byte nibble lookup expand loop fast-forward", ThirtyTwoXSh2ByteNibbleLookupExpandLoopFastForward);
 Run("32X SH-2 unrolled long fill GT BT/S loop fast-forward", ThirtyTwoXSh2UnrolledLongFillGtBtsLoopFastForward);
@@ -4010,6 +4011,68 @@ void ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward()
     AssertEqual(3u, partial.R[6]);
     AssertEqual(Destination + 6, partial.R[2]);
     AssertEqual(SwapWords(partial.R[7]), partial.R[11]);
+}
+
+void ThirtyTwoXSh2RepeatedSharR4RtsFastForward()
+{
+    const uint RoutinePc = 0x0204_E5C0;
+    const uint ReturnPc = 0x0600_4000;
+
+    static void WriteRoutine(SyntheticSh2Bus bus, uint pc, int shiftsBeforeRts)
+    {
+        for (int i = 0; i < shiftsBeforeRts; i++)
+        {
+            bus.WriteInstructionWord(pc + (uint)(i * 2), 0x4421);
+        }
+
+        bus.WriteInstructionWord(pc + (uint)(shiftsBeforeRts * 2), 0x000B);
+        bus.WriteInstructionWord(pc + (uint)((shiftsBeforeRts + 1) * 2), 0x4421);
+        bus.WriteInstructionWord(ReturnPc, 0x001B);
+    }
+
+    static void SeedCpu(Sh2Cpu cpu, uint pc, uint value)
+    {
+        cpu.Reset(pc);
+        cpu.RestoreState(cpu.CaptureState() with { PR = ReturnPc });
+        cpu.R[4] = value;
+    }
+
+    void Compare(string name, int shiftsBeforeRts, uint value)
+    {
+        SyntheticSh2Bus interpretedBus = new();
+        WriteRoutine(interpretedBus, RoutinePc, shiftsBeforeRts);
+        Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+        SeedCpu(interpreted, RoutinePc, value);
+        interpreted.Run(128);
+        AssertTrue(interpreted.Halted, $"interpreter repeated SHAR helper should return for {name}");
+
+        SyntheticSh2Bus fastBus = new();
+        WriteRoutine(fastBus, RoutinePc, shiftsBeforeRts);
+        Sh2Cpu fast = new(fastBus, "fast");
+        SeedCpu(fast, RoutinePc, value);
+        AssertTrue(fast.TryFastForwardRepeatedSharR4Rts(64, out int cycles), $"repeated SHAR helper should fast-forward for {name}");
+        AssertEqual(shiftsBeforeRts + 2, cycles);
+        fast.Step();
+        AssertTrue(fast.Halted, $"fast repeated SHAR helper should return for {name}");
+
+        for (int i = 0; i < 16; i++)
+        {
+            AssertEqual(interpreted.R[i], fast.R[i]);
+        }
+
+        AssertEqual(interpreted.PC, fast.PC);
+        AssertEqual(interpreted.SR, fast.SR);
+        AssertEqual(interpreted.Halted, fast.Halted);
+    }
+
+    Compare("positive value", shiftsBeforeRts: 5, value: 0x4000_0000u);
+    Compare("negative value", shiftsBeforeRts: 12, value: 0xF000_0000u);
+
+    SyntheticSh2Bus shortBudgetBus = new();
+    WriteRoutine(shortBudgetBus, RoutinePc, shiftsBeforeRts: 5);
+    Sh2Cpu shortBudget = new(shortBudgetBus, "short-budget");
+    SeedCpu(shortBudget, RoutinePc, 0x4000_0000u);
+    AssertTrue(!shortBudget.TryFastForwardRepeatedSharR4Rts(6, out _), "repeated SHAR helper should reject a short cycle budget");
 }
 
 void ThirtyTwoXSh2ByteSpanCompareLoopFastForward()
