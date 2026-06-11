@@ -968,6 +968,19 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("compute") &&
+                (((nextOpcode & 0xF0FF) == 0x4000 ||
+                    (nextOpcode & 0xF0FF) == 0x4024 ||
+                    (nextOpcode & 0xF0FF) == 0x4010 ||
+                    (nextOpcode & 0xFF00) == 0x8F00 ||
+                    (nextOpcode & 0xF000) == 0x7000) &&
+                    cpu.TryFastForwardShllRotclDtBfsAddLoop(fastPathCycleBudget, out fastCycles)))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("compute") &&
                 nextOpcode == 0x4421 &&
                 cpu.TryFastForwardRepeatedSharR4Rts(fastPathCycleBudget, out fastCycles))
             {

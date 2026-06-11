@@ -67,6 +67,7 @@ Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2Long
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 literal word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward);
+Run("32X SH-2 SHLL ROTCL DT BF/S ADD loop fast-forward", ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
 Run("32X SH-2 long masked change BT/S delay poll loop fast-forward", ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward);
@@ -4853,6 +4854,48 @@ void ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward()
 
     bus.WriteWord(PollAddress, 0xFFFF);
     AssertTrue(!cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(300, out _), "negative loaded word should fall back so the loop can exit normally");
+}
+
+void ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0872;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x4D00); // SHLL R13
+    bus.WriteInstructionWord(LoopPc + 2, 0x4024); // ROTCL R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x4B10); // DT R11
+    bus.WriteInstructionWord(LoopPc + 6, 0x8FFB); // BF/S LoopPc
+    bus.WriteInstructionWord(LoopPc + 8, 0x7EFF); // ADD #-1,R14
+
+    Sh2Cpu interpreted = new(bus, "interpreter");
+    interpreted.Reset(LoopPc);
+    interpreted.R[0] = 0x4000_0001;
+    interpreted.R[11] = 6;
+    interpreted.R[13] = 0xA000_0000;
+    interpreted.R[14] = 9;
+    for (int i = 0; i < 8; i++)
+    {
+        interpreted.Step();
+    }
+
+    Sh2Cpu fast = new(bus, "fast");
+    fast.Reset(LoopPc);
+    fast.R[0] = 0x4000_0001;
+    fast.R[11] = 6;
+    fast.R[13] = 0xA000_0000;
+    fast.R[14] = 9;
+    AssertTrue(fast.TryFastForwardShllRotclDtBfsAddLoop(10, out int cycles), "SHLL/ROTCL/DT/BF/S/ADD bit loop should fast-forward complete taken iterations");
+    AssertEqual(10, cycles);
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.R[0], fast.R[0]);
+    AssertEqual(interpreted.R[11], fast.R[11]);
+    AssertEqual(interpreted.R[13], fast.R[13]);
+    AssertEqual(interpreted.R[14], fast.R[14]);
+    AssertEqual(interpreted.SR & 1u, fast.SR & 1u);
+
+    Sh2Cpu finalIteration = new(bus, "final");
+    finalIteration.Reset(LoopPc);
+    finalIteration.R[11] = 1;
+    AssertTrue(!finalIteration.TryFastForwardShllRotclDtBfsAddLoop(10, out _), "final loop iteration should fall back so the non-taken branch exit is interpreted");
 }
 
 void ThirtyTwoXSh2WordTstBtPollLoopFastForward()

@@ -4541,10 +4541,11 @@ void ProfileThirtyTwoXHotPcs(string romPath, string outputCsv, int frames, int i
         totalSamples++;
     };
 
+    int endFrame = startFrame + Math.Max(0, frames);
     System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
     {
-        for (currentFrame = 0; currentFrame < frames; currentFrame++)
+        for (currentFrame = 0; currentFrame < endFrame; currentFrame++)
         {
             machine.RunFrameCycles(instructionsPerFrame);
         }
@@ -4621,10 +4622,11 @@ void ProfileThirtyTwoXFastPathMisses(string romPath, string outputCsv, int frame
         totalAttempts++;
     };
 
+    int endFrame = startFrame + Math.Max(0, frames);
     System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
     {
-        for (currentFrame = 0; currentFrame < frames; currentFrame++)
+        for (currentFrame = 0; currentFrame < endFrame; currentFrame++)
         {
             machine.RunFrameCycles(instructionsPerFrame);
         }

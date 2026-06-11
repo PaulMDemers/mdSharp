@@ -7252,6 +7252,76 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardShllRotclDtBfsAddLoop(int maxCycles, out int cycles)
+    {
+        const int CyclesPerIteration = 5;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFiveWordDelayBranchLoop(
+                peekBus,
+                [0],
+                out uint loopPc,
+                out ushort shiftOpcode,
+                out ushort rotateOpcode,
+                out ushort decrementOpcode,
+                out ushort branchOpcode,
+                out ushort delayOpcode) ||
+            (shiftOpcode & 0xF0FF) != 0x4000 ||
+            (rotateOpcode & 0xF0FF) != 0x4024 ||
+            (decrementOpcode & 0xF0FF) != 0x4010 ||
+            (branchOpcode & 0xFF00) != 0x8F00 ||
+            (delayOpcode & 0xF000) != 0x7000 ||
+            (sbyte)(byte)delayOpcode != -1)
+        {
+            return false;
+        }
+
+        int shiftRegister = (shiftOpcode >> 8) & 0x0F;
+        int rotateRegister = (rotateOpcode >> 8) & 0x0F;
+        int countRegister = (decrementOpcode >> 8) & 0x0F;
+        int delayRegister = (delayOpcode >> 8) & 0x0F;
+        uint count = R[countRegister];
+        if (count <= 1 ||
+            countRegister == delayRegister)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint iterations = Math.Min(count - 1, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        for (uint i = 0; i < iterations; i++)
+        {
+            bool shiftedCarry = (R[shiftRegister] & 0x8000_0000u) != 0;
+            R[shiftRegister] <<= 1;
+
+            R[rotateRegister] = (R[rotateRegister] << 1) | (shiftedCarry ? 1u : 0u);
+            R[countRegister]--;
+            R[delayRegister]--;
+        }
+
+        SetT(false);
+        PC = loopPc;
+        cycles = checked((int)(iterations * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
     public bool TryFastForwardWordDisplacementTstBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -10657,6 +10727,45 @@ Done:
         thirdOpcode = 0;
         fourthOpcode = 0;
         branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindFiveWordDelayBranchLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort firstOpcode,
+        out ushort secondOpcode,
+        out ushort thirdOpcode,
+        out ushort branchOpcode,
+        out ushort delayOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out firstOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out secondOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out thirdOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out branchOpcode) &&
+                peekBus.TryPeekWord(candidate + 8, out delayOpcode) &&
+                BranchByteTarget(candidate + 6, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        firstOpcode = 0;
+        secondOpcode = 0;
+        thirdOpcode = 0;
+        branchOpcode = 0;
+        delayOpcode = 0;
         return false;
     }
 
