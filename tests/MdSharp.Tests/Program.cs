@@ -99,6 +99,7 @@ Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBuffer
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
 Run("32X SH-2 GBR CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward);
+Run("32X SH-2 GBR word TST BF/S delay poll loop fast-forward", ThirtyTwoXSh2GbrWordTstBfsDelayPollLoopFastForward);
 Run("32X SH-2 GBR register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward);
 Run("32X SH-2 null linked-list idle loop fast-forward", ThirtyTwoXSh2NullLinkedListIdleLoopFastForward);
 Run("32X SH-2 GBR word CMP/GT BF poll loop fast-forward", ThirtyTwoXSh2GbrWordCmpGtBfPollLoopFastForward);
@@ -2433,7 +2434,7 @@ void ThirtyTwoXSh2DtBfDelayLoopFastForward()
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart + 2, branchEntryDevice.MasterSh2.PC);
     int branchEntryPartial = branchEntryDevice.RunSh2Cycles(21);
     AssertTrue(branchEntryPartial <= 3, "branch-entry DT/BF loop should collapse after landing on BF");
-    AssertEqual(27u, branchEntryDevice.MasterSh2.R[0]);
+    AssertEqual(22u, branchEntryDevice.MasterSh2.R[0]);
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, branchEntryDevice.MasterSh2.PC);
 }
 
@@ -6377,6 +6378,42 @@ void ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward()
     AssertTrue(!cpu.TryFastForwardGbrCmpEqBtPollLoop(500, out _), "nonmatching GBR CMP/EQ BT value should fall back to the interpreter");
 }
 
+void ThirtyTwoXSh2GbrWordTstBfsDelayPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_B45C;
+    const uint Gbr = 0x0600_D4F8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x8FFD); // BF/S loop
+    bus.WriteInstructionWord(LoopPc + 4, 0xC502); // MOV.W @(4,GBR),R0
+    bus.WriteWord(Gbr + 4, 0x0001);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    cpu.R[0] = 1;
+    AssertTrue(cpu.TryFastForwardGbrWordTstBfsDelayPollLoop(500, out int cycles), "GBR word TST BF/S delay poll should fast-forward while the word remains non-zero");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 2);
+    cpu.SetGbr(Gbr);
+    cpu.R[0] = 1;
+    AssertTrue(cpu.TryFastForwardGbrWordTstBfsDelayPollLoop(500, out _), "GBR word TST BF/S delay poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.SetGbr(Gbr);
+    cpu.R[0] = 1;
+    AssertTrue(cpu.TryFastForwardGbrWordTstBfsDelayPollLoop(500, out _), "GBR word TST BF/S delay poll should fast-forward from the delay slot");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(Gbr + 4, 0x0000);
+    AssertTrue(!cpu.TryFastForwardGbrWordTstBfsDelayPollLoop(500, out _), "zero GBR word should fall back and let the poll leave normally");
+}
+
 void ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward()
 {
     const uint LoopPc = 0x0600_01A4;
@@ -7692,6 +7729,26 @@ void ThirtyTwoXCommunicationByteReadWriteEdge()
 
     AssertEqual((byte)0x00, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     AssertEqual((byte)0x01, commandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 1));
+
+    ThirtyTwoXDevice retailCommandAckDevice = new();
+    retailCommandAckDevice.Reset();
+    retailCommandAckDevice.RestoreState(retailCommandAckDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+    });
+    retailCommandAckDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14, 0x01);
+    WriteSh2ByteForTest(
+        retailCommandAckDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        0,
+        cpuIndex: 0);
+    AssertEqual((byte)0x00, retailCommandAckDevice.ReadSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14));
+    AssertEqual((byte)0x00, ReadSh2ByteForTest(
+        retailCommandAckDevice,
+        ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14),
+        cpuIndex: 0));
 
     ThirtyTwoXDevice highMailboxDevice = new();
     highMailboxDevice.Reset();

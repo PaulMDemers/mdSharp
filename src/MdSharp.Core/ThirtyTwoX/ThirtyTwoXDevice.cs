@@ -1673,7 +1673,8 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF0FF) == 0x4010 &&
+            if (((nextOpcode & 0xF0FF) == 0x4010 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
                 cpu.TryFastForwardDtBfLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -1709,6 +1710,16 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0x8800 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardGbrCmpEqBtPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8F00 ||
+                    (nextOpcode & 0xFF00) == 0xC500) &&
+                cpu.TryFastForwardGbrWordTstBfsDelayPollLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -8260,6 +8271,7 @@ public sealed class ThirtyTwoXDevice
         if (value != 0 ||
             !TryGetCommunicationByteIndex(offset, out int index) ||
             index < 14 ||
+            !ShouldProtectPendingHostCommunicationClear() ||
             !_m68kCommunicationPendingHostBytes[index])
         {
             return false;
@@ -8273,6 +8285,15 @@ public sealed class ThirtyTwoXDevice
         }
 
         return protect;
+    }
+
+    private bool ShouldProtectPendingHostCommunicationClear()
+    {
+        return _bootRomHandshakePending ||
+            _bootRomSignatureReadbackActive ||
+            _bootRomPostStartSignaturePending ||
+            _bootRomSixtyEightUpPending ||
+            _bootRomSixtyEightUpReadyHiddenFromSh2;
     }
 
     private void TrySeedDualSh2WorkerSemaphore(ushort offset, byte previousValue, byte value, int cpuIndex)

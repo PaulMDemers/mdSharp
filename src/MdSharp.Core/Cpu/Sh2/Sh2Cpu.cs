@@ -5109,6 +5109,81 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardGbrWordTstBfsDelayPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        bool found = false;
+        uint loopPc = PC;
+        ushort testOpcode = 0;
+        ushort branchOpcode = 0;
+        ushort delayLoadOpcode = 0;
+        ReadOnlySpan<int> offsets = [0, -2, -4];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out ushort candidateTestOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out ushort candidateBranchOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out ushort candidateDelayLoadOpcode) &&
+                (candidateTestOpcode & 0xF00F) == 0x2008 &&
+                (candidateBranchOpcode & 0xFF00) == 0x8F00 &&
+                (candidateDelayLoadOpcode & 0xFF00) == 0xC500)
+            {
+                loopPc = candidate;
+                testOpcode = candidateTestOpcode;
+                branchOpcode = candidateBranchOpcode;
+                delayLoadOpcode = candidateDelayLoadOpcode;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        int testLeft = (testOpcode >> 8) & 0x0F;
+        int testRight = (testOpcode >> 4) & 0x0F;
+        if (testLeft != 0 ||
+            testRight != 0 ||
+            BranchByteTarget(loopPc + 2, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        uint address = GBR + (uint)((delayLoadOpcode & 0xFF) * 2);
+        if (!peekBus.TryPeekWord(address, out ushort wordValue) ||
+            wordValue == 0)
+        {
+            return false;
+        }
+
+        R[0] = (uint)(short)wordValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 2;
+        return true;
+    }
+
     public bool TryFastForwardGbrRegisterCmpEqBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
