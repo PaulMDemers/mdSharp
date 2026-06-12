@@ -422,6 +422,150 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardMovImmediateDtBfRtsDelayLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 5 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort movOpcode) ||
+            (movOpcode & 0xFF00) != 0xEC00 ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort dtOpcode) ||
+            dtOpcode != 0x4C10 ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort branchOpcode) ||
+            branchOpcode != 0x8BFD ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort rtsOpcode) ||
+            rtsOpcode != 0x000B ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort delayOpcode) ||
+            delayOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        int count = (sbyte)(movOpcode & 0xFF);
+        if (count <= 0)
+        {
+            return false;
+        }
+
+        int requiredCycles = checked(1 + (count * 2) + 2);
+        if (maxCycles < requiredCycles)
+        {
+            return false;
+        }
+
+        R[12] = 0;
+        SetT(true);
+        cycles = requiredCycles;
+        Cycles += cycles;
+        LastOpcode = rtsOpcode;
+        LastOpcodePc = loopPc + 6;
+        PC = PR;
+        return true;
+    }
+
+    public bool TryFastForwardWordMismatchDelaySubroutinePollLoop(int maxCycles, Func<uint, ushort?> readWord, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 10 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0, out ushort loadOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort compareOpcode) ||
+            (compareOpcode & 0xF00F) != 0x3000 ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort exitBranchOpcode) ||
+            (exitBranchOpcode & 0xFF00) != 0x8900 ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort bsrOpcode) ||
+            (bsrOpcode & 0xF000) != 0xB000 ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort bsrDelayOpcode) ||
+            bsrDelayOpcode != 0x0009 ||
+            !peekBus.TryPeekWord(loopPc + 10, out ushort loopBranchOpcode) ||
+            (loopBranchOpcode & 0xF000) != 0xA000 ||
+            BranchWordTarget(loopPc + 10, loopBranchOpcode) != loopPc ||
+            !peekBus.TryPeekWord(loopPc + 12, out ushort loopDelayOpcode) ||
+            loopDelayOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        int loadRegister = (loadOpcode >> 8) & 0x0F;
+        int addressRegister = (loadOpcode >> 4) & 0x0F;
+        int compareRegister = (compareOpcode >> 8) & 0x0F;
+        int comparedLoadRegister = (compareOpcode >> 4) & 0x0F;
+        if (comparedLoadRegister != loadRegister)
+        {
+            return false;
+        }
+
+        uint helperPc = BranchWordTarget(loopPc + 6, bsrOpcode);
+        if (!peekBus.TryPeekWord(helperPc + 0, out ushort movDelayOpcode) ||
+            (movDelayOpcode & 0xFF00) != 0xEC00 ||
+            !peekBus.TryPeekWord(helperPc + 2, out ushort dtOpcode) ||
+            dtOpcode != 0x4C10 ||
+            !peekBus.TryPeekWord(helperPc + 4, out ushort delayBranchOpcode) ||
+            delayBranchOpcode != 0x8BFD ||
+            !peekBus.TryPeekWord(helperPc + 6, out ushort rtsOpcode) ||
+            rtsOpcode != 0x000B ||
+            !peekBus.TryPeekWord(helperPc + 8, out ushort rtsDelayOpcode) ||
+            rtsDelayOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        int delayCount = (sbyte)(movDelayOpcode & 0xFF);
+        if (delayCount <= 0)
+        {
+            return false;
+        }
+
+        ushort? rawValue = readWord(R[addressRegister]);
+        if (!rawValue.HasValue)
+        {
+            return false;
+        }
+
+        uint loadedValue = SignExtend16(rawValue.Value);
+        if (loadedValue == R[compareRegister])
+        {
+            return false;
+        }
+
+        int cyclesPerIteration = checked((delayCount * 2) + 10);
+        int iterations = maxCycles / cyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        cycles = checked(iterations * cyclesPerIteration);
+        Cycles += cycles;
+        R[loadRegister] = loadedValue;
+        R[12] = 0;
+        PR = loopPc + 10;
+        SetT(true);
+        LastOpcode = loopBranchOpcode;
+        LastOpcodePc = loopPc + 10;
+        PC = loopPc;
+        return true;
+    }
+
     public bool TryFastForwardNopDtBfDelayLoop(int maxCycles, out int cycles)
     {
         cycles = 0;

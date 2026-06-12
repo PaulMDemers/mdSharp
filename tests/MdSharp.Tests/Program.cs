@@ -23,6 +23,8 @@ Run("32X SH-2 core executes synthetic code", ThirtyTwoXSh2CoreExecutesSyntheticC
 Run("32X SH-2 BRA self idle loop fast-forward", ThirtyTwoXSh2BraSelfIdleLoopFastForward);
 Run("32X SH-2 ADD BRA NOP delay loop fast-forward", ThirtyTwoXSh2AddBraNopDelayLoopFastForward);
 Run("32X SH-2 DT/BF delay loop fast-forward", ThirtyTwoXSh2DtBfDelayLoopFastForward);
+Run("32X SH-2 MOV immediate DT/BF RTS delay helper fast-forward", ThirtyTwoXSh2MovImmediateDtBfRtsDelayFastForward);
+Run("32X SH-2 word mismatch delay subroutine poll loop fast-forward", ThirtyTwoXSh2WordMismatchDelaySubroutinePollLoopFastForward);
 Run("32X SH-2 NOP DT/BF delay loop fast-forward", ThirtyTwoXSh2NopDtBfDelayLoopFastForward);
 Run("32X SH-2 MOV.L ADD BF/S DT loop fast-forward", ThirtyTwoXSh2MovLAddBfSDtLoopFastForward);
 Run("32X SH-2 MOV.L NOP DT BF/S ADD loop fast-forward", ThirtyTwoXSh2MovLNopDtBfSAddLoopFastForward);
@@ -2433,6 +2435,130 @@ void ThirtyTwoXSh2DtBfDelayLoopFastForward()
     AssertTrue(branchEntryPartial <= 3, "branch-entry DT/BF loop should collapse after landing on BF");
     AssertEqual(27u, branchEntryDevice.MasterSh2.R[0]);
     AssertEqual(ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, branchEntryDevice.MasterSh2.PC);
+}
+
+void ThirtyTwoXSh2MovImmediateDtBfRtsDelayFastForward()
+{
+    const uint LoopPc = 0x0600_0BD2;
+    const uint ReturnPc = 0x0600_0A30;
+
+    static void LoadRoutine(SyntheticSh2Bus bus, ushort movOpcode)
+    {
+        bus.WriteInstructionWord(LoopPc + 0, movOpcode); // MOV #n,R12
+        bus.WriteInstructionWord(LoopPc + 2, 0x4C10); // DT R12
+        bus.WriteInstructionWord(LoopPc + 4, 0x8BFD); // BF back to DT
+        bus.WriteInstructionWord(LoopPc + 6, 0x000B); // RTS
+        bus.WriteInstructionWord(LoopPc + 8, 0x0009); // NOP
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    LoadRoutine(interpretedBus, 0xEC04);
+    Sh2Cpu interpreted = new(interpretedBus, "interpreter");
+    interpreted.Reset(LoopPc);
+    SetSh2Property(interpreted, nameof(Sh2Cpu.PR), ReturnPc);
+    for (int guard = 0; guard < 32 && interpreted.PC != ReturnPc; guard++)
+    {
+        interpreted.Step();
+    }
+
+    AssertEqual(ReturnPc, interpreted.PC);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadRoutine(fastBus, 0xEC04);
+    Sh2Cpu fast = new(fastBus, "fast");
+    fast.Reset(LoopPc);
+    SetSh2Property(fast, nameof(Sh2Cpu.PR), ReturnPc);
+    AssertTrue(fast.TryFastForwardMovImmediateDtBfRtsDelayLoop(128, out int cycles), "MOV #n,R12 DT/BF RTS delay helper should fast-forward");
+    AssertEqual((int)interpreted.Cycles, cycles);
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.R[12], fast.R[12]);
+    AssertEqual(interpreted.SR & 1u, fast.SR & 1u);
+    AssertEqual(interpreted.LastOpcode, fast.LastOpcode);
+    AssertEqual(interpreted.LastOpcodePc, fast.LastOpcodePc);
+
+    Sh2Cpu lowBudget = new(fastBus, "low-budget");
+    lowBudget.Reset(LoopPc);
+    SetSh2Property(lowBudget, nameof(Sh2Cpu.PR), ReturnPc);
+    AssertTrue(!lowBudget.TryFastForwardMovImmediateDtBfRtsDelayLoop(cycles - 1, out _), "insufficient budget should fall back to the interpreter");
+
+    SyntheticSh2Bus zeroBus = new();
+    LoadRoutine(zeroBus, 0xEC00);
+    Sh2Cpu zero = new(zeroBus, "zero");
+    zero.Reset(LoopPc);
+    SetSh2Property(zero, nameof(Sh2Cpu.PR), ReturnPc);
+    AssertTrue(!zero.TryFastForwardMovImmediateDtBfRtsDelayLoop(128, out _), "zero-count helper should not fast-forward");
+
+    SyntheticSh2Bus negativeBus = new();
+    LoadRoutine(negativeBus, 0xECFF);
+    Sh2Cpu negative = new(negativeBus, "negative");
+    negative.Reset(LoopPc);
+    SetSh2Property(negative, nameof(Sh2Cpu.PR), ReturnPc);
+    AssertTrue(!negative.TryFastForwardMovImmediateDtBfRtsDelayLoop(128, out _), "negative immediate helper should not fast-forward");
+}
+
+void ThirtyTwoXSh2WordMismatchDelaySubroutinePollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0A26;
+    const uint HelperPc = 0x0600_0BD2;
+    const uint PollAddress = 0x2600_0A04;
+
+    static void LoadRoutine(SyntheticSh2Bus bus)
+    {
+        bus.WriteInstructionWord(LoopPc + 0, 0x60E1); // MOV.W @R14,R0
+        bus.WriteInstructionWord(LoopPc + 2, 0x3D00); // CMP/EQ R0,R13
+        bus.WriteInstructionWord(LoopPc + 4, 0x8909); // BT exit
+        bus.WriteInstructionWord(LoopPc + 6, 0xB0D1); // BSR helper
+        bus.WriteInstructionWord(LoopPc + 8, 0x0009); // NOP
+        bus.WriteInstructionWord(LoopPc + 10, 0xAFF9); // BRA loop
+        bus.WriteInstructionWord(LoopPc + 12, 0x0009); // NOP
+        bus.WriteInstructionWord(HelperPc + 0, 0xEC04); // MOV #4,R12
+        bus.WriteInstructionWord(HelperPc + 2, 0x4C10); // DT R12
+        bus.WriteInstructionWord(HelperPc + 4, 0x8BFD); // BF helper loop
+        bus.WriteInstructionWord(HelperPc + 6, 0x000B); // RTS
+        bus.WriteInstructionWord(HelperPc + 8, 0x0009); // NOP
+        bus.WriteWord(PollAddress, 0);
+    }
+
+    static Sh2Cpu CreateCpu(SyntheticSh2Bus bus)
+    {
+        Sh2Cpu cpu = new(bus, "test");
+        cpu.Reset(LoopPc);
+        cpu.R[13] = 0x43;
+        cpu.R[14] = PollAddress;
+        return cpu;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    LoadRoutine(interpretedBus);
+    Sh2Cpu interpreted = CreateCpu(interpretedBus);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadRoutine(fastBus);
+    Sh2Cpu fast = CreateCpu(fastBus);
+    AssertTrue(
+        fast.TryFastForwardWordMismatchDelaySubroutinePollLoop(100, fastBus.TryReadWord, out int cycles),
+        "word mismatch delay-subroutine poll loop should fast-forward while the watched word does not match");
+
+    while (interpreted.Cycles < cycles)
+    {
+        interpreted.Step();
+    }
+
+    AssertEqual(interpreted.Cycles, fast.Cycles);
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.PR, fast.PR);
+    AssertEqual(interpreted.R[0], fast.R[0]);
+    AssertEqual(interpreted.R[12], fast.R[12]);
+    AssertEqual(interpreted.SR & 1u, fast.SR & 1u);
+    AssertEqual(interpreted.LastOpcode, fast.LastOpcode);
+    AssertEqual(interpreted.LastOpcodePc, fast.LastOpcodePc);
+
+    Sh2Cpu lowBudget = CreateCpu(fastBus);
+    AssertTrue(!lowBudget.TryFastForwardWordMismatchDelaySubroutinePollLoop(17, fastBus.TryReadWord, out _), "insufficient budget should fall back to the interpreter");
+
+    fastBus.WriteWord(PollAddress, 0x0043);
+    Sh2Cpu matching = CreateCpu(fastBus);
+    AssertTrue(!matching.TryFastForwardWordMismatchDelaySubroutinePollLoop(100, fastBus.TryReadWord, out _), "matching watched word should fall back so the loop exits normally");
 }
 
 void ThirtyTwoXSh2NopDtBfDelayLoopFastForward()
