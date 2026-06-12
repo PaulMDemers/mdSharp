@@ -968,6 +968,15 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("compute") &&
+                nextOpcode == 0x2EE8 &&
+                cpu.TryFastForwardChaotixBitPackLoop(fastPathCycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("compute") &&
                 (((nextOpcode & 0xF0FF) == 0x4000 ||
                     (nextOpcode & 0xF0FF) == 0x4024 ||
                     (nextOpcode & 0xF0FF) == 0x4010 ||

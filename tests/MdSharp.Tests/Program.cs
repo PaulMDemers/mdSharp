@@ -67,6 +67,7 @@ Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2Long
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 literal word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward);
+Run("32X SH-2 Chaotix bit pack loop fast-forward", ThirtyTwoXSh2ChaotixBitPackLoopFastForward);
 Run("32X SH-2 SHLL ROTCL DT BF/S ADD loop fast-forward", ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward);
 Run("32X SH-2 word displacement TST BT poll loop fast-forward", ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward);
 Run("32X SH-2 padded long TST BT poll loop fast-forward", ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward);
@@ -4854,6 +4855,82 @@ void ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward()
 
     bus.WriteWord(PollAddress, 0xFFFF);
     AssertTrue(!cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(300, out _), "negative loaded word should fall back so the loop can exit normally");
+}
+
+void ThirtyTwoXSh2ChaotixBitPackLoopFastForward()
+{
+    const uint LoopPc = 0x0600_085C;
+    const uint Source = 0x2600_1200;
+
+    static void LoadRoutine(SyntheticSh2Bus bus, uint loopPc)
+    {
+        ushort[] words =
+        [
+            0x2EE8, 0x8B03, 0x6D14, 0xEE08, 0x4D28, 0x4D18, 0x3CE6, 0x8F01,
+            0x6BC3, 0x6BE3, 0x3CB8, 0x4D00, 0x4024, 0x4B10, 0x8FFB, 0x7EFF,
+            0x2CC8, 0x8BED, 0x000B, 0x0009
+        ];
+
+        for (int i = 0; i < words.Length; i++)
+        {
+            bus.WriteInstructionWord(loopPc + (uint)(i * 2), words[i]);
+        }
+    }
+
+    static void Seed(SyntheticSh2Bus bus)
+    {
+        bus.WriteByte(Source, 0xA6);
+        bus.WriteByte(Source + 1, 0xC0);
+    }
+
+    static Sh2Cpu CreateCpu(SyntheticSh2Bus bus)
+    {
+        Sh2Cpu cpu = new(bus, "test");
+        cpu.Reset(LoopPc);
+        cpu.R[0] = 0x1234_5678;
+        cpu.R[1] = Source;
+        cpu.R[12] = 10;
+        cpu.R[14] = 0;
+        return cpu;
+    }
+
+    SyntheticSh2Bus interpretedBus = new();
+    LoadRoutine(interpretedBus, LoopPc);
+    Seed(interpretedBus);
+    Sh2Cpu interpreted = CreateCpu(interpretedBus);
+    for (int guard = 0; guard < 200; guard++)
+    {
+        interpreted.Step();
+        if (interpreted.PC == LoopPc)
+        {
+            break;
+        }
+    }
+
+    AssertEqual(LoopPc, interpreted.PC);
+
+    SyntheticSh2Bus fastBus = new();
+    LoadRoutine(fastBus, LoopPc);
+    Seed(fastBus);
+    Sh2Cpu fast = CreateCpu(fastBus);
+    AssertTrue(fast.TryFastForwardChaotixBitPackLoop(512, out int cycles), "Chaotix bit pack loop should fast-forward one non-final outer chunk");
+    AssertEqual((int)interpreted.Cycles, cycles);
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.R[0], fast.R[0]);
+    AssertEqual(interpreted.R[1], fast.R[1]);
+    AssertEqual(interpreted.R[11], fast.R[11]);
+    AssertEqual(interpreted.R[12], fast.R[12]);
+    AssertEqual(interpreted.R[13], fast.R[13]);
+    AssertEqual(interpreted.R[14], fast.R[14]);
+    AssertEqual(interpreted.SR & 1u, fast.SR & 1u);
+
+    Sh2Cpu rejected = CreateCpu(fastBus);
+    rejected.R[14] = 9;
+    AssertTrue(!rejected.TryFastForwardChaotixBitPackLoop(512, out _), "unexpected bit count state should fall back to the interpreter");
+
+    Sh2Cpu finalChunk = CreateCpu(fastBus);
+    finalChunk.R[12] = 8;
+    AssertTrue(!finalChunk.TryFastForwardChaotixBitPackLoop(512, out _), "final chunk should fall back so the routine exit is interpreted");
 }
 
 void ThirtyTwoXSh2ShllRotclDtBfsAddLoopFastForward()

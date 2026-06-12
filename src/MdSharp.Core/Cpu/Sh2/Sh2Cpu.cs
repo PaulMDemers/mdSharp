@@ -7322,6 +7322,99 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardChaotixBitPackLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        ReadOnlySpan<ushort> pattern =
+        [
+            0x2EE8, 0x8B03, 0x6D14, 0xEE08, 0x4D28, 0x4D18, 0x3CE6, 0x8F01,
+            0x6BC3, 0x6BE3, 0x3CB8, 0x4D00, 0x4024, 0x4B10, 0x8FFB, 0x7EFF,
+            0x2CC8, 0x8BED, 0x000B, 0x0009
+        ];
+
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            if (!peekBus.TryPeekWord(loopPc + (uint)(i * 2), out ushort opcode) ||
+                opcode != pattern[i])
+            {
+                return false;
+            }
+        }
+
+        if (R[12] == 0 ||
+            R[14] > 8)
+        {
+            return false;
+        }
+
+        uint r12 = R[12];
+        uint r14 = R[14];
+        uint availableBits = r14 == 0 ? 8 : r14;
+        if (r12 <= availableBits)
+        {
+            return false;
+        }
+
+        int setupCycles;
+        if (r14 == 0)
+        {
+            if (!peekBus.TryPeekByte(R[1], out byte sourceByte))
+            {
+                return false;
+            }
+
+            setupCycles = 6;
+            uint loaded = (uint)(int)(sbyte)sourceByte;
+            loaded <<= 16;
+            loaded <<= 8;
+            R[13] = loaded;
+            R[1]++;
+            r14 = 8;
+        }
+        else
+        {
+            setupCycles = 2;
+        }
+
+        uint count = r14;
+        int chunkCycles = checked(setupCycles + 4 + 1 + ((int)count * 5) + 2);
+        if (chunkCycles > maxCycles)
+        {
+            return false;
+        }
+
+        R[11] = count;
+        R[12] = r12 - count;
+        for (uint bit = 0; bit < count; bit++)
+        {
+            uint incoming = (R[13] & 0x8000_0000u) != 0 ? 1u : 0u;
+            R[13] <<= 1;
+            R[0] = (R[0] << 1) | incoming;
+            R[11]--;
+            r14--;
+        }
+
+        R[14] = r14;
+        SetT(false);
+        PC = loopPc;
+        cycles = chunkCycles;
+        Cycles += cycles;
+        LastOpcode = 0x8BED;
+        LastOpcodePc = loopPc + 0x22u;
+        return true;
+    }
+
     public bool TryFastForwardWordDisplacementTstBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
