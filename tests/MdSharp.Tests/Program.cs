@@ -4847,7 +4847,7 @@ void ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward()
     Sh2Cpu cpu = new(bus, "test");
     cpu.Reset(LoopPc + 6);
     AssertTrue(cpu.TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(303, out int cycles), "literal MOV.L/MOV.W/CMP-PZ/BT idle loop should coalesce one safe poll iteration while the loaded word is nonnegative");
-    AssertEqual(4, cycles);
+    AssertEqual(8, cycles);
     AssertEqual(LoopPc, cpu.PC);
     AssertEqual(0x0000_0012u, cpu.R[0]);
     AssertEqual(1u, cpu.SR & 1u);

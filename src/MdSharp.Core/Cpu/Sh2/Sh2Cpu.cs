@@ -7188,7 +7188,7 @@ Done:
     public bool TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(int maxCycles, out int cycles)
     {
         const int CyclesPerIteration = 4;
-        const int MaxBurstCycles = CyclesPerIteration;
+        const int MaxBurstCycles = CyclesPerIteration * 2;
         cycles = 0;
         if (maxCycles < CyclesPerIteration ||
             Halted ||
