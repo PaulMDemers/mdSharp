@@ -48,6 +48,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-comm-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-comm-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
+    Console.WriteLine("  mdsharp --32x-vdp-mode-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-sdram-watch <rom-file> <output.csv> [frames] [instructions-per-frame] [offset-start] [offset-end] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
@@ -419,6 +420,22 @@ if (args[0].Equals("--32x-diagnostic-trace", StringComparison.OrdinalIgnoreCase)
     int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? parsedStartFrame : 0;
     int maxEvents = args.Length > 6 && int.TryParse(args[6], out int parsedMaxEvents) ? parsedMaxEvents : 10_000;
     TraceThirtyTwoXDiagnostic(args[1], args[2], frames, instructionsPerFrame, startFrame, maxEvents);
+    return;
+}
+
+if (args[0].Equals("--32x-vdp-mode-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-vdp-mode-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? parsedStartFrame : 0;
+    int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? parsedMaxLines : 10_000;
+    TraceThirtyTwoXVdpMode(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines);
     return;
 }
 
@@ -4218,6 +4235,120 @@ void TraceThirtyTwoXDiagnostic(string romPath, string outputCsv, int frames, int
     device.FrameBufferAccessObserver = null;
     Console.WriteLine($"Wrote {emittedEvents:N0} 32X diagnostic trace row(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
+void TraceThirtyTwoXVdpMode(string romPath, string outputCsv, int frames, int instructionsPerFrame, int startFrame, int maxLines)
+{
+    CartridgeImage cartridge = CartridgeImage.FromFile(romPath);
+    if (!cartridge.Diagnostics.Requires32X)
+    {
+        Console.Error.WriteLine("The supplied ROM is not detected as a 32X cartridge.");
+        return;
+    }
+
+    MegaDrive machine = CreateMachineFromCartridge(cartridge);
+    machine.Reset();
+    ThirtyTwoXDevice device = machine.Bus.ThirtyTwoX ?? throw new InvalidOperationException("32X device was not attached.");
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8) { AutoFlush = true };
+    writer.WriteLine("frame,sequence,event,source,operation,address,offset,value,m68kPc,masterPc,slavePc,adapter,bitmap,mode,priority,lines240,fbctl,draw,display,swapPending,vblank,hblank,paletteNonzero,displayPayload,drawPayload");
+
+    int currentFrame = 0;
+    int sequence = 0;
+    int lines = 0;
+    ushort lastBitmap = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.BitmapModeOffset);
+    ushort lastFbctl = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+
+    void WriteRow(string eventKind, string source, string operation, ushort offset, ushort value)
+    {
+        if (currentFrame < startFrame || lines >= maxLines)
+        {
+            return;
+        }
+
+        ushort bitmap = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.BitmapModeOffset);
+        ushort fbctl = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+        uint address = source == "M68K"
+            ? ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + offset
+            : ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + offset;
+        writer.WriteLine(string.Join(
+            ',',
+            currentFrame.ToString(CultureInfo.InvariantCulture),
+            (++sequence).ToString(CultureInfo.InvariantCulture),
+            eventKind,
+            source,
+            operation,
+            $"${address:X8}",
+            $"${offset:X4}",
+            $"${value:X4}",
+            $"${machine.MainCpu.PC:X8}",
+            $"${device.MasterSh2.PC:X8}",
+            $"${device.SlaveSh2.PC:X8}",
+            $"${device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset):X4}",
+            $"${bitmap:X4}",
+            (bitmap & 0x03).ToString(CultureInfo.InvariantCulture),
+            ((bitmap & 0x0080) != 0 ? "true" : "false"),
+            ((bitmap & 0x0040) != 0 ? "true" : "false"),
+            $"${fbctl:X4}",
+            device.DrawFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            device.DisplayFrameBufferIndex.ToString(CultureInfo.InvariantCulture),
+            device.FrameBufferSwapPending ? "true" : "false",
+            device.VBlank ? "true" : "false",
+            device.HBlank ? "true" : "false",
+            CountNonzeroBytes(device.Palette).ToString(CultureInfo.InvariantCulture),
+            CountFramebufferPayloadNonzero(device.DisplayFrameBuffer).ToString(CultureInfo.InvariantCulture),
+            CountFramebufferPayloadNonzero(device.DrawFrameBuffer).ToString(CultureInfo.InvariantCulture)));
+        lines++;
+    }
+
+    device.VdpRegisterAccessObserver = access =>
+    {
+        ushort aligned = (ushort)(access.Offset & ~1);
+        if (!IsTraceWriteOperation(access.Operation) ||
+            (aligned != ThirtyTwoXHardwareProfile.BitmapModeOffset &&
+                aligned != ThirtyTwoXHardwareProfile.FrameBufferControlOffset))
+        {
+            return;
+        }
+
+        WriteRow("vdp", access.Source, access.Operation, access.Offset, access.Value);
+    };
+
+    int endFrame = startFrame + frames;
+    Console.WriteLine($"32X VDP mode trace: {Path.GetFileName(romPath)}, frames={frames:N0}, startFrame={startFrame:N0}, budget={instructionsPerFrame:N0}, max {maxLines:N0} row(s)");
+    for (currentFrame = 0; currentFrame < endFrame && lines < maxLines; currentFrame++)
+    {
+        machine.RunFrameCycles(instructionsPerFrame);
+
+        ushort bitmap = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.BitmapModeOffset);
+        ushort fbctl = SnapshotVdpRegister(device, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+        if (currentFrame >= startFrame && (bitmap != lastBitmap || fbctl != lastFbctl))
+        {
+            WriteRow("frame-change", "VDP", "STATE", ThirtyTwoXHardwareProfile.BitmapModeOffset, bitmap);
+        }
+
+        lastBitmap = bitmap;
+        lastFbctl = fbctl;
+    }
+
+    device.VdpRegisterAccessObserver = null;
+    Console.WriteLine($"Wrote {lines:N0} 32X VDP mode trace row(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine($"Master PC=${device.MasterSh2.PC:X8}; slave PC=${device.SlaveSh2.PC:X8}; M68K PC=${machine.MainCpu.PC:X8}");
+}
+
+ushort SnapshotVdpRegister(ThirtyTwoXDevice device, ushort offset)
+{
+    Action<ThirtyTwoXDevice.SystemRegisterAccessTrace>? observer = device.VdpRegisterAccessObserver;
+    device.VdpRegisterAccessObserver = null;
+    try
+    {
+        return device.ReadVdpRegisterWord(offset);
+    }
+    finally
+    {
+        device.VdpRegisterAccessObserver = observer;
+    }
 }
 
 void TraceThirtyTwoXSdramWatch(string romPath, string outputCsv, int frames, int instructionsPerFrame, int offsetStart, int offsetEnd, int startFrame, int maxLines)
