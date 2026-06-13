@@ -5116,6 +5116,57 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardWordLoadAndImmediateCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFourWordPollLoop(peekBus, [0, -2, -4, -6], out uint loopPc, out ushort loadOpcode, out ushort andOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            (andOpcode & 0xFF00) != 0xC900 ||
+            (compareOpcode & 0xF00F) != 0x3000 ||
+            (branchOpcode & 0xFF00) != 0x8B00)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int compareLeft = (compareOpcode >> 8) & 0x0F;
+        int compareRight = (compareOpcode >> 4) & 0x0F;
+        if (loadDestination != 0 ||
+            compareLeft != 0 && compareRight != 0 ||
+            !peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
+        {
+            return false;
+        }
+
+        int compareRegister = compareLeft == 0 ? compareRight : compareLeft;
+        uint maskedValue = (uint)(short)wordValue & (byte)andOpcode;
+        if (maskedValue == R[compareRegister])
+        {
+            return false;
+        }
+
+        R[0] = maskedValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
     public bool TryFastForwardGbrCmpEqBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;

@@ -78,6 +78,7 @@ Run("32X SH-2 GBR long masked OR compare BF poll loop fast-forward", ThirtyTwoXS
 Run("32X SH-2 word increment GBR zero BT poll loop fast-forward", ThirtyTwoXSh2WordIncrementGbrZeroBtPollLoopFastForward);
 Run("32X SH-2 word TST BT poll loop fast-forward", ThirtyTwoXSh2WordTstBtPollLoopFastForward);
 Run("32X SH-2 word TST BF poll loop fast-forward", ThirtyTwoXSh2WordTstBfPollLoopFastForward);
+Run("32X SH-2 word load AND immediate CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordLoadAndImmediateCmpEqBfPollLoopFastForward);
 Run("32X SH-2 byte TST BF poll loop fast-forward", ThirtyTwoXSh2ByteTstBfPollLoopFastForward);
 Run("32X SH-2 byte displacement TST immediate BT poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementTstImmediateBtPollLoopFastForward);
 Run("32X SH-2 peripheral byte TST immediate poll fast-forwards in device", ThirtyTwoXSh2PeripheralByteTstImmediatePollFastForward);
@@ -5178,6 +5179,37 @@ void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x7FFF);
     AssertTrue(!cpu.TryFastForwardWordTstBfPollLoop(300, out _), "clear masked TST poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2WordLoadAndImmediateCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_3960;
+    const uint Address = 0x2000_410A;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6011); // MOV.W @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0xC901); // AND #1,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x3200); // CMP/EQ R0,R2
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop
+    bus.WriteWord(Address, 0x0000);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = Address;
+    cpu.R[2] = 1;
+    AssertTrue(cpu.TryFastForwardWordLoadAndImmediateCmpEqBfPollLoop(500, out int cycles), "masked word compare poll should fast-forward while the masked value differs");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 6);
+    cpu.R[1] = Address;
+    cpu.R[2] = 1;
+    AssertTrue(cpu.TryFastForwardWordLoadAndImmediateCmpEqBfPollLoop(500, out _), "masked word compare poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(Address, 0x0001);
+    AssertTrue(!cpu.TryFastForwardWordLoadAndImmediateCmpEqBfPollLoop(500, out _), "matching masked word compare value should fall back and leave normally");
 }
 
 void ThirtyTwoXSh2WordDisplacementTstBtPollLoopFastForward()
