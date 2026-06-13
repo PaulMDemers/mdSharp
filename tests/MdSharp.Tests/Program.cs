@@ -1522,6 +1522,14 @@ void ThirtyTwoXDeviceShell()
     accessDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
     AssertTrue((accessDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should be visible while the 32X framebuffer is engaged during active display");
 
+    ThirtyTwoXDevice m68kVdpOwnershipDevice = new();
+    m68kVdpOwnershipDevice.Reset();
+    m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001, "M68K");
+    AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);
+    m68kVdpOwnershipDevice.GrantVdpAccessToSh2();
+    m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000, "M68K");
+    AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);
+
     ThirtyTwoXDevice latchDevice = new();
     latchDevice.Reset();
     latchDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);

@@ -3395,6 +3395,12 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (IsM68kVdpRegisterAccessDenied(source))
+        {
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "DENY-W8", (ushort)index, value));
+            return;
+        }
+
         _vdpRegisters[index] = value;
         VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "W8", (ushort)index, value));
         TrackVdpRegisterWrite((ushort)(index & ~1));
@@ -3410,6 +3416,12 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        if (IsM68kVdpRegisterAccessDenied(source))
+        {
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "DENY-W16", (ushort)index, value));
+            return;
+        }
+
         if ((index & ~1) == ThirtyTwoXHardwareProfile.BitmapModeOffset)
         {
             value = ApplyTvFormatBit(value);
@@ -3419,6 +3431,11 @@ public sealed class ThirtyTwoXDevice
         VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "W16", (ushort)index, value));
         TrackVdpRegisterWrite((ushort)(index & ~1));
         ApplyVdpRegisterSideEffects((ushort)(index & ~1), completedWordWrite: true);
+    }
+
+    private bool IsM68kVdpRegisterAccessDenied(string source)
+    {
+        return source == "M68K" && _vdpAccessGrantedToSh2;
     }
 
     private ushort ApplyTvFormatBit(ushort value)
