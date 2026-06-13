@@ -1143,6 +1143,21 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (((nextOpcode & 0xF00F) == 0x2001) ||
+                    ((nextOpcode & 0xF0FF) == 0x4010) ||
+                    ((nextOpcode & 0xFF00) == 0x8F00) ||
+                    ((nextOpcode & 0xF000) == 0x7000)) &&
+                cpu.TryFastForwardMovWStoreDtBfsAddImmediateLoop(
+                    Math.Min(cycleBudget, 4 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (IsSh2FastPathGroupEnabled("memscan") &&
                 nextOpcode == 0x613F &&
                 cpu.TryFastForwardWordTableSearchLoop(cycleBudget, _sh2WordReaders[cpuIndex], out fastCycles))
@@ -1943,6 +1958,18 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
+            if ((((nextOpcode & 0xF00F) == 0x6001) ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8D00 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xF000) == 0xE000) &&
+                cpu.TryFastForwardWordTstBtsPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if (((nextOpcode & 0xFF00) == 0x8900 ||
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     ((nextOpcode & 0xFF00) >= 0x8500 && (nextOpcode & 0xFF00) <= 0x85F0)) &&
@@ -1954,10 +1981,12 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (((nextOpcode & 0xF00F) == 0x6002 ||
+                    (nextOpcode & 0xF000) == 0x5000 ||
                     nextOpcode == 0x0009 ||
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
-                cpu.TryFastForwardLongTstBtPaddedPollLoop(cycleBudget, out fastCycles))
+                (cpu.TryFastForwardLongTstBtPollLoop(cycleBudget, out fastCycles) ||
+                    cpu.TryFastForwardLongTstBtPaddedPollLoop(cycleBudget, out fastCycles)))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -2013,6 +2042,16 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xFF00) == 0xC800 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardByteDisplacementTstImmediateBtPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if ((((nextOpcode & 0xFF00) == 0x8400) ||
+                    ((nextOpcode & 0xF00F) == 0x2008) ||
+                    ((nextOpcode & 0xFF00) == 0x8900)) &&
+                cpu.TryFastForwardByteDisplacementTstRegisterBtPollLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);

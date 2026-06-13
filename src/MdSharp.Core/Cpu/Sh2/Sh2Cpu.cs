@@ -3758,6 +3758,78 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovWStoreDtBfsAddImmediateLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
+    {
+        const int CyclesPerIteration = 4;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindMovWStoreDtBfsAddImmediateLoop(peekBus, out uint loopPc, out ushort storeOpcode, out ushort dtOpcode, out ushort branchOpcode, out ushort addOpcode))
+        {
+            return false;
+        }
+
+        int addressRegister = (storeOpcode >> 8) & 0x0F;
+        int sourceRegister = (storeOpcode >> 4) & 0x0F;
+        int countRegister = (dtOpcode >> 8) & 0x0F;
+        int addRegister = (addOpcode >> 8) & 0x0F;
+        if (addRegister != addressRegister)
+        {
+            return false;
+        }
+
+        uint count = R[countRegister];
+        if (count <= 1)
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint iterations = Math.Min(count - 1, maxIterations);
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        uint address = R[addressRegister];
+        ushort value = (ushort)R[sourceRegister];
+        int step = (sbyte)addOpcode;
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            if (!writeWord(address, value))
+            {
+                break;
+            }
+
+            completed++;
+            address = unchecked((uint)(address + step));
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[addressRegister] = address;
+        R[countRegister] = count - completed;
+        SetT(false);
+        PC = loopPc;
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardEmptyDescriptorSpanFillLoop(int maxCycles, Func<uint, ushort, bool> writeWord, out int cycles)
     {
         const int CyclesPerIteration = 6;
@@ -7626,6 +7698,74 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardWordTstBtsPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordDelayPollLoop(
+                peekBus,
+                [0, -2, -4, -6],
+                out uint loopPc,
+                out ushort loadOpcode,
+                out ushort testOpcode,
+                out ushort branchOpcode,
+                out ushort delayOpcode) ||
+            (loadOpcode & 0xF00F) != 0x6001 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8D00 ||
+            BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int testSource = (testOpcode >> 4) & 0x0F;
+        int testDestination = (testOpcode >> 8) & 0x0F;
+        if (testSource != loadDestination &&
+            testDestination != loadDestination)
+        {
+            return false;
+        }
+
+        int maskRegister = testSource == loadDestination ? testDestination : testSource;
+        if (!IsSafeRepeatedPollDelaySlot(delayOpcode, loadDestination, loadSource, maskRegister))
+        {
+            return false;
+        }
+
+        if (!peekBus.TryPeekWord(R[loadSource], out ushort wordValue))
+        {
+            return false;
+        }
+
+        uint loadedValue = (uint)(short)wordValue;
+        uint maskValue = maskRegister == loadDestination ? loadedValue : R[maskRegister];
+        if ((loadedValue & maskValue) != 0)
+        {
+            return false;
+        }
+
+        R[loadDestination] = loadedValue;
+        ApplyRepeatedPollDelaySlot(delayOpcode);
+        SetT(true);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardMovLiteralWordLoadCmpPzBtIdleLoop(int maxCycles, out int cycles)
     {
         const int CyclesPerIteration = 4;
@@ -8018,6 +8158,53 @@ Done:
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
+    public bool TryFastForwardLongTstBtPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode) ||
+            !TryReadLongLoadValue(peekBus, loadOpcode, out int loadDestination, out uint longValue) ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900 ||
+            BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        int testSource = (testOpcode >> 4) & 0x0F;
+        int testDestination = (testOpcode >> 8) & 0x0F;
+        if (testSource != loadDestination &&
+            testDestination != loadDestination)
+        {
+            return false;
+        }
+
+        int maskRegister = testSource == loadDestination ? testDestination : testSource;
+        uint maskValue = maskRegister == loadDestination ? longValue : R[maskRegister];
+        if ((longValue & maskValue) != 0)
+        {
+            return false;
+        }
+
+        R[loadDestination] = longValue;
+        SetT(true);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
         return true;
     }
 
@@ -8612,6 +8799,64 @@ Done:
         byte mask = (byte)testOpcode;
         bool zero = (byteValue & mask) == 0;
         if (!zero)
+        {
+            return false;
+        }
+
+        R[0] = (uint)(sbyte)byteValue;
+        SetT(true);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
+    public bool TryFastForwardByteDisplacementTstRegisterBtPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(
+                peekBus,
+                [0, -2, -4],
+                out uint loopPc,
+                out ushort loadOpcode,
+                out ushort testOpcode,
+                out ushort branchOpcode) ||
+            (loadOpcode & 0xFF00) != 0x8400 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        int testSource = (testOpcode >> 4) & 0x0F;
+        int testDestination = (testOpcode >> 8) & 0x0F;
+        if (testSource != 0 && testDestination != 0)
+        {
+            return false;
+        }
+
+        int maskRegister = testSource == 0 ? testDestination : testSource;
+        int baseRegister = (loadOpcode >> 4) & 0x0F;
+        uint address = R[baseRegister] + (uint)(loadOpcode & 0x0F);
+        if (!peekBus.TryPeekByte(address, out byte byteValue))
+        {
+            return false;
+        }
+
+        uint maskValue = R[maskRegister];
+        if ((byteValue & maskValue) != 0)
         {
             return false;
         }
@@ -11123,6 +11368,33 @@ Done:
         return branchPc + 4 + (uint)(((sbyte)branchOpcode) * 2);
     }
 
+    private static bool IsSafeRepeatedPollDelaySlot(ushort opcode, int loadDestination, int loadSource, int maskRegister)
+    {
+        if (opcode == 0x0009)
+        {
+            return true;
+        }
+
+        if ((opcode & 0xF000) == 0xE000)
+        {
+            int destination = (opcode >> 8) & 0x0F;
+            return destination != loadDestination &&
+                destination != loadSource &&
+                destination != maskRegister;
+        }
+
+        return false;
+    }
+
+    private void ApplyRepeatedPollDelaySlot(ushort opcode)
+    {
+        if ((opcode & 0xF000) == 0xE000)
+        {
+            int destination = (opcode >> 8) & 0x0F;
+            R[destination] = (uint)(sbyte)opcode;
+        }
+    }
+
     private static bool TryResolveAddBraNopDelayLoop(ISh2PeekBus peekBus, ref uint loopPc, out ushort addOpcode, out ushort branchOpcode)
     {
         addOpcode = 0;
@@ -11186,6 +11458,42 @@ Done:
         firstOpcode = 0;
         secondOpcode = 0;
         branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindThreeWordDelayPollLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort firstOpcode,
+        out ushort secondOpcode,
+        out ushort branchOpcode,
+        out ushort delayOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out firstOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out secondOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out branchOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out delayOpcode) &&
+                BranchByteTarget(candidate + 4, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        firstOpcode = 0;
+        secondOpcode = 0;
+        branchOpcode = 0;
+        delayOpcode = 0;
         return false;
     }
 
@@ -11278,6 +11586,45 @@ Done:
         secondOpcode = 0;
         thirdOpcode = 0;
         branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindMovWStoreDtBfsAddImmediateLoop(
+        ISh2PeekBus peekBus,
+        out uint loopPc,
+        out ushort storeOpcode,
+        out ushort dtOpcode,
+        out ushort branchOpcode,
+        out ushort addOpcode)
+    {
+        for (int offset = 0; offset >= -6; offset -= 2)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out storeOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out dtOpcode) &&
+                peekBus.TryPeekWord(candidate + 4, out branchOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out addOpcode) &&
+                (storeOpcode & 0xF00F) == 0x2001 &&
+                (dtOpcode & 0xF0FF) == 0x4010 &&
+                (branchOpcode & 0xFF00) == 0x8F00 &&
+                (addOpcode & 0xF000) == 0x7000 &&
+                BranchByteTarget(candidate + 4, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        storeOpcode = 0;
+        dtOpcode = 0;
+        branchOpcode = 0;
+        addOpcode = 0;
         return false;
     }
 
