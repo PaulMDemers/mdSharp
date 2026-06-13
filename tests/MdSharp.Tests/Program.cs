@@ -66,6 +66,7 @@ Run("32X SH-2 MOV literal byte CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2M
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
+Run("32X SH-2 long register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
 Run("32X SH-2 long CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2LongCmpEqBfPollLoopFastForward);
 Run("32X SH-2 padded long CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2PaddedLongCmpEqBfPollLoopFastForward);
@@ -4928,6 +4929,42 @@ void ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward()
 
     bus.WriteLong(FlagAddress, 0x1234_5679);
     AssertTrue(!cpu.TryFastForwardLongRegisterCmpEqBtPollLoop(512, out _), "changed long value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2LongRegisterCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0842;
+    const uint Base = 0xFFFF_FE04;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x5083); // MOV.L @(12,R8),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x3100); // CMP/EQ R0,R1
+    bus.WriteInstructionWord(LoopPc + 4, 0x8BFC); // BF loop while mismatched
+    bus.WriteLong(Base + 12, 0x1234_5678);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc + 4);
+    cpu.R[8] = Base;
+    cpu.R[1] = 0xFFFF_FE10;
+    AssertTrue(cpu.TryFastForwardLongRegisterCmpEqBfPollLoop(5000, out int cycles), "MOV.L displacement/CMP/EQ/BF register mismatch poll should fast-forward from branch");
+    AssertEqual(4096, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x1234_5678u, cpu.R[0]);
+    AssertEqual(0xFFFF_FE10u, cpu.R[1]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    Sh2Cpu comparePcCpu = new(bus, "test");
+    comparePcCpu.Reset(LoopPc + 2);
+    comparePcCpu.R[8] = Base;
+    comparePcCpu.R[1] = 0xFFFF_FE10;
+    AssertTrue(comparePcCpu.TryFastForwardLongRegisterCmpEqBfPollLoop(300, out _), "MOV.L displacement/CMP/EQ/BF register mismatch poll should fast-forward from compare");
+    AssertEqual(LoopPc, comparePcCpu.PC);
+
+    bus.WriteLong(Base + 12, 0xFFFF_FE10);
+    Sh2Cpu matchingCpu = new(bus, "test");
+    matchingCpu.Reset(LoopPc);
+    matchingCpu.R[8] = Base;
+    matchingCpu.R[1] = 0xFFFF_FE10;
+    AssertTrue(!matchingCpu.TryFastForwardLongRegisterCmpEqBfPollLoop(300, out _), "matching long register compare should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()

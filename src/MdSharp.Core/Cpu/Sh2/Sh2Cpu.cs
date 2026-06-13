@@ -7465,6 +7465,59 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardLongRegisterCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (compareOpcode & 0xF00F) != 0x3000 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            !TryReadLongLoadValue(peekBus, loadOpcode, out int loadDestination, out uint longValue))
+        {
+            return false;
+        }
+
+        int compareLeft = (compareOpcode >> 8) & 0x0F;
+        int compareRight = (compareOpcode >> 4) & 0x0F;
+        int compareRegister;
+        if (compareLeft == loadDestination)
+        {
+            compareRegister = compareRight;
+        }
+        else if (compareRight == loadDestination)
+        {
+            compareRegister = compareLeft;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (longValue == R[compareRegister])
+        {
+            return false;
+        }
+
+        R[loadDestination] = longValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
     public bool TryFastForwardWordCmpEqBfPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
