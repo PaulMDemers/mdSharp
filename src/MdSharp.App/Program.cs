@@ -8107,26 +8107,22 @@ bool UseRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge, ReadOnlyMemory<byte>
         }
     }
 
-    return CartridgePrefersRealThirtyTwoXSh2BiosBoot(cartridge) &&
-        masterSh2Bios.HasValue &&
+    return masterSh2Bios.HasValue &&
         !masterSh2Bios.Value.IsEmpty &&
         slaveSh2Bios.HasValue &&
-        !slaveSh2Bios.Value.IsEmpty;
+        !slaveSh2Bios.Value.IsEmpty &&
+        !CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(cartridge);
 }
 
-bool CartridgePrefersRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
+bool CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
 {
     string product = cartridge.Header.ProductCode.ToUpperInvariant();
     string domestic = cartridge.Header.DomesticName.ToUpperInvariant();
     string overseas = cartridge.Header.OverseasName.ToUpperInvariant();
 
-    return product is "GM MK-84700-00" or "GM T-8301B -00" or "GM MK-84519-00" ||
-        domestic.Contains("CYBER BRAWL", StringComparison.Ordinal) ||
-        overseas.Contains("COSMIC CARNAGE", StringComparison.Ordinal) ||
-        domestic.Contains("BRUTAL UNLEASHED", StringComparison.Ordinal) ||
-        overseas.Contains("BRUTAL UNLEASHED", StringComparison.Ordinal) ||
-        domestic.Contains("BLACKTHORNE", StringComparison.Ordinal) ||
-        overseas.Contains("BLACKTHORNE", StringComparison.Ordinal);
+    return product == "GM MK-84506-00" ||
+        domestic == "DOOM" ||
+        overseas == "DOOM";
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
