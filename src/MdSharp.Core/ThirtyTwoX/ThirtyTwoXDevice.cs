@@ -665,6 +665,13 @@ public sealed class ThirtyTwoXDevice
         _vdpAccessGrantedToSh2 = true;
     }
 
+    private void GrantVdpAccessToM68k()
+    {
+        _vdpAccessGrantedToSh2 = false;
+        ushort adapterControl = ReadBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.AdapterControlOffset);
+        WriteBigEndianWord(_systemRegisters, ThirtyTwoXHardwareProfile.AdapterControlOffset, (ushort)(adapterControl & ~AdapterControlVdpAccessSh2));
+    }
+
     public void ResetSh2(uint masterPc = ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart, uint slavePc = ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart)
     {
         Array.Clear(_sh2PeripheralRegisters[0]);
@@ -3329,6 +3336,7 @@ public sealed class ThirtyTwoXDevice
         UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
         TrackBootRomChecksumHostClear(aligned, ReadBigEndianWord(_systemRegisters, aligned));
         PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
+        CompleteHiddenPostStartBootAfterHostClear((ushort)index, 1, value);
     }
 
     public void WriteSystemRegisterWord(ushort offset, ushort value)
@@ -3365,6 +3373,8 @@ public sealed class ThirtyTwoXDevice
         PublishBootRomChecksumAfterHostClear(aligned);
         RetireBootRomSixtyEightUpReadyOnHostWrite(aligned, value);
         PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
+        CompleteHiddenPostStartBootAfterHostClear(aligned, 2, value);
+        AckLateHiddenPostStartHostReady(aligned, value);
     }
 
     public byte ReadVdpRegisterByte(ushort offset, string source = "VDP")
@@ -3379,8 +3389,9 @@ public sealed class ThirtyTwoXDevice
         if (aligned == ThirtyTwoXHardwareProfile.FrameBufferControlOffset)
         {
             ushort word = ReadVdpRegisterWord(aligned, source);
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word));
-            return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
+            byte readValue = (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, readValue));
+            return readValue;
         }
 
         if (aligned == ThirtyTwoXHardwareProfile.BitmapModeOffset)
@@ -3489,10 +3500,26 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsM68kVdpRegisterAccessDenied(string source, ushort alignedOffset)
     {
+        if (source == "M68K" &&
+            alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset &&
+            IsHiddenPostStartBootVdpControlHandoff())
+        {
+            return false;
+        }
+
         return source == "M68K" &&
             _vdpAccessGrantedToSh2 &&
             (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
                 alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+    }
+
+    private bool IsHiddenPostStartBootVdpControlHandoff()
+    {
+        return _bootRomPostStartSignatureHiddenFromSh2 &&
+            !_bootRomHandshakePending &&
+            !_bootRomLaunchPending &&
+            MasterSh2.PC is >= 0x0600_0890 and <= 0x0600_089C &&
+            SlaveSh2.PC == 0x0600_0DCC;
     }
 
     private ushort ApplyTvFormatBit(ushort value)
@@ -4931,6 +4958,7 @@ public sealed class ThirtyTwoXDevice
         TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "R16", aligned, value);
         ApplyDeferredSh2CommunicationClearAfterRead(aligned, (byte)(value >> 8));
         ApplyDeferredSh2CommunicationClearAfterRead((ushort)(aligned + 1), (byte)value);
+        RetireLateHiddenPostStartHostMdOkAfterSh2Read(aligned, value, cpuIndex);
         SyncOtherSh2ForCommunicationAccess(aligned, cpuIndex);
         return value;
     }
@@ -5053,6 +5081,7 @@ public sealed class ThirtyTwoXDevice
         CancelBootRomReadbackOnSh2DataWrite((ushort)(aligned + 1), (byte)value);
         ApplySystemRegisterSideEffects(aligned, allowAdapterControl: false);
         TryCompleteBootRomPeerReadyProbe(aligned, previousWord, value, cpuIndex);
+        RetireM68kCommandBusyAfterSh2CommandAccept(aligned, value, cpuIndex);
         TryRunDreqDma();
     }
 
@@ -5419,6 +5448,7 @@ public sealed class ThirtyTwoXDevice
         _bootRomSignatureReadbackActive = false;
         _bootRomPostStartSignatureHiddenFromSh2 = !ShouldExposePostStartSignatureToSh2();
         PublishBootRomChecksumAfterHostClear((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 8));
+        PublishHiddenPostStartBootReady();
     }
 
     private bool ShouldExposePostStartSignatureToSh2()
@@ -5801,6 +5831,122 @@ public sealed class ThirtyTwoXDevice
         _m68kCommunicationDeferredSh2ClearBytes[15] = false;
         _bootRomSixtyEightUpPending = false;
         _bootRomSixtyEightUpReadyHiddenFromSh2 = true;
+    }
+
+    private void CompleteHiddenPostStartBootAfterHostClear(ushort offset, int bytes, uint value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        int relative = (offset & (SystemRegisterBytes - 1)) - comm;
+        if (value != 0 ||
+            !_bootRomPostStartSignaturePending ||
+            !_bootRomPostStartSignatureHiddenFromSh2 ||
+            _bootRomLaunchPending ||
+            relative < 0 ||
+            relative + bytes < BootRomCommunicationSignature.Length ||
+            relative >= BootRomCommunicationSignature.Length ||
+            _systemRegisters[comm + 12] != 0 ||
+            _systemRegisters[comm + 13] != 0 ||
+            _systemRegisters[comm + 14] != 0 ||
+            _systemRegisters[comm + 15] != 0)
+        {
+            return;
+        }
+
+        PublishHiddenPostStartBootReady();
+        RetirePostStartSignatureAfterReadyTokenHostClear();
+    }
+
+    private void AckLateHiddenPostStartHostReady(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (!_bootRomPostStartSignatureHiddenFromSh2 ||
+            _bootRomHandshakePending ||
+            _bootRomLaunchPending ||
+            offset != comm + 14 ||
+            value != 0x4F4B ||
+            ReadBigEndianWord(_systemRegisters, comm + 12) != 0x475F ||
+            MasterSh2.PC is < 0x0600_0890 or > 0x0600_089C ||
+            SlaveSh2.PC != 0x0600_0DCC)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 12, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 14, 0);
+        ClearM68kCommunicationTrackingForWord(12);
+        ClearM68kCommunicationTrackingForWord(14);
+        _bootRomPostStartSignaturePending = false;
+        _bootRomPostStartSignatureHiddenFromSh2 = false;
+        _bootRomPostStartSignatureReadMask = 0;
+        _bootRomPostStartHostClearProtectMask = 0;
+        TraceSystemRegisterAccess("BOOT", "W32", (ushort)(comm + 12), 0);
+    }
+
+    private void RetireLateHiddenPostStartHostMdOkAfterSh2Read(ushort offset, ushort value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (cpuIndex != 0 ||
+            offset != comm + 2 ||
+            value != 0x4F4B ||
+            ReadBigEndianWord(_systemRegisters, comm) != 0x4D5F ||
+            MasterSh2.PC is < 0x0600_0898 or > 0x0600_08A2 ||
+            SlaveSh2.PC != 0x0600_0DCC)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 2, 0);
+        ClearM68kCommunicationTrackingForWord(0);
+        ClearM68kCommunicationTrackingForWord(2);
+        TraceSystemRegisterAccess("BOOT", "W32", comm, 0);
+    }
+
+    private void RetireM68kCommandBusyAfterSh2CommandAccept(ushort offset, ushort value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (cpuIndex != 0 ||
+            offset != comm + 4 ||
+            value != 0 ||
+            ReadBigEndianWord(_systemRegisters, comm) == 0)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm, 0);
+        if (ReadBigEndianWord(_systemRegisters, comm + 6) == 1)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 6, 0);
+            ClearM68kCommunicationTrackingForWord(6);
+            TraceSystemRegisterAccess("MSH2", "W16", (ushort)(comm + 6), 0);
+        }
+
+        ClearM68kCommunicationTrackingForWord(0);
+        TraceSystemRegisterAccess("MSH2", "W16", comm, 0);
+    }
+
+    private void PublishHiddenPostStartBootReady()
+    {
+        if (!_bootRomPostStartSignatureHiddenFromSh2)
+        {
+            return;
+        }
+
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (_systemRegisters[comm + 12] != 0 ||
+            _systemRegisters[comm + 13] != 0 ||
+            _systemRegisters[comm + 14] != 0 ||
+            _systemRegisters[comm + 15] != 0)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 12, 0x475F);
+        WriteBigEndianWord(_systemRegisters, comm + 14, 0x4F4B);
+        ClearM68kCommunicationTrackingForWord(12);
+        ClearM68kCommunicationTrackingForWord(14);
+        GrantVdpAccessToM68k();
+        TransferSh2SciByte(sourceCpuIndex: 0, value: 0);
     }
 
     private void RetireBootRomSixtyEightUpReadyOnHostWrite(ushort offset, ushort value)
