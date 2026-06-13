@@ -3447,7 +3447,7 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        if (IsM68kVdpRegisterAccessDenied(source))
+        if (IsM68kVdpRegisterAccessDenied(source, (ushort)(index & ~1)))
         {
             VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "DENY-W8", (ushort)index, value));
             return;
@@ -3468,7 +3468,7 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        if (IsM68kVdpRegisterAccessDenied(source))
+        if (IsM68kVdpRegisterAccessDenied(source, (ushort)(index & ~1)))
         {
             VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "DENY-W16", (ushort)index, value));
             return;
@@ -3485,9 +3485,12 @@ public sealed class ThirtyTwoXDevice
         ApplyVdpRegisterSideEffects((ushort)(index & ~1), completedWordWrite: true);
     }
 
-    private bool IsM68kVdpRegisterAccessDenied(string source)
+    private bool IsM68kVdpRegisterAccessDenied(string source, ushort alignedOffset)
     {
-        return source == "M68K" && _vdpAccessGrantedToSh2;
+        return source == "M68K" &&
+            _vdpAccessGrantedToSh2 &&
+            (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
+                alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
     }
 
     private ushort ApplyTvFormatBit(ushort value)

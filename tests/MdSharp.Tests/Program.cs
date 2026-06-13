@@ -481,6 +481,10 @@ void ThirtyTwoXDeviceShell()
     device.WritePaletteWord(0x0040, 0x1357, "M68K");
     AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
     WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8000);
+    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001, "M68K");
+    AssertEqual((ushort)0x2000, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset, 0x0004, "M68K");
+    AssertEqual((ushort)0x0004, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset));
     device.WritePaletteWord(0x0042, 0x8000, "M68K");
     AssertEqual((ushort)0x8000, device.ReadPaletteWord(0x0042));
     device.WritePaletteWord(0x0040, 0x0000, "M68K");
