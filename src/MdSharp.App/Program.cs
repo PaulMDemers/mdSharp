@@ -8084,10 +8084,10 @@ MegaDrive CreateMachineFromCartridge(CartridgeImage cartridge)
         m68kBios,
         masterSh2Bios,
         slaveSh2Bios,
-        UseRealThirtyTwoXSh2BiosBoot(masterSh2Bios, slaveSh2Bios));
+        UseRealThirtyTwoXSh2BiosBoot(cartridge, masterSh2Bios, slaveSh2Bios));
 }
 
-bool UseRealThirtyTwoXSh2BiosBoot(ReadOnlyMemory<byte>? masterSh2Bios, ReadOnlyMemory<byte>? slaveSh2Bios)
+bool UseRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge, ReadOnlyMemory<byte>? masterSh2Bios, ReadOnlyMemory<byte>? slaveSh2Bios)
 {
     string? value = Environment.GetEnvironmentVariable("MDSHARP_32X_REAL_SH2_BIOS_BOOT");
     if (value is not null)
@@ -8107,10 +8107,26 @@ bool UseRealThirtyTwoXSh2BiosBoot(ReadOnlyMemory<byte>? masterSh2Bios, ReadOnlyM
         }
     }
 
-    return masterSh2Bios.HasValue &&
+    return CartridgePrefersRealThirtyTwoXSh2BiosBoot(cartridge) &&
+        masterSh2Bios.HasValue &&
         !masterSh2Bios.Value.IsEmpty &&
         slaveSh2Bios.HasValue &&
         !slaveSh2Bios.Value.IsEmpty;
+}
+
+bool CartridgePrefersRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
+{
+    string product = cartridge.Header.ProductCode.ToUpperInvariant();
+    string domestic = cartridge.Header.DomesticName.ToUpperInvariant();
+    string overseas = cartridge.Header.OverseasName.ToUpperInvariant();
+
+    return product is "GM MK-84700-00" or "GM T-8301B -00" or "GM MK-84519-00" ||
+        domestic.Contains("CYBER BRAWL", StringComparison.Ordinal) ||
+        overseas.Contains("COSMIC CARNAGE", StringComparison.Ordinal) ||
+        domestic.Contains("BRUTAL UNLEASHED", StringComparison.Ordinal) ||
+        overseas.Contains("BRUTAL UNLEASHED", StringComparison.Ordinal) ||
+        domestic.Contains("BLACKTHORNE", StringComparison.Ordinal) ||
+        overseas.Contains("BLACKTHORNE", StringComparison.Ordinal);
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
