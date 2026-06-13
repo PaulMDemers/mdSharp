@@ -6401,18 +6401,10 @@ public sealed class ThirtyTwoXDevice
 
     private void SelectFrameBuffer(int requestedDisplayFrameBuffer)
     {
-        if (_frameBufferSwapPending)
-        {
-            ushort control = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
-            control = (ushort)((control & ~0x0001) | _requestedDisplayFrameBufferIndex);
-            WriteBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset, control);
-            return;
-        }
-
         _requestedDisplayFrameBufferIndex = requestedDisplayFrameBuffer & 0x01;
         _pendingDrawFrameBufferIndex = _requestedDisplayFrameBufferIndex ^ 1;
         _frameBufferSwapPending = _requestedDisplayFrameBufferIndex != _activeDisplayFrameBufferIndex;
-        if (IsLatchedBlankMode())
+        if (CanSwitchFrameBufferNow())
         {
             CompletePendingFrameBufferSwap();
         }
@@ -6440,8 +6432,7 @@ public sealed class ThirtyTwoXDevice
 
     private ushort BuildFrameBufferControlStatus()
     {
-        ushort raw = ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
-        ushort status = (ushort)(raw & FrameBufferStatusFrameBufferSelect);
+        ushort status = (ushort)(_activeDisplayFrameBufferIndex & FrameBufferStatusFrameBufferSelect);
         if (IsFrameBufferEngaged())
         {
             status |= FrameBufferStatusFrameBufferDenied;
