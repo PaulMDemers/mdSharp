@@ -5034,6 +5034,88 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardPaddedGbrCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFourWordPollLoop(peekBus, [0, -2, -4, -6], out uint loopPc, out ushort loadOpcode, out ushort nopOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            nopOpcode != 0x0009 ||
+            (compareOpcode & 0xFF00) != 0x8800 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            !TryReadGbrLoadValue(peekBus, loadOpcode, out uint value))
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = value == (uint)(sbyte)immediate;
+        if (equal)
+        {
+            return false;
+        }
+
+        R[0] = value;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
+    public bool TryFastForwardPaddedGbrTstBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFourWordPollLoop(peekBus, [0, -2, -4, -6], out uint loopPc, out ushort loadOpcode, out ushort nopOpcode, out ushort testOpcode, out ushort branchOpcode) ||
+            nopOpcode != 0x0009 ||
+            (testOpcode & 0xF00F) != 0x2008 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            !TryReadGbrLoadValue(peekBus, loadOpcode, out uint value))
+        {
+            return false;
+        }
+
+        int testLeft = (testOpcode >> 8) & 0x0F;
+        int testRight = (testOpcode >> 4) & 0x0F;
+        if (testLeft != 0 ||
+            testRight != 0 ||
+            value == 0)
+        {
+            return false;
+        }
+
+        R[0] = value;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
     public bool TryFastForwardGbrCmpEqBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -10964,6 +11046,41 @@ Done:
         firstOpcode = 0;
         secondOpcode = 0;
         branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryReadGbrLoadValue(ISh2PeekBus peekBus, ushort loadOpcode, out uint value)
+    {
+        if ((loadOpcode & 0xFF00) == 0xC400)
+        {
+            uint address = GBR + (uint)(loadOpcode & 0xFF);
+            if (peekBus.TryPeekByte(address, out byte byteValue))
+            {
+                value = (uint)(sbyte)byteValue;
+                return true;
+            }
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC500)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 2);
+            if (peekBus.TryPeekWord(address, out ushort wordValue))
+            {
+                value = (uint)(short)wordValue;
+                return true;
+            }
+        }
+        else if ((loadOpcode & 0xFF00) == 0xC600)
+        {
+            uint address = GBR + (uint)((loadOpcode & 0xFF) * 4);
+            if (peekBus.TryPeekWord(address, out ushort high) &&
+                peekBus.TryPeekWord(address + 2, out ushort low))
+            {
+                value = ((uint)high << 16) | low;
+                return true;
+            }
+        }
+
+        value = 0;
         return false;
     }
 

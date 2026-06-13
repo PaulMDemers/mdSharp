@@ -98,6 +98,8 @@ Run("32X SH-2 long difference poll fast-forward", ThirtyTwoXSh2LongDifferencePol
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 padded GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2PaddedGbrCmpEqBfPollLoopFastForward);
+Run("32X SH-2 padded GBR TST BF poll loop fast-forward", ThirtyTwoXSh2PaddedGbrTstBfPollLoopFastForward);
 Run("32X SH-2 GBR CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward);
 Run("32X SH-2 GBR word TST BF/S delay poll loop fast-forward", ThirtyTwoXSh2GbrWordTstBfsDelayPollLoopFastForward);
 Run("32X SH-2 GBR register CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrRegisterCmpEqBfPollLoopFastForward);
@@ -6376,6 +6378,64 @@ void ThirtyTwoXSh2GbrCmpEqBtPollLoopFastForward()
 
     bus.WriteWord(Gbr + 44, 0x0001);
     AssertTrue(!cpu.TryFastForwardGbrCmpEqBtPollLoop(500, out _), "nonmatching GBR CMP/EQ BT value should fall back to the interpreter");
+}
+
+void ThirtyTwoXSh2PaddedGbrCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0C6A;
+    const uint Gbr = 0x0600_D4F8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC511); // MOV.W @(34,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 4, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop
+    bus.WriteWord(Gbr + 34, 0x0001);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardPaddedGbrCmpEqBfPollLoop(500, out int cycles), "padded GBR CMP/EQ BF poll should fast-forward while the value differs");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 6);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardPaddedGbrCmpEqBfPollLoop(500, out _), "padded GBR CMP/EQ BF poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteWord(Gbr + 34, 0x0000);
+    AssertTrue(!cpu.TryFastForwardPaddedGbrCmpEqBfPollLoop(500, out _), "matching padded GBR CMP/EQ value should fall back and leave normally");
+}
+
+void ThirtyTwoXSh2PaddedGbrTstBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_05D0;
+    const uint Gbr = 0x0600_D4F8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xC608); // MOV.L @(32,GBR),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 4, 0x2008); // TST R0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop
+    bus.WriteLong(Gbr + 32, 0x0000_0001);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardPaddedGbrTstBfPollLoop(500, out int cycles), "padded GBR TST BF poll should fast-forward while the loaded value is non-zero");
+    AssertEqual(500, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(1u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.SetGbr(Gbr);
+    AssertTrue(cpu.TryFastForwardPaddedGbrTstBfPollLoop(500, out _), "padded GBR TST BF poll should fast-forward from the test instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteLong(Gbr + 32, 0x0000_0000);
+    AssertTrue(!cpu.TryFastForwardPaddedGbrTstBfPollLoop(500, out _), "zero padded GBR TST value should fall back and leave normally");
 }
 
 void ThirtyTwoXSh2GbrWordTstBfsDelayPollLoopFastForward()

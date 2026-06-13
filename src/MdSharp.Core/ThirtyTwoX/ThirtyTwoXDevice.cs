@@ -1707,6 +1707,28 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (((nextOpcode & 0xFC00) == 0xC400 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xFF00) == 0x8800 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardPaddedGbrCmpEqBfPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xFC00) == 0xC400 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardPaddedGbrTstBfPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xFC00) == 0xC400 ||
                     (nextOpcode & 0xFF00) == 0x8800 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardGbrCmpEqBtPollLoop(cycleBudget, out fastCycles))
