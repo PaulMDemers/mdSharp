@@ -8075,21 +8075,42 @@ MegaDrive CreateMachine(string romPath)
 
 MegaDrive CreateMachineFromCartridge(CartridgeImage cartridge)
 {
+    ReadOnlyMemory<byte>? m68kBios = TryLoadThirtyTwoXM68kBios();
+    ReadOnlyMemory<byte>? masterSh2Bios = TryLoadThirtyTwoXMasterSh2Bios();
+    ReadOnlyMemory<byte>? slaveSh2Bios = TryLoadThirtyTwoXSlaveSh2Bios();
     return new MegaDrive(
         cartridge,
         IsPalRegion(cartridge),
-        TryLoadThirtyTwoXM68kBios(),
-        TryLoadThirtyTwoXMasterSh2Bios(),
-        TryLoadThirtyTwoXSlaveSh2Bios(),
-        UseRealThirtyTwoXSh2BiosBoot());
+        m68kBios,
+        masterSh2Bios,
+        slaveSh2Bios,
+        UseRealThirtyTwoXSh2BiosBoot(masterSh2Bios, slaveSh2Bios));
 }
 
-bool UseRealThirtyTwoXSh2BiosBoot()
+bool UseRealThirtyTwoXSh2BiosBoot(ReadOnlyMemory<byte>? masterSh2Bios, ReadOnlyMemory<byte>? slaveSh2Bios)
 {
     string? value = Environment.GetEnvironmentVariable("MDSHARP_32X_REAL_SH2_BIOS_BOOT");
-    return value is "1" ||
-        value?.Equals("true", StringComparison.OrdinalIgnoreCase) == true ||
-        value?.Equals("yes", StringComparison.OrdinalIgnoreCase) == true;
+    if (value is not null)
+    {
+        if (value is "1" ||
+            value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("yes", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (value is "0" ||
+            value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("no", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+    }
+
+    return masterSh2Bios.HasValue &&
+        !masterSh2Bios.Value.IsEmpty &&
+        slaveSh2Bios.HasValue &&
+        !slaveSh2Bios.Value.IsEmpty;
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
