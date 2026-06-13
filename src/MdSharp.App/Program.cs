@@ -8120,9 +8120,15 @@ bool CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
     string domestic = cartridge.Header.DomesticName.ToUpperInvariant();
     string overseas = cartridge.Header.OverseasName.ToUpperInvariant();
 
-    return product == "GM MK-84506-00" ||
+    return product is "GM MK-84506-00" or "GM T-04803F-00" or "GM MK-84701-00" or "GM G-XXXX   00" ||
         domestic == "DOOM" ||
-        overseas == "DOOM";
+        overseas == "DOOM" ||
+        domestic.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
+        overseas.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
+        domestic.Contains("VIRTUA FIGHTER", StringComparison.Ordinal) ||
+        overseas.Contains("VIRTUA FIGHTER", StringComparison.Ordinal) ||
+        domestic.Contains("MARS TEST PROGRAM", StringComparison.Ordinal) ||
+        overseas.Contains("MARS TEST PROGRAM", StringComparison.Ordinal);
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
