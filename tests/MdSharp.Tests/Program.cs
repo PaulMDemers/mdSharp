@@ -67,6 +67,8 @@ Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPo
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward);
+Run("32X SH-2 long CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2LongCmpEqBfPollLoopFastForward);
+Run("32X SH-2 padded long CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2PaddedLongCmpEqBfPollLoopFastForward);
 Run("32X SH-2 word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 literal word load CMP/PZ BT idle loop fast-forward", ThirtyTwoXSh2MovLiteralWordLoadCmpPzBtIdleLoopFastForward);
 Run("32X SH-2 Chaotix bit pack loop fast-forward", ThirtyTwoXSh2ChaotixBitPackLoopFastForward);
@@ -4941,6 +4943,63 @@ void ThirtyTwoXSh2WordCmpEqBfPollLoopFastForward()
 
     bus.WriteWord(FlagAddress, 0);
     AssertTrue(!cpu.TryFastForwardWordCmpEqBfPollLoop(300, out _), "matching compact poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2LongCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0588;
+    const uint Base = 0x2000_4000;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x5019); // MOV.L @(36,R1),R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8BFC); // BF loop while nonzero
+    bus.WriteLong(Base + 36, 0x535F_4F4B);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = Base;
+    AssertTrue(cpu.TryFastForwardLongCmpEqBfPollLoop(5000, out int cycles), "MOV.L displacement/CMP/EQ/BF mismatch poll should fast-forward");
+    AssertEqual(4096, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x535F_4F4Bu, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    cpu.R[1] = Base;
+    AssertTrue(cpu.TryFastForwardLongCmpEqBfPollLoop(300, out _), "MOV.L displacement/CMP/EQ/BF poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteLong(Base + 36, 0);
+    AssertTrue(!cpu.TryFastForwardLongCmpEqBfPollLoop(300, out _), "matching long compare value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2PaddedLongCmpEqBfPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_04C4;
+    const uint Address = 0x2600_04F8;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0x6012); // MOV.L @R1,R0
+    bus.WriteInstructionWord(LoopPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(LoopPc + 4, 0x88FF); // CMP/EQ #-1,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x8BFB); // BF loop while not -1
+    bus.WriteLong(Address, 0);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    cpu.R[1] = Address;
+    AssertTrue(cpu.TryFastForwardPaddedLongCmpEqBfPollLoop(5000, out int cycles), "padded MOV.L/CMP/EQ/BF mismatch poll should fast-forward");
+    AssertEqual(4096, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 6);
+    cpu.R[1] = Address;
+    AssertTrue(cpu.TryFastForwardPaddedLongCmpEqBfPollLoop(300, out _), "padded MOV.L/CMP/EQ/BF poll should fast-forward from the branch instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteLong(Address, 0xFFFF_FFFF);
+    AssertTrue(!cpu.TryFastForwardPaddedLongCmpEqBfPollLoop(300, out _), "matching padded long compare value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordLoadCmpPzBtIdleLoopFastForward()

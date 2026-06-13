@@ -7440,6 +7440,95 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardLongCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            (compareOpcode & 0xFF00) != 0x8800 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            !TryReadLongLoadValue(peekBus, loadOpcode, out int loadDestination, out uint longValue))
+        {
+            return false;
+        }
+
+        if (loadDestination != 0)
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = longValue == (uint)(int)(sbyte)immediate;
+        if (equal)
+        {
+            return false;
+        }
+
+        R[loadDestination] = longValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 4;
+        return true;
+    }
+
+    public bool TryFastForwardPaddedLongCmpEqBfPollLoop(int maxCycles, out int cycles)
+    {
+        const int MaxBurstCycles = 4096;
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        if (!TryFindFourWordPollLoop(peekBus, [0, -2, -4, -6], out uint loopPc, out ushort loadOpcode, out ushort nopOpcode, out ushort compareOpcode, out ushort branchOpcode) ||
+            nopOpcode != 0x0009 ||
+            (compareOpcode & 0xFF00) != 0x8800 ||
+            (branchOpcode & 0xFF00) != 0x8B00 ||
+            !TryReadLongLoadValue(peekBus, loadOpcode, out int loadDestination, out uint longValue))
+        {
+            return false;
+        }
+
+        if (loadDestination != 0)
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        bool equal = longValue == (uint)(int)(sbyte)immediate;
+        if (equal)
+        {
+            return false;
+        }
+
+        R[loadDestination] = longValue;
+        SetT(false);
+        PC = loopPc;
+        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
     public bool TryFastForwardWordLoadCmpPzBtIdleLoop(int maxCycles, out int cycles)
     {
         const int CyclesPerIteration = 3;
@@ -11132,6 +11221,27 @@ Done:
         }
 
         value = 0;
+        return false;
+    }
+
+    private bool TryReadLongLoadValue(ISh2PeekBus peekBus, ushort loadOpcode, out int destination, out uint value)
+    {
+        destination = (loadOpcode >> 8) & 0x0F;
+        value = 0;
+
+        if ((loadOpcode & 0xF00F) == 0x6002)
+        {
+            int source = (loadOpcode >> 4) & 0x0F;
+            return TryPeekLong(peekBus, R[source], out value);
+        }
+
+        if ((loadOpcode & 0xF000) == 0x5000)
+        {
+            int source = (loadOpcode >> 4) & 0x0F;
+            uint address = R[source] + (uint)((loadOpcode & 0x0F) * 4);
+            return TryPeekLong(peekBus, address, out value);
+        }
+
         return false;
     }
 
