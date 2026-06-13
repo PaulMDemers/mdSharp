@@ -3313,31 +3313,31 @@ public sealed class ThirtyTwoXDevice
         PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
     }
 
-    public byte ReadVdpRegisterByte(ushort offset)
+    public byte ReadVdpRegisterByte(ushort offset, string source = "VDP")
     {
         ushort aligned = (ushort)(offset & ~1);
         if (!IsDefinedVdpRegisterOffset(aligned))
         {
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R8", offset, 0));
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, 0));
             return 0;
         }
 
         if (aligned == ThirtyTwoXHardwareProfile.FrameBufferControlOffset)
         {
-            ushort word = ReadVdpRegisterWord(aligned);
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R8", offset, (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word));
+            ushort word = ReadVdpRegisterWord(aligned, source);
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word));
             return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
         }
 
         if (aligned == ThirtyTwoXHardwareProfile.BitmapModeOffset)
         {
-            ushort word = ReadVdpRegisterWord(aligned);
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R8", offset, (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word));
+            ushort word = ReadVdpRegisterWord(aligned, source);
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word));
             return (offset & 1) == 0 ? (byte)(word >> 8) : (byte)word;
         }
 
         byte value = _vdpRegisters[offset & (VdpRegisterBytes - 1)];
-        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R8", offset, value));
+        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R8", offset, value));
         return value;
     }
 
@@ -3361,18 +3361,18 @@ public sealed class ThirtyTwoXDevice
         return _vdpRegisters[offset & (VdpRegisterBytes - 1)];
     }
 
-    public ushort ReadVdpRegisterWord(ushort offset)
+    public ushort ReadVdpRegisterWord(ushort offset, string source = "VDP")
     {
         if (!IsDefinedVdpRegisterOffset((ushort)(offset & ~1)))
         {
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R16", offset, 0));
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R16", offset, 0));
             return 0;
         }
 
         if ((offset & ~1) == ThirtyTwoXHardwareProfile.FrameBufferControlOffset)
         {
             ushort status = BuildFrameBufferControlStatus();
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R16", offset, status));
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R16", offset, status));
             return status;
         }
 
@@ -3382,31 +3382,31 @@ public sealed class ThirtyTwoXDevice
             value = ApplyTvFormatBit(value);
         }
 
-        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "R16", offset, value));
+        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "R16", offset, value));
         return value;
     }
 
-    public void WriteVdpRegisterByte(ushort offset, byte value)
+    public void WriteVdpRegisterByte(ushort offset, byte value, string source = "VDP")
     {
         int index = offset & (VdpRegisterBytes - 1);
         if (!IsDefinedVdpRegisterOffset((ushort)(index & ~1)))
         {
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "WU8", (ushort)index, value));
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "WU8", (ushort)index, value));
             return;
         }
 
         _vdpRegisters[index] = value;
-        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "W8", (ushort)index, value));
+        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "W8", (ushort)index, value));
         TrackVdpRegisterWrite((ushort)(index & ~1));
         ApplyVdpRegisterSideEffects((ushort)(index & ~1), completedWordWrite: (index & 1) != 0);
     }
 
-    public void WriteVdpRegisterWord(ushort offset, ushort value)
+    public void WriteVdpRegisterWord(ushort offset, ushort value, string source = "VDP")
     {
         int index = offset & (VdpRegisterBytes - 1);
         if (!IsDefinedVdpRegisterOffset((ushort)(index & ~1)))
         {
-            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "WU16", (ushort)index, value));
+            VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "WU16", (ushort)index, value));
             return;
         }
 
@@ -3416,7 +3416,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         WriteBigEndianWord(_vdpRegisters, index, value);
-        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace("VDP", "W16", (ushort)index, value));
+        VdpRegisterAccessObserver?.Invoke(new SystemRegisterAccessTrace(source, "W16", (ushort)index, value));
         TrackVdpRegisterWrite((ushort)(index & ~1));
         ApplyVdpRegisterSideEffects((ushort)(index & ~1), completedWordWrite: true);
     }
@@ -3952,13 +3952,13 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x80)
         {
             AddSh2WaitCycles(cpuIndex, Sh2VdpRegisterWaitCycles);
-            return ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart));
+            return ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart), cpuIndex == 0 ? "MSH2" : "SSH2");
         }
 
         if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80)
         {
             AddSh2WaitCycles(cpuIndex, Sh2VdpRegisterWaitCycles);
-            return ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart));
+            return ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart), cpuIndex == 0 ? "MSH2" : "SSH2");
         }
 
         if (address is >= ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart and < ThirtyTwoXHardwareProfile.Sh2ColorPaletteStart + (ThirtyTwoXHardwareProfile.PaletteEntries * 2))
@@ -4528,14 +4528,14 @@ public sealed class ThirtyTwoXDevice
         if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + 0x80)
         {
             AddSh2WaitCycles(cpuIndex, Sh2VdpRegisterWaitCycles);
-            WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart), value);
+            WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart), value, cpuIndex == 0 ? "MSH2" : "SSH2");
             return;
         }
 
         if (address is >= ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart and < ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + 0x80)
         {
             AddSh2WaitCycles(cpuIndex, Sh2VdpRegisterWaitCycles);
-            WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart), value);
+            WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart), value, cpuIndex == 0 ? "MSH2" : "SSH2");
             return;
         }
 

@@ -1075,7 +1075,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x80)
         {
-            value = _thirtyTwoX.ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart));
+            value = _thirtyTwoX.ReadVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), "M68K");
             return true;
         }
 
@@ -1233,7 +1233,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x7F)
         {
-            value = _thirtyTwoX.ReadVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart));
+            value = _thirtyTwoX.ReadVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), "M68K");
             return true;
         }
 
@@ -1286,7 +1286,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x80)
         {
-            _thirtyTwoX.WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value);
+            _thirtyTwoX.WriteVdpRegisterByte((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value, "M68K");
             _thirtyTwoX.GrantVdpAccessToSh2();
             return true;
         }
@@ -1332,7 +1332,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kVdpRegisterStart and < ThirtyTwoXHardwareProfile.M68kVdpRegisterStart + 0x7F)
         {
-            _thirtyTwoX.WriteVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value);
+            _thirtyTwoX.WriteVdpRegisterWord((ushort)(address - ThirtyTwoXHardwareProfile.M68kVdpRegisterStart), value, "M68K");
             _thirtyTwoX.GrantVdpAccessToSh2();
             return true;
         }
