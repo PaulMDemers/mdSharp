@@ -80,6 +80,19 @@ public sealed class Sh2Cpu
         GBR = value;
     }
 
+    public void FastForwardSyntheticLoop(uint pc, ushort lastOpcode, uint lastOpcodePc, int cycles)
+    {
+        if (cycles <= 0)
+        {
+            return;
+        }
+
+        PC = pc;
+        LastOpcode = lastOpcode;
+        LastOpcodePc = lastOpcodePc;
+        Cycles += cycles;
+    }
+
     public void RequestInterrupt(int level, int? vectorNumber = null)
     {
         if (level is < 1 or > 15)
@@ -1788,6 +1801,88 @@ Done:
     {
         ReadOnlySpan<ushort> expected = [0x2100, 0x4210, 0x8FFC, 0x7101];
         return MatchesInstructionSequence(peekBus, loopPc, expected);
+    }
+
+    public bool TryFastForwardMovBPostIncStoreAddDtBfLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, byte, bool> writeByte,
+        out int cycles)
+    {
+        const int CyclesPerIteration = 7;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus ||
+            R[6] == 0)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesMovBPostIncStoreAddDtBfPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / CyclesPerIteration);
+        uint iterations = Math.Min(R[6], maxIterations);
+        uint source = R[1];
+        uint destination = R[3];
+        byte lastValue = (byte)R[2];
+        uint completed = 0;
+        while (completed < iterations)
+        {
+            byte? value = readByte(source);
+            if (!value.HasValue || !writeByte(destination, value.Value))
+            {
+                break;
+            }
+
+            lastValue = value.Value;
+            source++;
+            destination++;
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[1] = source;
+        R[2] = (uint)(sbyte)lastValue;
+        R[3] = destination;
+        R[6] -= completed;
+        bool finished = R[6] == 0;
+        SetT(finished);
+        cycles = checked((int)(completed * CyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8BFA;
+        LastOpcodePc = loopPc + 8;
+        PC = finished ? loopPc + 10 : loopPc;
+        return true;
+    }
+
+    private static bool MatchesMovBPostIncStoreAddDtBfPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        if (!peekBus.TryPeekWord(loopPc + 0, out ushort loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort storeOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort addOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort dtOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort branchOpcode))
+        {
+            return false;
+        }
+
+        return loadOpcode == 0x6214 &&
+            storeOpcode == 0x2320 &&
+            addOpcode == 0x7301 &&
+            dtOpcode == 0x4610 &&
+            branchOpcode == 0x8BFA;
     }
 
     public bool TryFastForwardGbrWordHelperJsrBfsPollLoop(

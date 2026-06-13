@@ -1268,6 +1268,19 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x6214 &&
+                cpu.TryFastForwardMovBPostIncStoreAddDtBfLoop(
+                    Math.Min(cycleBudget, 7 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2ByteWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memscan") &&
                 nextOpcode == 0x6830 &&
                 cpu.TryFastForwardDoomMaskedColumnWordStoreLoop(
                     Math.Min(cycleBudget, 10 * 4096),
@@ -1573,6 +1586,14 @@ public sealed class ThirtyTwoXDevice
                 IsLikelySdramFlagTaskletDispatcher(cpuIndex, cpu.PC, nextOpcode) &&
                 TryFastForwardSdramFlagTaskletDispatcher(cpu, cpuIndex, cycleBudget, out fastCycles))
             {
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("sync") &&
+                TryFastForwardZeroSdramFlagTaskletDispatcher(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
             }
 
@@ -2269,6 +2290,88 @@ public sealed class ThirtyTwoXDevice
         RecordSh2FastPath(cycles);
         AdvanceSh2InternalTimers(cpuIndex, cycles);
         return true;
+    }
+
+    private bool TryFastForwardZeroSdramFlagTaskletDispatcher(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        const uint LoopPc = 0x0600_0528;
+        const int CyclesPerIteration = 35;
+        const int MaxBurstCycles = 65_520;
+        const int CounterOffset = 0x2_028C;
+        const int FlagOffset = 0x2_0290;
+
+        cycles = 0;
+        if (cpuIndex != 0 ||
+            cpu.PC != LoopPc ||
+            cycleBudget < CyclesPerIteration ||
+            !IsSlaveInBootRomIdleLoop() ||
+            ReadBigEndianWord(_sdram, FlagOffset) != 0 ||
+            !MatchesZeroSdramFlagTaskletDispatcher(cpuIndex, LoopPc))
+        {
+            return false;
+        }
+
+        int iterations = Math.Min(cycleBudget, MaxBurstCycles) / CyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        uint counter = ReadBigEndianLong(_sdram, CounterOffset);
+        WriteBigEndianLong(_sdram, CounterOffset, counter + (uint)iterations);
+        cpu.R[0] = 0;
+        cpu.R[1] = 0x80;
+        cpu.R[2] = 0xC000_07FC;
+        cpu.R[8] = 0x0602_0290;
+        cpu.R[15] = 0xC000_0800;
+        cycles = iterations * CyclesPerIteration;
+        cpu.FastForwardSyntheticLoop(LoopPc, 0x89E6, 0x0600_0558, cycles);
+        RecordSh2FastPathProbe("zeroSdramTaskletDispatcher", cpuIndex, LoopPc, 0xD80D, hit: true);
+        return true;
+    }
+
+    private bool MatchesZeroSdramFlagTaskletDispatcher(int cpuIndex, uint pc)
+    {
+        return
+            TryPeekSh2Word(pc, cpuIndex, out ushort op00) && op00 == 0xD80D &&
+            TryPeekSh2Word(pc + 0x02, cpuIndex, out ushort op02) && op02 == 0x6081 &&
+            TryPeekSh2Word(pc + 0x04, cpuIndex, out ushort op04) && op04 == 0x600D &&
+            TryPeekSh2Word(pc + 0x06, cpuIndex, out ushort op06) && op06 == 0x2F06 &&
+            TryPeekSh2Word(pc + 0x08, cpuIndex, out ushort op08) && op08 == 0xD20C &&
+            TryPeekSh2Word(pc + 0x0A, cpuIndex, out ushort op0A) && op0A == 0x6122 &&
+            TryPeekSh2Word(pc + 0x0C, cpuIndex, out ushort op0C) && op0C == 0x7101 &&
+            TryPeekSh2Word(pc + 0x0E, cpuIndex, out ushort op0E) && op0E == 0x2212 &&
+            TryPeekSh2Word(pc + 0x10, cpuIndex, out ushort op10) && op10 == 0xE180 &&
+            TryPeekSh2Word(pc + 0x12, cpuIndex, out ushort op12) && op12 == 0x611C &&
+            TryPeekSh2Word(pc + 0x14, cpuIndex, out ushort op14) && op14 == 0x3017 &&
+            TryPeekSh2Word(pc + 0x16, cpuIndex, out ushort op16) && op16 == 0x8917 &&
+            TryPeekSh2Word(pc + 0x18, cpuIndex, out ushort op18) && op18 == 0xD209 &&
+            TryPeekSh2Word(pc + 0x1A, cpuIndex, out ushort op1A) && op1A == 0x22F2 &&
+            TryPeekSh2Word(pc + 0x1C, cpuIndex, out ushort op1C) && op1C == 0xD109 &&
+            TryPeekSh2Word(pc + 0x1E, cpuIndex, out ushort op1E) && op1E == 0x001E &&
+            TryPeekSh2Word(pc + 0x20, cpuIndex, out ushort op20) && op20 == 0x400B &&
+            TryPeekSh2Word(pc + 0x22, cpuIndex, out ushort op22) && op22 == 0x0009 &&
+            TryPeekSh2Word(pc + 0x24, cpuIndex, out ushort op24) && op24 == 0xD206 &&
+            TryPeekSh2Word(pc + 0x26, cpuIndex, out ushort op26) && op26 == 0x6222 &&
+            TryPeekSh2Word(pc + 0x28, cpuIndex, out ushort op28) && op28 == 0x3F20 &&
+            TryPeekSh2Word(pc + 0x2A, cpuIndex, out ushort op2A) && op2A == 0x8B0F &&
+            TryPeekSh2Word(pc + 0x2C, cpuIndex, out ushort op2C) && op2C == 0x60F6 &&
+            TryPeekSh2Word(pc + 0x2E, cpuIndex, out ushort op2E) && op2E == 0x8800 &&
+            TryPeekSh2Word(pc + 0x30, cpuIndex, out ushort op30) && op30 == 0x89E6 &&
+            TryPeekSh2Word(0x0600_064C, cpuIndex, out ushort rts) && rts == 0x000B &&
+            TryPeekSh2Word(0x0600_064E, cpuIndex, out ushort rtsDelay) && rtsDelay == 0x0009 &&
+            ReadBigEndianLong(_sdram, 0x2_0290) == 0 &&
+            ReadBigEndianLong(_sdram, 0x1_EA5C) == 0xC000_07FC;
+    }
+
+    private bool IsSlaveInBootRomIdleLoop()
+    {
+        return !SlaveSh2.HasAcceptablePendingInterrupt &&
+            (SlaveSh2.PC == 0x0600_01B0 || SlaveSh2.PC == 0x0600_01B2) &&
+            TryPeekSh2Word(0x0600_01B0, 1, out ushort branchOpcode) &&
+            branchOpcode == 0xAFFE &&
+            TryPeekSh2Word(0x0600_01B2, 1, out ushort delayOpcode) &&
+            delayOpcode == 0x0009;
     }
 
     private bool TryFastForwardLiteralByteDisplacementTstRegisterPoll(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
@@ -3501,7 +3604,8 @@ public sealed class ThirtyTwoXDevice
     private bool IsM68kVdpRegisterAccessDenied(string source, ushort alignedOffset)
     {
         if (source == "M68K" &&
-            alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset &&
+            (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
+                alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset) &&
             IsHiddenPostStartBootVdpControlHandoff())
         {
             return false;
@@ -3518,8 +3622,10 @@ public sealed class ThirtyTwoXDevice
         return _bootRomPostStartSignatureHiddenFromSh2 &&
             !_bootRomHandshakePending &&
             !_bootRomLaunchPending &&
-            MasterSh2.PC is >= 0x0600_0890 and <= 0x0600_089C &&
-            SlaveSh2.PC == 0x0600_0DCC;
+            ((MasterSh2.PC is >= 0x0600_0890 and <= 0x0600_089C &&
+                SlaveSh2.PC == 0x0600_0DCC) ||
+                (MasterSh2.PC is >= 0x0600_052E and <= 0x0600_064C &&
+                    SlaveSh2.PC == 0x0600_01B0));
     }
 
     private ushort ApplyTvFormatBit(ushort value)
