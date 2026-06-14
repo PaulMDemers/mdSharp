@@ -1282,6 +1282,20 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("memscan") &&
+                nextOpcode == 0x60C0 &&
+                cpu.TryFastForwardDoomByteHighBitPatchDtBfLoop(
+                    Math.Min(cycleBudget, 7 * 4096),
+                    _sh2ByteReaders[cpuIndex],
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memscan") &&
                 nextOpcode == 0x6830 &&
                 cpu.TryFastForwardDoomMaskedColumnWordStoreLoop(
                     Math.Min(cycleBudget, 10 * 4096),

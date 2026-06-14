@@ -9767,6 +9767,121 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardDoomByteHighBitPatchDtBfLoop(
+        int maxCycles,
+        Func<uint, byte?> readByte,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        out int cycles)
+    {
+        const int TakenCyclesPerIteration = 7;
+        const int HighBitExitCycles = 3;
+        const int CounterExitCycles = 7;
+        cycles = 0;
+        if (maxCycles < HighBitExitCycles ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc + 0x00, out ushort loadByte) ||
+            loadByte != 0x60C0 ||
+            !peekBus.TryPeekWord(loopPc + 0x02, out ushort testHighBit) ||
+            testHighBit != 0xC880 ||
+            !peekBus.TryPeekWord(loopPc + 0x04, out ushort branchHighBitExit) ||
+            branchHighBitExit != 0x8B13 ||
+            !peekBus.TryPeekWord(loopPc + 0x06, out ushort loadPatchWord) ||
+            loadPatchWord != 0x85E6 ||
+            !peekBus.TryPeekWord(loopPc + 0x08, out ushort storePatchWord) ||
+            storePatchWord != 0x2C01 ||
+            !peekBus.TryPeekWord(loopPc + 0x0A, out ushort decrementCounter) ||
+            decrementCounter != 0x4710 ||
+            !peekBus.TryPeekWord(loopPc + 0x0C, out ushort branchLoop) ||
+            branchLoop != 0x8BF8)
+        {
+            return false;
+        }
+
+        int iterations = 0;
+        while (cycles < maxCycles)
+        {
+            byte? value = readByte(R[12]);
+            if (!value.HasValue)
+            {
+                break;
+            }
+
+            R[0] = SignExtend8(value.Value);
+            bool highBitClear = (R[0] & 0x80u) == 0;
+            SetT(highBitClear);
+            if (!highBitClear)
+            {
+                if (cycles + HighBitExitCycles > maxCycles)
+                {
+                    break;
+                }
+
+                cycles += HighBitExitCycles;
+                PC = loopPc + 0x2E;
+                LastOpcode = branchHighBitExit;
+                LastOpcodePc = loopPc + 0x04;
+                Cycles += cycles;
+                return true;
+            }
+
+            ushort? patch = readWord(R[14] + 12);
+            if (!patch.HasValue)
+            {
+                break;
+            }
+
+            uint nextCounter = R[7] - 1;
+            bool counterZero = nextCounter == 0;
+            int iterationCycles = counterZero ? CounterExitCycles : TakenCyclesPerIteration;
+            if (cycles + iterationCycles > maxCycles)
+            {
+                break;
+            }
+
+            R[0] = SignExtend16(patch.Value);
+            if (!writeWord(R[12], (ushort)R[0]))
+            {
+                break;
+            }
+
+            R[7] = nextCounter;
+            SetT(counterZero);
+            cycles += iterationCycles;
+            iterations++;
+            if (counterZero)
+            {
+                PC = loopPc + 0x0E;
+                LastOpcode = branchLoop;
+                LastOpcodePc = loopPc + 0x0C;
+                Cycles += cycles;
+                return true;
+            }
+
+            PC = loopPc;
+        }
+
+        if (iterations == 0)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        Cycles += cycles;
+        LastOpcode = branchLoop;
+        LastOpcodePc = loopPc + 0x0C;
+        return true;
+    }
+
     public bool TryFastForwardDoomMaskedColumnWordStoreLoop(
         int maxCycles,
         Func<uint, byte?> readByte,

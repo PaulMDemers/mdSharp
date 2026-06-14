@@ -50,6 +50,7 @@ Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFill
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
 Run("32X SH-2 Doom record pair scan loop fast-forward", ThirtyTwoXSh2DoomRecordPairScanLoopFastForward);
 Run("32X SH-2 MOV.B postincrement copy CMP/GE loop fast-forward", ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward);
+Run("32X SH-2 Doom byte high-bit patch DT/BF loop fast-forward", ThirtyTwoXSh2DoomByteHighBitPatchDtBfLoopFastForward);
 Run("32X SH-2 Doom masked column word store loop fast-forward", ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 Doom stepped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSteppedMaskedColumnWordStoreLoopFastForward);
 Run("32X SH-2 Doom swapped masked column word store loop fast-forward", ThirtyTwoXSh2DoomSwappedMaskedColumnWordStoreLoopFastForward);
@@ -4071,6 +4072,86 @@ void ThirtyTwoXSh2MovBPostIncCopyCmpGeLoopFastForward()
     {
         AssertEqual(interpretedBus.ReadByte(Destination + i), fastBus.ReadByte(Destination + i));
     }
+}
+
+void ThirtyTwoXSh2DoomByteHighBitPatchDtBfLoopFastForward()
+{
+    const uint LoopPc = 0x0204_E844;
+    const uint PatchAddress = 0x0600_9000;
+    const uint PatchWordBase = 0x0600_A000;
+    ushort[] opcodes = [0x60C0, 0xC880, 0x8B13, 0x85E6, 0x2C01, 0x4710, 0x8BF8];
+
+    void WriteRoutine(SyntheticSh2Bus bus)
+    {
+        for (int i = 0; i < opcodes.Length; i++)
+        {
+            bus.WriteInstructionWord(LoopPc + (uint)(i * 2), opcodes[i]);
+        }
+
+        bus.WriteInstructionWord(LoopPc + 0x0E, 0x001B);
+        bus.WriteInstructionWord(LoopPc + 0x2E, 0x001B);
+    }
+
+    void AssertSameArchitecturalState(Sh2Cpu expected, Sh2Cpu actual)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            AssertEqual(expected.R[i], actual.R[i]);
+        }
+
+        AssertEqual(expected.PC, actual.PC);
+        AssertEqual(expected.SR, actual.SR);
+        AssertEqual(expected.Cycles, actual.Cycles);
+        AssertEqual(expected.Halted, actual.Halted);
+    }
+
+    void SeedCpu(Sh2Cpu cpu, uint count)
+    {
+        cpu.Reset(LoopPc);
+        cpu.R[7] = count;
+        cpu.R[12] = PatchAddress;
+        cpu.R[14] = PatchWordBase;
+    }
+
+    void Compare(string name, byte initialByte, ushort patchWord, uint count, int expectedCycles)
+    {
+        SyntheticSh2Bus interpretedBus = new();
+        WriteRoutine(interpretedBus);
+        interpretedBus.WriteByte(PatchAddress, initialByte);
+        interpretedBus.WriteWord(PatchWordBase + 12, patchWord);
+        Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+        SeedCpu(interpreted, count);
+        interpreted.Run(256);
+        AssertTrue(interpreted.Halted, $"interpreter Doom byte high-bit patch loop should halt for {name}");
+
+        SyntheticSh2Bus fastBus = new();
+        WriteRoutine(fastBus);
+        fastBus.WriteByte(PatchAddress, initialByte);
+        fastBus.WriteWord(PatchWordBase + 12, patchWord);
+        Sh2Cpu fast = new(fastBus, "fast");
+        SeedCpu(fast, count);
+        AssertTrue(
+            fast.TryFastForwardDoomByteHighBitPatchDtBfLoop(7 * 16, fastBus.TryReadByte, fastBus.TryReadWord, fastBus.TryWriteWord, out int cycles),
+            $"Doom byte high-bit patch loop should fast-forward for {name}");
+        AssertEqual(expectedCycles, cycles);
+        fast.Step();
+        AssertTrue(fast.Halted, $"fast Doom byte high-bit patch loop should stop on the following SLEEP for {name}");
+        AssertSameArchitecturalState(interpreted, fast);
+        AssertEqual(interpretedBus.ReadByte(PatchAddress), fastBus.ReadByte(PatchAddress));
+    }
+
+    Compare("counter exhausted", initialByte: 0x12, patchWord: 0x0034, count: 4, expectedCycles: 28);
+    Compare("high-bit exit", initialByte: 0x80, patchWord: 0x0034, count: 4, expectedCycles: 3);
+
+    SyntheticSh2Bus shortBudgetBus = new();
+    WriteRoutine(shortBudgetBus);
+    shortBudgetBus.WriteByte(PatchAddress, 0x12);
+    shortBudgetBus.WriteWord(PatchWordBase + 12, 0x0034);
+    Sh2Cpu shortBudget = new(shortBudgetBus, "short-budget");
+    SeedCpu(shortBudget, 4);
+    AssertTrue(
+        !shortBudget.TryFastForwardDoomByteHighBitPatchDtBfLoop(6, shortBudgetBus.TryReadByte, shortBudgetBus.TryReadWord, shortBudgetBus.TryWriteWord, out _),
+        "Doom byte high-bit patch loop should reject budgets below one full patch iteration");
 }
 
 void ThirtyTwoXSh2DoomMaskedColumnWordStoreLoopFastForward()
