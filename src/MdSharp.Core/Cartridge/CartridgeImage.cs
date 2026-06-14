@@ -25,7 +25,7 @@ public sealed class CartridgeImage
         }
 
         _hasSaveRam = _eeprom is null && TryGetSaveRamRange(_rom, out _saveRamStart, out _saveRamEnd, out _saveRamLanes);
-        SaveRamEnabled = !_hasSaveRam || (uint)_rom.Length <= _saveRamStart || _saveRamStart == _saveRamEnd;
+        SaveRamEnabled = IsSaveRamInitiallyEnabled(_rom, Header, _hasSaveRam, _saveRamStart, _saveRamEnd);
         Diagnostics = BuildDiagnostics();
     }
 
@@ -355,18 +355,29 @@ public sealed class CartridgeImage
 
         start = ReadUInt32(rom, 0x1B4);
         end = ReadUInt32(rom, 0x1B8);
-        lanes = (rom[0x1B3] & 0x60) switch
-        {
-            0x20 => SaveRamLanes.Odd,
-            0x40 => SaveRamLanes.Even,
-            _ => SaveRamLanes.Both,
-        };
+        lanes = DecodeSaveRamLanes(rom[0x1B2], rom[0x1B3]);
         if (start == end && !AddressMatchesSaveRamLane(start, lanes))
         {
             lanes = (start & 1) == 0 ? SaveRamLanes.Even : SaveRamLanes.Odd;
         }
 
         return start <= end && start >= 0x20_0000 && end <= 0x3F_FFFF;
+    }
+
+    private static SaveRamLanes DecodeSaveRamLanes(byte type, byte legacyLaneByte)
+    {
+        return type switch
+        {
+            0xB0 or 0xF0 => SaveRamLanes.Even,
+            0xB8 or 0xE8 or 0xF8 => SaveRamLanes.Odd,
+            0xA0 or 0xE0 => SaveRamLanes.Both,
+            _ => (legacyLaneByte & 0x60) switch
+            {
+                0x20 => SaveRamLanes.Odd,
+                0x40 => SaveRamLanes.Even,
+                _ => SaveRamLanes.Both,
+            },
+        };
     }
 
     private static SerialEeprom? TryCreateEeprom(ReadOnlySpan<byte> rom, byte[] backing, CartridgeHeader header)
@@ -436,6 +447,20 @@ public sealed class CartridgeImage
         }
 
         return null;
+    }
+
+    private static bool IsSaveRamInitiallyEnabled(ReadOnlySpan<byte> rom, CartridgeHeader header, bool hasSaveRam, uint start, uint end)
+    {
+        if (!hasSaveRam || (uint)rom.Length <= start || start == end)
+        {
+            return true;
+        }
+
+        string console = header.ConsoleName.ToUpperInvariant();
+        string product = header.ProductCode.ToUpperInvariant();
+        string domestic = header.DomesticName.ToUpperInvariant();
+        string overseas = header.OverseasName.ToUpperInvariant();
+        return LooksLike32X(console, product, domestic, overseas, string.Empty);
     }
 
     private static SerialEeprom CreateSegaMode1Eeprom(byte[] backing)

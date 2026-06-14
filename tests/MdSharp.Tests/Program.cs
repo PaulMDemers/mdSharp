@@ -134,6 +134,7 @@ Run("32X SH-2 division unit", ThirtyTwoXSh2DivisionUnit);
 Run("32X PWM interrupts advance with executed SH-2 cycles", ThirtyTwoXPwmInterruptsAdvanceWithExecutedSh2Cycles);
 Run("32X 68000 bus shell", ThirtyTwoXM68kBusShell);
 Run("32X 68000 vector ROM mapping", ThirtyTwoXM68kVectorRomMapping);
+Run("32X RV low ROM maps cartridge save RAM", ThirtyTwoXRvLowRomMapsCartridgeSaveRam);
 Run("32X 68000 VBlank uses Genesis level 6", ThirtyTwoXM68kVBlankUsesGenesisLevel6);
 Run("32X SH-2 boot ROM ready marker", ThirtyTwoXSh2BootRomReadyMarker);
 Run("32X SH-2 boot ROM maps optional BIOS images", ThirtyTwoXSh2BootRomMapsOptionalBiosImages);
@@ -8618,6 +8619,31 @@ void ThirtyTwoXM68kVectorRomMapping()
     AssertEqual((ushort)0xDEAD, machine.Bus.ReadWord(0x0000_02B4));
 }
 
+void ThirtyTwoXRvLowRomMapsCartridgeSaveRam()
+{
+    byte[] rom = new byte[0x400000];
+    WriteAscii(rom, 0x100, "SEGA 32X");
+    WriteAscii(rom, 0x1B0, "RA");
+    rom[0x1B2] = 0xE8;
+    rom[0x1B3] = 0x40;
+    WriteLong(rom, 0x1B4, 0x0020_0000);
+    WriteLong(rom, 0x1B8, 0x0020_0001);
+    rom[0x20_0000] = 0x44;
+    rom[0x20_0001] = 0x00;
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0083);
+    machine.Bus.WriteWord(ThirtyTwoXHardwareProfile.M68kSystemRegister(ThirtyTwoXHardwareProfile.DreqControlOffset), 0x0001);
+
+    machine.Bus.WriteByte(0x0020_0000, 0x7E);
+    machine.Bus.WriteByte(0x0020_0001, 0x01);
+
+    AssertEqual((byte)0xFF, machine.Bus.ReadByte(0x0020_0000));
+    AssertEqual((byte)0x01, machine.Bus.ReadByte(0x0020_0001));
+    AssertEqual((byte)0x01, machine.Bus.Cartridge.SaveRam[0]);
+}
+
 void ThirtyTwoXM68kVBlankUsesGenesisLevel6()
 {
     byte[] rom = new byte[0x400000];
@@ -13783,7 +13809,12 @@ byte[] CreateRom()
 void DeclareSaveRam(byte[] data, uint start = 0x0020_0000, uint end = 0x0020_FFFF, byte lanes = 0x60)
 {
     WriteAscii(data, 0x1B0, "RA");
-    data[0x1B2] = 0xF8;
+    data[0x1B2] = lanes switch
+    {
+        0x20 => (byte)0xF8,
+        0x40 => (byte)0xF0,
+        _ => (byte)0xE0,
+    };
     data[0x1B3] = lanes;
     WriteLong(data, 0x1B4, start);
     WriteLong(data, 0x1B8, end);
