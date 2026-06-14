@@ -141,6 +141,7 @@ public sealed class ThirtyTwoXDevice
     private const int Sh2LongStoreDelayFillLoopMaxBurstIterations = 4096;
     private const int Sh2MovWordStridedCopyMinBurstCycles = 4096;
     private const int Sh2MovWordStridedCopyMaxBurstCycles = 6 * 32768;
+    private const int Sh2VdpStatusPollMaxBurstCycles = 65536;
     private const int Sh2BraSelfIdleLoopTimerSensitiveBurstCycles = 32;
     private const int DreqBackpressureSh2Cycles = 64;
     private const int Sh2CartridgeByteWaitCycles = 6;
@@ -1697,6 +1698,17 @@ public sealed class ThirtyTwoXDevice
 
         if (canProbeFastPath && IsSh2FastPathGroupEnabled("poll"))
         {
+            if (nextOpcode == 0x4F22 &&
+                cpu.TryFastForwardStableWordChangeSubroutinePollLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
             if ((nextOpcode & 0xF00F) == 0x6001 &&
                 cpu.TryFastForwardWordMismatchDelaySubroutinePollLoop(
                     cycleBudget,
@@ -1852,6 +1864,13 @@ public sealed class ThirtyTwoXDevice
                     return fastCycles;
                 }
 
+                if (cpu.TryFastForwardMovLiteralWordTstBfPollLoop(cycleBudget, out fastCycles))
+                {
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
                 if (cpu.TryFastForwardMovLiteralWordCmpEqBtPollLoop(cycleBudget, out fastCycles))
                 {
                     RecordSh2FastPath(fastCycles);
@@ -1888,6 +1907,16 @@ public sealed class ThirtyTwoXDevice
                     (nextOpcode & 0xF00F) == 0x2008 ||
                     (nextOpcode & 0xFF00) == 0x8900) &&
                 cpu.TryFastForwardMovLiteralWordTstBtPollLoop(cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF00F) == 0x6001 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
+                cpu.TryFastForwardMovLiteralWordTstBfPollLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
@@ -2379,7 +2408,10 @@ public sealed class ThirtyTwoXDevice
         LiteralByteDisplacementTstRegisterPollFastPathAttempts++;
         uint pc = cpu.PC;
         ushort opcode = PeekSh2ProbeOpcode(cpuIndex, pc);
-        if (!cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(cycleBudget, out cycles))
+        int burstBudget = IsVdpStatusLiteralByteDisplacementTstRegisterPollCandidate(cpuIndex, pc)
+            ? Math.Min(cycleBudget, Sh2VdpStatusPollMaxBurstCycles)
+            : 4096;
+        if (!cpu.TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(cycleBudget, burstBudget, out cycles))
         {
             RecordSh2FastPathProbe("literalByteTstReg", cpuIndex, pc, opcode, hit: false);
             return false;
@@ -2640,12 +2672,88 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsLiteralByteDisplacementTstRegisterPollLoadCandidate(int cpuIndex, uint loadPc)
     {
+        return TryReadLiteralByteDisplacementTstRegisterPollLoad(
+            cpuIndex,
+            loadPc,
+            out _,
+            out _,
+            out _,
+            out _,
+            out _);
+    }
+
+    private bool IsVdpStatusLiteralByteDisplacementTstRegisterPollCandidate(int cpuIndex, uint pc)
+    {
+        if (TryReadLiteralByteDisplacementTstRegisterPollDetails(cpuIndex, pc + 4, out uint address, out uint mask) &&
+            IsVdpStatusBytePollAddress(address, mask))
+        {
+            return true;
+        }
+
+        ReadOnlySpan<int> offsets = [0, -2, -4, -6, -8];
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && pc < (uint)-offset)
+            {
+                continue;
+            }
+
+            if (TryReadLiteralByteDisplacementTstRegisterPollDetails(cpuIndex, (uint)(pc + offset), out address, out mask) &&
+                IsVdpStatusBytePollAddress(address, mask))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryReadLiteralByteDisplacementTstRegisterPollDetails(int cpuIndex, uint loadPc, out uint address, out uint mask)
+    {
+        address = 0;
+        mask = 0;
+        if (!TryReadLiteralByteDisplacementTstRegisterPollLoad(
+                cpuIndex,
+                loadPc,
+                out ushort baseLiteralOpcode,
+                out ushort maskLiteralOpcode,
+                out ushort loadOpcode,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        if (!TryReadSh2PcRelativeLongLiteral(cpuIndex, loadPc - 4, baseLiteralOpcode, out uint baseAddress) ||
+            !TryReadSh2PcRelativeLongLiteral(cpuIndex, loadPc - 2, maskLiteralOpcode, out mask))
+        {
+            return false;
+        }
+
+        address = baseAddress + (uint)(loadOpcode & 0x0F);
+        return true;
+    }
+
+    private bool TryReadLiteralByteDisplacementTstRegisterPollLoad(
+        int cpuIndex,
+        uint loadPc,
+        out ushort baseLiteralOpcode,
+        out ushort maskLiteralOpcode,
+        out ushort loadOpcode,
+        out ushort testOpcode,
+        out ushort branchOpcode)
+    {
+        baseLiteralOpcode = 0;
+        maskLiteralOpcode = 0;
+        loadOpcode = 0;
+        testOpcode = 0;
+        branchOpcode = 0;
         if (loadPc < 4 ||
-            !TryPeekSh2Word(loadPc - 4, cpuIndex, out ushort baseLiteralOpcode) ||
-            !TryPeekSh2Word(loadPc - 2, cpuIndex, out ushort maskLiteralOpcode) ||
-            !TryPeekSh2Word(loadPc, cpuIndex, out ushort loadOpcode) ||
-            !TryPeekSh2Word(loadPc + 2, cpuIndex, out ushort testOpcode) ||
-            !TryPeekSh2Word(loadPc + 4, cpuIndex, out ushort branchOpcode))
+            !TryPeekSh2Word(loadPc - 4, cpuIndex, out baseLiteralOpcode) ||
+            !TryPeekSh2Word(loadPc - 2, cpuIndex, out maskLiteralOpcode) ||
+            !TryPeekSh2Word(loadPc, cpuIndex, out loadOpcode) ||
+            !TryPeekSh2Word(loadPc + 2, cpuIndex, out testOpcode) ||
+            !TryPeekSh2Word(loadPc + 4, cpuIndex, out branchOpcode))
         {
             return false;
         }
@@ -2673,6 +2781,28 @@ public sealed class ThirtyTwoXDevice
         int displacement = (sbyte)branchOpcode;
         uint target = loadPc + 8 + (uint)(displacement * 2);
         return target == loadPc;
+    }
+
+    private bool TryReadSh2PcRelativeLongLiteral(int cpuIndex, uint opcodePc, ushort opcode, out uint value)
+    {
+        value = 0;
+        uint literalAddress = ((opcodePc + 4) & 0xFFFF_FFFCu) + (uint)((opcode & 0x00FF) * 4);
+        if (!TryPeekSh2Word(literalAddress, cpuIndex, out ushort high) ||
+            !TryPeekSh2Word(literalAddress + 2, cpuIndex, out ushort low))
+        {
+            return false;
+        }
+
+        value = ((uint)high << 16) | low;
+        return true;
+    }
+
+    private static bool IsVdpStatusBytePollAddress(uint address, uint mask)
+    {
+        bool isFrameBufferControlStatusByte =
+            address == ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + ThirtyTwoXHardwareProfile.FrameBufferControlOffset ||
+            address == ThirtyTwoXHardwareProfile.Sh2VdpRegisterCachedStart + ThirtyTwoXHardwareProfile.FrameBufferControlOffset;
+        return isFrameBufferControlStatusByte && (mask & 0xE0) != 0;
     }
 
     private ushort PeekSh2ProbeOpcode(int cpuIndex, uint pc)

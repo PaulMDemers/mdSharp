@@ -579,6 +579,72 @@ public sealed class Sh2Cpu
         return true;
     }
 
+    public bool TryFastForwardStableWordChangeSubroutinePollLoop(int maxCycles, Func<uint, ushort?> readWord, out int cycles)
+    {
+        const int CyclesPerIteration = 28;
+        cycles = 0;
+        if (maxCycles < CyclesPerIteration ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!peekBus.TryPeekWord(loopPc, out ushort pushPrOpcode) ||
+            pushPrOpcode != 0x4F22 ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort routineLiteralOpcode) ||
+            (routineLiteralOpcode & 0xF000) != 0xD000 ||
+            !peekBus.TryPeekWord(loopPc + 4, out ushort jsrOpcode) ||
+            jsrOpcode != 0x400B ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort jsrDelayOpcode) ||
+            jsrDelayOpcode != 0x0009 ||
+            !peekBus.TryPeekWord(loopPc + 8, out ushort popPrOpcode) ||
+            popPrOpcode != 0x4F26 ||
+            !peekBus.TryPeekWord(loopPc + 10, out ushort cmpZeroOpcode) ||
+            cmpZeroOpcode != 0x8800 ||
+            !peekBus.TryPeekWord(loopPc + 12, out ushort loopBranchOpcode) ||
+            (loopBranchOpcode & 0xFF00) != 0x8900 ||
+            BranchByteTarget(loopPc + 12, loopBranchOpcode) != loopPc)
+        {
+            return false;
+        }
+
+        uint routinePc = ReadPcRelativeLongLiteral(peekBus, loopPc + 2, routineLiteralOpcode);
+        if (!TryReadStableWordChangeMonitor(
+                peekBus,
+                routinePc,
+                readWord,
+                out uint sourceAddress,
+                out uint latchAddress,
+                out ushort currentValue))
+        {
+            return false;
+        }
+
+        int iterations = maxCycles / CyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        cycles = checked(iterations * CyclesPerIteration);
+        Cycles += cycles;
+        R[0] = 0;
+        R[1] = SignExtend16(currentValue);
+        R[4] = SignExtend16(currentValue);
+        R[13] = latchAddress;
+        R[14] = sourceAddress;
+        SetT(true);
+        LastOpcode = loopBranchOpcode;
+        LastOpcodePc = loopPc + 12;
+        PC = loopPc;
+        return true;
+    }
+
     public bool TryFastForwardNopDtBfDelayLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -6196,6 +6262,106 @@ Done:
             (branchOpcode & 0xFF00) == 0x8900;
     }
 
+    public bool TryFastForwardMovLiteralWordTstBfPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!TryReadMovLiteralWordTstBfPattern(peekBus, loopPc, out ushort literalOpcode, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode))
+        {
+            if (PC < 2 || !TryReadMovLiteralWordTstBfPattern(peekBus, PC - 2, out literalOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+            {
+                if (PC < 4 || !TryReadMovLiteralWordTstBfPattern(peekBus, PC - 4, out literalOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+                {
+                    if (PC < 6 || !TryReadMovLiteralWordTstBfPattern(peekBus, PC - 6, out literalOpcode, out loadOpcode, out testOpcode, out branchOpcode))
+                    {
+                        return false;
+                    }
+
+                    loopPc = PC - 6;
+                }
+                else
+                {
+                    loopPc = PC - 4;
+                }
+            }
+            else
+            {
+                loopPc = PC - 2;
+            }
+        }
+
+        int literalRegister = (literalOpcode >> 8) & 0x0F;
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int testN = (testOpcode >> 8) & 0x0F;
+        int testM = (testOpcode >> 4) & 0x0F;
+        if (loadSource != literalRegister ||
+            testN != loadDestination ||
+            testM != loadDestination)
+        {
+            return false;
+        }
+
+        int displacement = (sbyte)branchOpcode;
+        uint target = loopPc + 10 + (uint)(displacement * 2);
+        if (target != loopPc)
+        {
+            return false;
+        }
+
+        uint address = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        if (!peekBus.TryPeekWord(address, out ushort value) || value == 0)
+        {
+            return false;
+        }
+
+        R[literalRegister] = address;
+        R[loadDestination] = SignExtend16(value);
+        SetT(false);
+        PC = loopPc;
+        cycles = maxCycles;
+        Cycles += cycles;
+        LastOpcode = branchOpcode;
+        LastOpcodePc = loopPc + 6;
+        return true;
+    }
+
+    private static bool TryReadMovLiteralWordTstBfPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out ushort literalOpcode,
+        out ushort loadOpcode,
+        out ushort testOpcode,
+        out ushort branchOpcode)
+    {
+        literalOpcode = 0;
+        loadOpcode = 0;
+        testOpcode = 0;
+        branchOpcode = 0;
+        if (!peekBus.TryPeekWord(pc, out literalOpcode) ||
+            !peekBus.TryPeekWord(pc + 2, out loadOpcode) ||
+            !peekBus.TryPeekWord(pc + 4, out testOpcode) ||
+            !peekBus.TryPeekWord(pc + 6, out branchOpcode))
+        {
+            return false;
+        }
+
+        return (literalOpcode & 0xF000) == 0xD000 &&
+            (loadOpcode & 0xF00F) == 0x6001 &&
+            (testOpcode & 0xF00F) == 0x2008 &&
+            (branchOpcode & 0xFF00) == 0x8B00;
+    }
+
     public bool TryFastForwardMovLiteralWordCmpEqBtPollLoop(int maxCycles, out int cycles)
     {
         cycles = 0;
@@ -6802,9 +6968,14 @@ Done:
 
     public bool TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(int maxCycles, out int cycles)
     {
-        const int MaxBurstCycles = 4096;
+        return TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(maxCycles, maxBurstCycles: 4096, out cycles);
+    }
+
+    public bool TryFastForwardLiteralByteDisplacementTstRegisterBtPollLoop(int maxCycles, int maxBurstCycles, out int cycles)
+    {
         cycles = 0;
         if (maxCycles <= 0 ||
+            maxBurstCycles <= 0 ||
             Halted ||
             HasAcceptablePendingInterrupt ||
             DelaySlotActive ||
@@ -6875,7 +7046,7 @@ Done:
         R[0] = SignExtend8(byteValue);
         SetT(true);
         PC = loadPc;
-        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        cycles = Math.Min(maxCycles, maxBurstCycles);
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loadPc + 4;
@@ -7325,6 +7496,83 @@ Done:
             return false;
         }
 
+        return true;
+    }
+
+    private static bool TryReadStableWordChangeMonitor(
+        ISh2PeekBus peekBus,
+        uint routinePc,
+        Func<uint, ushort?> readWord,
+        out uint sourceAddress,
+        out uint latchAddress,
+        out ushort currentValue)
+    {
+        sourceAddress = 0;
+        latchAddress = 0;
+        currentValue = 0;
+        if (!peekBus.TryPeekWord(routinePc + 0, out ushort sourceLiteralOpcode) ||
+            (sourceLiteralOpcode & 0xF000) != 0xD000 ||
+            !peekBus.TryPeekWord(routinePc + 2, out ushort firstReadOpcode) ||
+            (firstReadOpcode & 0xF00F) != 0x6001 ||
+            !peekBus.TryPeekWord(routinePc + 4, out ushort copyOpcode) ||
+            copyOpcode != 0x6103 ||
+            !peekBus.TryPeekWord(routinePc + 6, out ushort secondReadOpcode) ||
+            secondReadOpcode != firstReadOpcode ||
+            !peekBus.TryPeekWord(routinePc + 8, out ushort stableCompareOpcode) ||
+            stableCompareOpcode != 0x3100 ||
+            !peekBus.TryPeekWord(routinePc + 10, out ushort unstableBranchOpcode) ||
+            (unstableBranchOpcode & 0xFF00) != 0x8B00 ||
+            BranchByteTarget(routinePc + 10, unstableBranchOpcode) != routinePc + 2 ||
+            !peekBus.TryPeekWord(routinePc + 12, out ushort latchLiteralOpcode) ||
+            (latchLiteralOpcode & 0xF000) != 0xD000 ||
+            !peekBus.TryPeekWord(routinePc + 14, out ushort latchReadOpcode) ||
+            (latchReadOpcode & 0xF00F) != 0x6001 ||
+            !peekBus.TryPeekWord(routinePc + 16, out ushort latchCompareOpcode) ||
+            latchCompareOpcode != 0x3400 ||
+            !peekBus.TryPeekWord(routinePc + 18, out ushort unchangedBranchOpcode) ||
+            (unchangedBranchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        uint unchangedPc = BranchByteTarget(routinePc + 18, unchangedBranchOpcode);
+        if (!peekBus.TryPeekWord(unchangedPc, out ushort zeroOpcode) ||
+            zeroOpcode != 0x200A ||
+            !peekBus.TryPeekWord(unchangedPc + 2, out ushort rtsOpcode) ||
+            rtsOpcode != 0x000B ||
+            !peekBus.TryPeekWord(unchangedPc + 4, out ushort rtsDelayOpcode) ||
+            rtsDelayOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        int readRegister = (firstReadOpcode >> 4) & 0x0F;
+        int readDestination = (firstReadOpcode >> 8) & 0x0F;
+        int latchRegister = (latchReadOpcode >> 4) & 0x0F;
+        int latchDestination = (latchReadOpcode >> 8) & 0x0F;
+        if (readDestination != 0 ||
+            readRegister != ((sourceLiteralOpcode >> 8) & 0x0F) ||
+            latchDestination != 4 ||
+            latchRegister != ((latchLiteralOpcode >> 8) & 0x0F))
+        {
+            return false;
+        }
+
+        sourceAddress = ReadPcRelativeLongLiteral(peekBus, routinePc, sourceLiteralOpcode);
+        latchAddress = ReadPcRelativeLongLiteral(peekBus, routinePc + 12, latchLiteralOpcode);
+        ushort? firstValue = readWord(sourceAddress);
+        ushort? secondValue = readWord(sourceAddress);
+        ushort? latchedValue = readWord(latchAddress);
+        if (!firstValue.HasValue ||
+            !secondValue.HasValue ||
+            !latchedValue.HasValue ||
+            firstValue.Value != secondValue.Value ||
+            firstValue.Value != latchedValue.Value)
+        {
+            return false;
+        }
+
+        currentValue = firstValue.Value;
         return true;
     }
 
