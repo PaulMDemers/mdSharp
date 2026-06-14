@@ -1884,7 +1884,8 @@ void RenderRom(string romPath, string outputPath, int frames, int instructionsPe
             $"byteFillDbf={machine.M68kMoveByteFillDbfFastPathHits:N0}/{machine.M68kMoveByteFillDbfFastPathCycles:N0} " +
             $"byteCopyDbf={machine.M68kMoveByteCopyDbfFastPathHits:N0}/{machine.M68kMoveByteCopyDbfFastPathCycles:N0} " +
             $"wordVdpFillDbf={machine.M68kMoveWordVdpFillDbfFastPathHits:N0}/{machine.M68kMoveWordVdpFillDbfFastPathCycles:N0} " +
-            $"bitReader={machine.M68kBitReaderFastPathHits:N0}/{machine.M68kBitReaderFastPathCycles:N0}");
+            $"bitReader={machine.M68kBitReaderFastPathHits:N0}/{machine.M68kBitReaderFastPathCycles:N0} " +
+            $"wordPairCmp={machine.M68kWordPairCompareFastPathHits:N0}/{machine.M68kWordPairCompareFastPathCycles:N0}");
         PrintThirtyTwoXFastPathDiagnostics(thirtyTwoX);
         Console.WriteLine($"32X sys={FormatThirtyTwoXWords(thirtyTwoX, system: true, 0x00, 0x40)}");
         Console.WriteLine($"32X vdp={FormatThirtyTwoXWords(thirtyTwoX, system: false, 0x00, 0x10)}");

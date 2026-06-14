@@ -72,6 +72,8 @@ public sealed class MegaDrive
     public long M68kMoveWordVdpFillDbfFastPathCycles => _m68kMoveWordVdpFillDbfFastPathCycles;
     public long M68kBitReaderFastPathHits => _m68kBitReaderFastPathHits;
     public long M68kBitReaderFastPathCycles => _m68kBitReaderFastPathCycles;
+    public long M68kWordPairCompareFastPathHits => _m68kWordPairCompareFastPathHits;
+    public long M68kWordPairCompareFastPathCycles => _m68kWordPairCompareFastPathCycles;
     private byte _pendingM68kInterruptLevels;
     private double _audioSampleCarry;
     private double _psgFilter;
@@ -104,6 +106,8 @@ public sealed class MegaDrive
     private long _m68kMoveWordVdpFillDbfFastPathCycles;
     private long _m68kBitReaderFastPathHits;
     private long _m68kBitReaderFastPathCycles;
+    private long _m68kWordPairCompareFastPathHits;
+    private long _m68kWordPairCompareFastPathCycles;
 
     public void Reset()
     {
@@ -143,6 +147,8 @@ public sealed class MegaDrive
         _m68kMoveWordVdpFillDbfFastPathCycles = 0;
         _m68kBitReaderFastPathHits = 0;
         _m68kBitReaderFastPathCycles = 0;
+        _m68kWordPairCompareFastPathHits = 0;
+        _m68kWordPairCompareFastPathCycles = 0;
     }
 
     public void StepInstruction()
@@ -347,6 +353,16 @@ public sealed class MegaDrive
                 RunThirtyTwoXForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider);
                 consumed += bitReaderCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - bitReaderInstructions);
+                continue;
+            }
+
+            if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(cycleBudget - consumed, out int wordPairCycles, out int wordPairInstructions))
+            {
+                RecordM68kFastPath(wordPairCycles, ref _m68kWordPairCompareFastPathHits, ref _m68kWordPairCompareFastPathCycles);
+                RunThirtyTwoXForMasterCycles((long)wordPairCycles * GenesisScheduler.M68kDivider);
+                consumed += wordPairCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - wordPairInstructions);
                 continue;
             }
 

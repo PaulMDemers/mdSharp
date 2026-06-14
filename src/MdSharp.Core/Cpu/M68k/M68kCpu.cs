@@ -404,6 +404,98 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardWordPairCompareSubroutineDbfLoop(int cycleBudget, out int cycles, out int instructionCount)
+    {
+        const int CyclesPerTakenEqualIteration = 76;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerTakenEqualIteration)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (_bus.ReadWord(loopPc) != 0x6100)
+        {
+            return false;
+        }
+
+        short subroutineDisplacement = (short)_bus.ReadWord(loopPc + 2);
+        uint helperPc = NormalizePc(unchecked(loopPc + 2u + (uint)subroutineDisplacement));
+        ushort dbf = _bus.ReadWord(loopPc + 4);
+        if ((dbf & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short dbfDisplacement = (short)_bus.ReadWord(loopPc + 6);
+        if (NormalizePc(unchecked(loopPc + 6u + (uint)dbfDisplacement)) != loopPc)
+        {
+            return false;
+        }
+
+        if (_bus.ReadWord(helperPc + 0) != 0x3018 ||
+            _bus.ReadWord(helperPc + 2) != 0x3219 ||
+            _bus.ReadWord(helperPc + 4) != 0x3800 ||
+            _bus.ReadWord(helperPc + 6) != 0xB240 ||
+            _bus.ReadWord(helperPc + 8) != 0x6700)
+        {
+            return false;
+        }
+
+        short equalBranchDisplacement = (short)_bus.ReadWord(helperPc + 10);
+        uint equalTarget = NormalizePc(unchecked(helperPc + 10u + (uint)equalBranchDisplacement));
+        if (_bus.ReadWord(equalTarget) != 0x4E75)
+        {
+            return false;
+        }
+
+        int counterRegister = dbf & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        int maxIterations = Math.Min(counter, cycleBudget / CyclesPerTakenEqualIteration);
+        uint a0 = A[0];
+        uint a1 = A[1];
+        ushort lastWord = 0;
+        int iterations = 0;
+        while (iterations < maxIterations)
+        {
+            ushort left = _bus.ReadWord(a0);
+            ushort right = _bus.ReadWord(a1);
+            if (left != right)
+            {
+                break;
+            }
+
+            lastWord = left;
+            a0 = unchecked(a0 + 2);
+            a1 = unchecked(a1 + 2);
+            iterations++;
+        }
+
+        if (iterations == 0)
+        {
+            return false;
+        }
+
+        A[0] = a0;
+        A[1] = a1;
+        D[0] = (D[0] & 0xFFFF_0000u) | lastWord;
+        D[1] = (D[1] & 0xFFFF_0000u) | lastWord;
+        D[4] = (D[4] & 0xFFFF_0000u) | lastWord;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | unchecked((ushort)(counter - iterations));
+        SetSubFlags(lastWord, lastWord, 0, OperandSize.Word);
+
+        cycles = iterations * CyclesPerTakenEqualIteration;
+        instructionCount = iterations * 8;
+        Cycles += cycles;
+        return true;
+    }
+
     public bool TryFastForwardMoveWordAbsoluteDbfLoop(
         int cycleBudget,
         Func<uint, bool> canFastForwardAddress,

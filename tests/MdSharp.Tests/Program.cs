@@ -245,6 +245,8 @@ Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostInc
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
 Run("68000 shift-register bit reader loop fast-forward", M68kShiftRegisterBitReaderLoopFastForward);
 Run("MegaDrive records 68000 bit-reader fast-path counters", MegaDriveRecordsM68kBitReaderFastPathCounters);
+Run("68000 word-pair compare subroutine DBF loop fast-forward", M68kWordPairCompareSubroutineDbfLoopFastForward);
+Run("MegaDrive records 68000 word-pair compare fast-path counters", MegaDriveRecordsM68kWordPairCompareFastPathCounters);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 CMP.L BEQ wait loop fast-forward", M68kCmpLongBeqWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
@@ -12028,6 +12030,57 @@ void MegaDriveRecordsM68kBitReaderFastPathCounters()
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the bit-reader loop");
 }
 
+void M68kWordPairCompareSubroutineDbfLoopFastForward()
+{
+    byte[] rom = CreateWordPairCompareLoopRom(stopAfterLoop: true);
+    MegaDrive interpreted = new(CartridgeImage.FromBytes(rom));
+    MegaDrive accelerated = new(CartridgeImage.FromBytes(rom));
+    interpreted.Reset();
+    accelerated.Reset();
+    SeedWordPairCompareState(interpreted);
+    SeedWordPairCompareState(accelerated);
+
+    for (int i = 0; i < 16; i++)
+    {
+        interpreted.StepInstruction();
+    }
+
+    AssertEqual(0x0000_0200u, interpreted.MainCpu.PC);
+    AssertTrue(
+        accelerated.MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(152, out int cycles, out int instructions),
+        "fast-forward should recognize equal word-pair compare helper iterations");
+    AssertEqual(152, cycles);
+    AssertEqual(16, instructions);
+    AssertEqual(interpreted.MainCpu.PC, accelerated.MainCpu.PC);
+    AssertEqual(interpreted.MainCpu.SR, accelerated.MainCpu.SR);
+    AssertEqual(interpreted.MainCpu.A[0], accelerated.MainCpu.A[0]);
+    AssertEqual(interpreted.MainCpu.A[1], accelerated.MainCpu.A[1]);
+    AssertEqual(interpreted.MainCpu.D[0], accelerated.MainCpu.D[0]);
+    AssertEqual(interpreted.MainCpu.D[1], accelerated.MainCpu.D[1]);
+    AssertEqual(interpreted.MainCpu.D[4], accelerated.MainCpu.D[4]);
+    AssertEqual(interpreted.MainCpu.D[7], accelerated.MainCpu.D[7]);
+
+    accelerated.Bus.WriteWord(accelerated.MainCpu.A[1], 0x9999);
+    AssertTrue(
+        !accelerated.MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(152, out _, out _),
+        "mismatched word pairs should fall back to the interpreter");
+}
+
+void MegaDriveRecordsM68kWordPairCompareFastPathCounters()
+{
+    byte[] rom = CreateWordPairCompareLoopRom(stopAfterLoop: true);
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    SeedWordPairCompareState(machine);
+
+    machine.RunFrame(4_000);
+
+    AssertTrue(machine.M68kWordPairCompareFastPathHits > 0, "scheduler should record word-pair compare fast-path hits");
+    AssertTrue(machine.M68kWordPairCompareFastPathCycles > 0, "scheduler should record word-pair compare fast-path cycles");
+    AssertTrue(machine.M68kFastPathHits >= machine.M68kWordPairCompareFastPathHits, "word-pair compare hits should contribute to aggregate 68000 fast-path hits");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the word-pair compare loop");
+}
+
 byte[] CreateBitReaderLoopRom(bool stopAfterLoop = false)
 {
     byte[] rom = CreateRom();
@@ -12062,6 +12115,52 @@ void SeedBitReaderState(MegaDrive machine)
     machine.MainCpu.D[5] = 0xABCD_EF00;
     machine.MainCpu.A[0] = 0x00FF_1003;
     machine.Bus.WriteByte(0x00FF_1003, 0xB0);
+}
+
+byte[] CreateWordPairCompareLoopRom(bool stopAfterLoop = false)
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x6100); // BSR.W helper
+    EmitWord(rom, ref pc, 0x00FE);
+    EmitWord(rom, ref pc, 0x51CF); // DBF D7,loop
+    EmitWord(rom, ref pc, 0xFFFA);
+    if (stopAfterLoop)
+    {
+        EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+        EmitWord(rom, ref pc, 0x2700);
+    }
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x3018); // MOVE.W (A0)+,D0
+    EmitWord(rom, ref pc, 0x3219); // MOVE.W (A1)+,D1
+    EmitWord(rom, ref pc, 0x3800); // MOVE.W D0,D4
+    EmitWord(rom, ref pc, 0xB240); // CMP.W D0,D1
+    EmitWord(rom, ref pc, 0x6700); // BEQ.W return
+    EmitWord(rom, ref pc, 0x0004);
+    EmitWord(rom, ref pc, 0x4E71); // mismatch path placeholder
+    EmitWord(rom, ref pc, 0x4E75); // RTS
+    return rom;
+}
+
+void SeedWordPairCompareState(MegaDrive machine)
+{
+    machine.MainCpu.A[0] = 0x00FF_1000;
+    machine.MainCpu.A[1] = 0x00FF_1100;
+    machine.MainCpu.A[7] = 0x00FF_2000;
+    machine.MainCpu.D[0] = 0xAAAA_0000;
+    machine.MainCpu.D[1] = 0xBBBB_0000;
+    machine.MainCpu.D[4] = 0xCCCC_0000;
+    machine.MainCpu.D[7] = 4;
+    for (int i = 0; i < 5; i++)
+    {
+        ushort value = (ushort)(0x1200 + i);
+        machine.Bus.WriteWord((uint)(0x00FF_1000 + (i * 2)), value);
+        machine.Bus.WriteWord((uint)(0x00FF_1100 + (i * 2)), value);
+    }
 }
 
 void M68kTstLongBneWaitLoopFastForward()
