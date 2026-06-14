@@ -315,6 +315,95 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardShiftRegisterBitReaderLoop(int cycleBudget, out int cycles, out int instructionCount)
+    {
+        const int NoRefillCycles = 56;
+        const int RefillCycles = 76;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < NoRefillCycles)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        if (_bus.ReadWord(pc) != 0x4A44 ||
+            _bus.ReadWord(pc + 2) != 0x6606 ||
+            _bus.ReadWord(pc + 4) != 0x1A10 ||
+            _bus.ReadWord(pc + 6) != 0x5388 ||
+            _bus.ReadWord(pc + 8) != 0x7808 ||
+            _bus.ReadWord(pc + 10) != 0xE305 ||
+            _bus.ReadWord(pc + 12) != 0xE350 ||
+            _bus.ReadWord(pc + 14) != 0x5344 ||
+            _bus.ReadWord(pc + 16) != 0x5341 ||
+            _bus.ReadWord(pc + 18) != 0x6AEC)
+        {
+            return false;
+        }
+
+        short bitCounter = unchecked((short)(D[1] & 0xFFFF));
+        if (bitCounter < 0)
+        {
+            return false;
+        }
+
+        bool completed = false;
+        while (bitCounter >= 0)
+        {
+            ushort d4 = (ushort)D[4];
+            int iterationCycles = d4 == 0 ? RefillCycles : NoRefillCycles;
+            if (cycles + iterationCycles > cycleBudget)
+            {
+                break;
+            }
+
+            if (d4 == 0)
+            {
+                byte refill = _bus.ReadByte(A[0]);
+                D[5] = (D[5] & 0xFFFF_FF00u) | refill;
+                A[0] = unchecked(A[0] - 1);
+                d4 = 8;
+                D[4] = (D[4] & 0xFFFF_0000u) | d4;
+                instructionCount += 3;
+            }
+
+            byte d5 = (byte)D[5];
+            bool extend = (d5 & 0x80) != 0;
+            d5 = (byte)(d5 << 1);
+            D[5] = (D[5] & 0xFFFF_FF00u) | d5;
+
+            ushort d0 = (ushort)D[0];
+            d0 = (ushort)((d0 << 1) | (extend ? 1 : 0));
+            D[0] = (D[0] & 0xFFFF_0000u) | d0;
+
+            d4--;
+            D[4] = (D[4] & 0xFFFF_0000u) | d4;
+
+            ushort oldD1 = (ushort)D[1];
+            ushort newD1 = unchecked((ushort)(oldD1 - 1));
+            D[1] = (D[1] & 0xFFFF_0000u) | newD1;
+            SetSubFlags(oldD1, 1, newD1, OperandSize.Word);
+
+            cycles += iterationCycles;
+            instructionCount += 7;
+            bitCounter = unchecked((short)newD1);
+            if (bitCounter < 0)
+            {
+                completed = true;
+                break;
+            }
+        }
+
+        if (cycles == 0)
+        {
+            return false;
+        }
+
+        PC = completed ? NormalizePc(pc + 20) : pc;
+        Cycles += cycles;
+        return true;
+    }
+
     public bool TryFastForwardMoveWordAbsoluteDbfLoop(
         int cycleBudget,
         Func<uint, bool> canFastForwardAddress,

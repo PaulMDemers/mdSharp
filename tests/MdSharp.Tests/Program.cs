@@ -243,6 +243,8 @@ Run("MegaDrive records 68000 fast-path counters", MegaDriveRecordsM68kFastPathCo
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
 Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementCopyDbfLoopFastForward);
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
+Run("68000 shift-register bit reader loop fast-forward", M68kShiftRegisterBitReaderLoopFastForward);
+Run("MegaDrive records 68000 bit-reader fast-path counters", MegaDriveRecordsM68kBitReaderFastPathCounters);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 CMP.L BEQ wait loop fast-forward", M68kCmpLongBeqWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
@@ -11979,6 +11981,87 @@ void M68kMoveWordAbsoluteDbfFillLoopFastForward()
     AssertEqual(0xFFFFu, machine.MainCpu.D[1] & 0xFFFF);
     AssertEqual((ushort)0x55AA, machine.Bus.ReadWord(0x00FF_2000));
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the absolute word fill loop");
+}
+
+void M68kShiftRegisterBitReaderLoopFastForward()
+{
+    byte[] rom = CreateBitReaderLoopRom();
+    MegaDrive interpreted = new(CartridgeImage.FromBytes(rom));
+    MegaDrive accelerated = new(CartridgeImage.FromBytes(rom));
+    interpreted.Reset();
+    accelerated.Reset();
+    SeedBitReaderState(interpreted);
+    SeedBitReaderState(accelerated);
+
+    for (int i = 0; interpreted.MainCpu.PC != 0x0000_0214 && i < 64; i++)
+    {
+        interpreted.StepInstruction();
+    }
+
+    AssertEqual(0x0000_0214u, interpreted.MainCpu.PC);
+
+    AssertTrue(
+        accelerated.MainCpu.TryFastForwardShiftRegisterBitReaderLoop(1024, out int cycles, out int instructions),
+        "fast-forward should recognize the shift-register bit reader loop");
+    AssertTrue(cycles > 0, "fast-forward should consume loop cycles");
+    AssertTrue(instructions > 0, "fast-forward should report skipped instructions");
+    AssertEqual(interpreted.MainCpu.PC, accelerated.MainCpu.PC);
+    AssertEqual(interpreted.MainCpu.SR, accelerated.MainCpu.SR);
+    AssertEqual(interpreted.MainCpu.A[0], accelerated.MainCpu.A[0]);
+    AssertEqual(interpreted.MainCpu.D[0], accelerated.MainCpu.D[0]);
+    AssertEqual(interpreted.MainCpu.D[1], accelerated.MainCpu.D[1]);
+    AssertEqual(interpreted.MainCpu.D[4], accelerated.MainCpu.D[4]);
+    AssertEqual(interpreted.MainCpu.D[5], accelerated.MainCpu.D[5]);
+}
+
+void MegaDriveRecordsM68kBitReaderFastPathCounters()
+{
+    byte[] rom = CreateBitReaderLoopRom(stopAfterLoop: true);
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    SeedBitReaderState(machine);
+    machine.RunFrame(4_000);
+
+    AssertTrue(machine.M68kBitReaderFastPathHits > 0, "scheduler should record bit-reader fast-path hits");
+    AssertTrue(machine.M68kBitReaderFastPathCycles > 0, "scheduler should record bit-reader fast-path cycles");
+    AssertTrue(machine.M68kFastPathHits >= machine.M68kBitReaderFastPathHits, "bit-reader hits should contribute to aggregate 68000 fast-path hits");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the bit-reader loop");
+}
+
+byte[] CreateBitReaderLoopRom(bool stopAfterLoop = false)
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x4A44); // TST.W D4
+    EmitWord(rom, ref pc, 0x6606); // BNE.S bits-ready
+    EmitWord(rom, ref pc, 0x1A10); // MOVE.B (A0),D5
+    EmitWord(rom, ref pc, 0x5388); // SUBQ.L #1,A0
+    EmitWord(rom, ref pc, 0x7808); // MOVEQ #8,D4
+    EmitWord(rom, ref pc, 0xE305); // ASL.B #1,D5
+    EmitWord(rom, ref pc, 0xE350); // ROXL.W #1,D0
+    EmitWord(rom, ref pc, 0x5344); // SUBQ.W #1,D4
+    EmitWord(rom, ref pc, 0x5341); // SUBQ.W #1,D1
+    EmitWord(rom, ref pc, 0x6AEC); // BPL.S loop
+    if (stopAfterLoop)
+    {
+        EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+        EmitWord(rom, ref pc, 0x2700);
+    }
+
+    return rom;
+}
+
+void SeedBitReaderState(MegaDrive machine)
+{
+    machine.MainCpu.D[0] = 0x1234_0000;
+    machine.MainCpu.D[1] = 0x5678_0003;
+    machine.MainCpu.D[4] = 0;
+    machine.MainCpu.D[5] = 0xABCD_EF00;
+    machine.MainCpu.A[0] = 0x00FF_1003;
+    machine.Bus.WriteByte(0x00FF_1003, 0xB0);
 }
 
 void M68kTstLongBneWaitLoopFastForward()

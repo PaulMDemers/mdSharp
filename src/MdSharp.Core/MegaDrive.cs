@@ -70,6 +70,8 @@ public sealed class MegaDrive
     public long M68kMoveByteCopyDbfFastPathCycles => _m68kMoveByteCopyDbfFastPathCycles;
     public long M68kMoveWordVdpFillDbfFastPathHits => _m68kMoveWordVdpFillDbfFastPathHits;
     public long M68kMoveWordVdpFillDbfFastPathCycles => _m68kMoveWordVdpFillDbfFastPathCycles;
+    public long M68kBitReaderFastPathHits => _m68kBitReaderFastPathHits;
+    public long M68kBitReaderFastPathCycles => _m68kBitReaderFastPathCycles;
     private byte _pendingM68kInterruptLevels;
     private double _audioSampleCarry;
     private double _psgFilter;
@@ -100,6 +102,8 @@ public sealed class MegaDrive
     private long _m68kMoveByteCopyDbfFastPathCycles;
     private long _m68kMoveWordVdpFillDbfFastPathHits;
     private long _m68kMoveWordVdpFillDbfFastPathCycles;
+    private long _m68kBitReaderFastPathHits;
+    private long _m68kBitReaderFastPathCycles;
 
     public void Reset()
     {
@@ -137,6 +141,8 @@ public sealed class MegaDrive
         _m68kMoveByteCopyDbfFastPathCycles = 0;
         _m68kMoveWordVdpFillDbfFastPathHits = 0;
         _m68kMoveWordVdpFillDbfFastPathCycles = 0;
+        _m68kBitReaderFastPathHits = 0;
+        _m68kBitReaderFastPathCycles = 0;
     }
 
     public void StepInstruction()
@@ -331,6 +337,16 @@ public sealed class MegaDrive
                 RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider);
                 consumed += cmpWaitLoopCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - cmpWaitLoopInstructions);
+                continue;
+            }
+
+            if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardShiftRegisterBitReaderLoop(cycleBudget - consumed, out int bitReaderCycles, out int bitReaderInstructions))
+            {
+                RecordM68kFastPath(bitReaderCycles, ref _m68kBitReaderFastPathHits, ref _m68kBitReaderFastPathCycles);
+                RunThirtyTwoXForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider);
+                consumed += bitReaderCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - bitReaderInstructions);
                 continue;
             }
 
