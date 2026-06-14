@@ -3780,7 +3780,8 @@ public sealed class ThirtyTwoXDevice
             ((MasterSh2.PC is >= 0x0600_0890 and <= 0x0600_089C &&
                 SlaveSh2.PC == 0x0600_0DCC) ||
                 (MasterSh2.PC is >= 0x0600_052E and <= 0x0600_064C &&
-                    SlaveSh2.PC == 0x0600_01B0));
+                    (SlaveSh2.PC == 0x0600_01B0 ||
+                        SlaveSh2.PC is >= 0x0600_04C0 and <= 0x0600_04C8)));
     }
 
     private ushort ApplyTvFormatBit(ushort value)

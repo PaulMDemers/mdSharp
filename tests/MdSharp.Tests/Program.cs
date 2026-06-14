@@ -8016,6 +8016,25 @@ void ThirtyTwoXAdapterControlAndCommunicationPorts()
     AssertEqual((ushort)0x0000, vdpControlUnarmedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12));
     AssertEqual((ushort)0x0000, vdpControlUnarmedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2));
 
+    ThirtyTwoXDevice nbaVdpHandoffDevice = new();
+    nbaVdpHandoffDevice.Reset();
+    nbaVdpHandoffDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);
+    ThirtyTwoXDevice.ThirtyTwoXState nbaVdpHandoffState = nbaVdpHandoffDevice.CaptureState();
+    nbaVdpHandoffDevice.RestoreState(nbaVdpHandoffState with
+    {
+        VdpAccessGrantedToSh2 = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = true,
+        BootRomPostStartSignatureHiddenFromSh2 = true,
+        MasterSh2 = nbaVdpHandoffState.MasterSh2 with { PC = 0x0600_05D0 },
+        SlaveSh2 = nbaVdpHandoffState.SlaveSh2 with { PC = 0x0600_04C4 },
+    });
+    nbaVdpHandoffDevice.WriteVdpRegisterByte(ThirtyTwoXHardwareProfile.FrameBufferControlOffset + 1, 0x01, "M68K");
+    AssertTrue(
+        (nbaVdpHandoffDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0001) != 0,
+        "NBA Jam-style hidden post-start VDP handoff should allow the 68000 to acknowledge FS");
+
     ThirtyTwoXDevice retailUpperCommandDevice = new();
     retailUpperCommandDevice.Reset();
     retailUpperCommandDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x0083);

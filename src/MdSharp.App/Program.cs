@@ -8123,6 +8123,8 @@ bool CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
     return product is "GM MK-84506-00" or "GM T-04803F-00" or "GM MK-84701-00" or "GM G-XXXX   00" ||
         domestic == "DOOM" ||
         overseas == "DOOM" ||
+        domestic.Contains("NBA JAM", StringComparison.Ordinal) ||
+        overseas.Contains("NBA JAM", StringComparison.Ordinal) ||
         domestic.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
         overseas.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
         domestic.Contains("VIRTUA FIGHTER", StringComparison.Ordinal) ||
