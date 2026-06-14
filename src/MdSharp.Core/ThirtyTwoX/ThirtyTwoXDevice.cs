@@ -1699,6 +1699,17 @@ public sealed class ThirtyTwoXDevice
         if (canProbeFastPath && IsSh2FastPathGroupEnabled("poll"))
         {
             if (nextOpcode == 0x4F22 &&
+                cpu.TryFastForwardStableWordChangeDispatchPollLoop(
+                    cycleBudget,
+                    _sh2WordReaders[cpuIndex],
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (nextOpcode == 0x4F22 &&
                 cpu.TryFastForwardStableWordChangeSubroutinePollLoop(
                     cycleBudget,
                     _sh2WordReaders[cpuIndex],

@@ -37,6 +37,7 @@ Run("32X SH-2 MOV.B DT BF/S ADD fill loop fast-forward", ThirtyTwoXSh2MovBStoreD
 Run("32X SH-2 GBR word helper JSR BF/S poll loop fast-forward", ThirtyTwoXSh2GbrWordHelperJsrBfsPollLoopFastForward);
 Run("32X SH-2 long TST immediate BT poll loop fast-forward", ThirtyTwoXSh2LongTstImmediateBtPollLoopFastForward);
 Run("32X SH-2 DMA idle communication mismatch poll loop fast-forward", ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward);
+Run("32X SH-2 stable word dispatch poll loop fast-forward", ThirtyTwoXSh2StableWordDispatchPollLoopFastForward);
 Run("32X SH-2 long reload CMP/EQ BF/S poll loop fast-forward", ThirtyTwoXSh2LongReloadCmpEqBfsPollLoopFastForward);
 Run("32X SH-2 byte displacement dual TST/BRA poll loop fast-forward", ThirtyTwoXSh2ByteDisplacementDualTstBraPollLoopFastForward);
 Run("32X SH-2 word high-bit mask transform fast-forward", ThirtyTwoXSh2WordHighBitMaskTransformFastForward);
@@ -3163,6 +3164,68 @@ void ThirtyTwoXSh2DmaIdleCommunicationLongMismatchPollLoopFastForward()
     AssertTrue(
         !cpu.TryFastForwardDmaIdleCommunicationLongMismatchPollLoop(60, bus.TryReadByte, out _),
         "DMA idle communication mismatch loop should fall back once the signature matches");
+}
+
+void ThirtyTwoXSh2StableWordDispatchPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0A80;
+    const uint RoutinePc = 0x0601_7600;
+    const uint SourceAddress = 0x2000_4020;
+    const uint LatchAddress = 0x0601_7634;
+    SyntheticSh2Bus bus = new();
+    ushort[] loopOpcodes =
+    [
+        0x4F22, 0xD01B, 0x400B, 0x0009, 0x4F26, 0x8802, 0x892D,
+        0x8803, 0x8919, 0x8804, 0x8901, 0xAFF3, 0x0009
+    ];
+    for (int i = 0; i < loopOpcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(LoopPc + (uint)(i * 2), loopOpcodes[i]);
+    }
+
+    bus.WriteLong(0x0600_0AF0, RoutinePc);
+    ushort[] routineOpcodes =
+    [
+        0xDE07, 0x60E1, 0x6103, 0x60E1, 0x3100, 0x8BFA, 0xDD05,
+        0x64D1, 0x3400, 0x890B
+    ];
+    for (int i = 0; i < routineOpcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(RoutinePc + (uint)(i * 2), routineOpcodes[i]);
+    }
+
+    bus.WriteInstructionWord(RoutinePc + 0x2C, 0x200A); // XOR R0,R0
+    bus.WriteInstructionWord(RoutinePc + 0x2E, 0x211A); // XOR R1,R1
+    bus.WriteInstructionWord(RoutinePc + 0x30, 0x000B); // RTS
+    bus.WriteInstructionWord(RoutinePc + 0x32, 0x0009); // NOP
+    bus.WriteLong(0x0601_7620, SourceAddress);
+    bus.WriteLong(0x0601_7624, LatchAddress);
+    bus.WriteWord(SourceAddress, 0xFFFF);
+    bus.WriteWord(LatchAddress, 0xFFFF);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(LoopPc);
+    SetSh2Property(cpu, nameof(Sh2Cpu.PR), 0x0601_8230u);
+    cpu.R[15] = 0x0603_EFF4;
+    AssertTrue(
+        cpu.TryFastForwardStableWordChangeDispatchPollLoop(400, bus.TryReadWord, out int cycles),
+        "stable word dispatch poll should fast-forward while the monitor returns zero");
+    AssertEqual(400, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x0601_8230u, cpu.PR);
+    AssertEqual(0x0603_EFF4u, cpu.R[15]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.R[1]);
+    AssertEqual(0xFFFF_FFFFu, cpu.R[4]);
+    AssertEqual(LatchAddress, cpu.R[13]);
+    AssertEqual(SourceAddress, cpu.R[14]);
+    AssertEqual(0u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc);
+    bus.WriteWord(SourceAddress, 0xFFFE);
+    AssertTrue(
+        !cpu.TryFastForwardStableWordChangeDispatchPollLoop(400, bus.TryReadWord, out _),
+        "stable word dispatch poll should fall back when the monitored word changes");
 }
 
 void ThirtyTwoXSh2LongReloadCmpEqBfsPollLoopFastForward()
