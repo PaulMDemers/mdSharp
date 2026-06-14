@@ -105,6 +105,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --audio-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --z80-trace <rom-file> <output.csv> [frames] [max-lines] [instructions-per-frame] [start-frame]");
     Console.WriteLine("  mdsharp --m68k-live-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [pc-start] [pc-end] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --m68k-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame] [pc-start] [pc-end]");
     Console.WriteLine("  mdsharp --32x-m68k-exception-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --32x-sdk-monitor-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --m68k-memory-read-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
@@ -1311,6 +1312,24 @@ if (args[0].Equals("--m68k-live-trace", StringComparison.OrdinalIgnoreCase))
     int maxLines = args.Length > 7 && int.TryParse(args[7], out int parsedMaxLines) ? parsedMaxLines : 4096;
     int startFrame = args.Length > 8 && int.TryParse(args[8], out int parsedStartFrame) ? parsedStartFrame : 0;
     TraceM68kLive(args[1], args[2], frames, instructionsPerFrame, pcStart, pcEnd, maxLines, startFrame);
+    return;
+}
+
+if (args[0].Equals("--m68k-pc-profile", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --m68k-pc-profile <rom-file> <output.csv> [frames] [instructions-per-frame] [top] [start-frame] [pc-start] [pc-end]");
+        Environment.Exit(1);
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 120;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    int top = args.Length > 5 && int.TryParse(args[5], out int parsedTop) ? parsedTop : 80;
+    int startFrame = args.Length > 6 && int.TryParse(args[6], out int parsedStartFrame) ? parsedStartFrame : 0;
+    uint pcStart = args.Length > 7 ? ParseNumber(args[7]) : 0;
+    uint pcEnd = args.Length > 8 ? ParseNumber(args[8]) : 0x00FF_FFFF;
+    ProfileM68kHotPcs(args[1], args[2], frames, instructionsPerFrame, top, startFrame, pcStart, pcEnd);
     return;
 }
 
@@ -11752,6 +11771,104 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
     Console.WriteLine(FormatState(machine));
 }
 
+void ProfileM68kHotPcs(string romPath, string outputPath, int frames, int instructionsPerFrame, int top, int startFrame, uint pcStart, uint pcEnd)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+    if (pcEnd < pcStart)
+    {
+        (pcStart, pcEnd) = (pcEnd, pcStart);
+    }
+
+    Dictionary<uint, M68kPcProfileSample> samples = [];
+    int currentFrame = 0;
+    long totalSamples = 0;
+    Action<M68kCpu.M68kInstructionTrace> observe = trace =>
+    {
+        if (trace.Pc < pcStart || trace.Pc > pcEnd)
+        {
+            return;
+        }
+
+        samples.TryGetValue(trace.Pc, out M68kPcProfileSample sample);
+        ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
+        sample.Count++;
+        sample.Opcode = trace.Opcode;
+        sample.NextPc = trace.NextPc;
+        sample.Frame = currentFrame;
+        sample.Sr = trace.Sr;
+        sample.D0 = trace.D0;
+        sample.D1 = trace.D1;
+        sample.D2 = trace.D2;
+        sample.D3 = trace.D3;
+        sample.A0 = trace.A0;
+        sample.A1 = trace.A1;
+        sample.A6 = trace.A6;
+        sample.Sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        sample.Sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
+        sample.MasterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
+        sample.SlavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
+        samples[trace.Pc] = sample;
+        totalSamples++;
+    };
+
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        int endFrame = startFrame + Math.Max(0, frames);
+        for (currentFrame = 0; currentFrame < endFrame; currentFrame++)
+        {
+            if (currentFrame == startFrame)
+            {
+                machine.MainCpu.InstructionObserver = observe;
+            }
+
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.InstructionObserver = null;
+        stopwatch.Stop();
+    }
+
+    int rank = 0;
+    using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
+    writer.WriteLine("rank,pc,opcode,nextPc,samples,percent,lastFrame,sr,d0,d1,d2,d3,a0,a1,a6,sys20,sys22,masterPc,slavePc");
+    foreach (KeyValuePair<uint, M68kPcProfileSample> entry in samples.OrderByDescending(pair => pair.Value.Count).ThenBy(pair => pair.Key).Take(Math.Max(0, top)))
+    {
+        rank++;
+        M68kPcProfileSample sample = entry.Value;
+        double percent = totalSamples == 0 ? 0.0 : (sample.Count * 100.0) / totalSamples;
+        writer.WriteLine(string.Join(
+            ',',
+            rank.ToString(CultureInfo.InvariantCulture),
+            $"${entry.Key:X8}",
+            $"${sample.Opcode:X4}",
+            $"${sample.NextPc:X8}",
+            sample.Count.ToString(CultureInfo.InvariantCulture),
+            percent.ToString("0.0000", CultureInfo.InvariantCulture),
+            sample.Frame.ToString(CultureInfo.InvariantCulture),
+            $"${sample.Sr:X4}",
+            $"${sample.D0:X8}",
+            $"${sample.D1:X8}",
+            $"${sample.D2:X8}",
+            $"${sample.D3:X8}",
+            $"${sample.A0:X8}",
+            $"${sample.A1:X8}",
+            $"${sample.A6:X8}",
+            $"${sample.Sys20:X4}",
+            $"${sample.Sys22:X4}",
+            $"${sample.MasterPc:X8}",
+            $"${sample.SlavePc:X8}"));
+    }
+
+    Console.WriteLine($"Profiled {Path.GetFileName(romPath)} 68K PCs for {frames:N0} frame(s), startFrame={startFrame:N0}, samples={totalSamples:N0}, elapsed={stopwatch.Elapsed.TotalSeconds:0.###}s");
+    Console.WriteLine($"Wrote top {Math.Min(top, samples.Count):N0} 68K PC sample row(s) to {Path.GetFullPath(outputPath)}");
+    Console.WriteLine(FormatState(machine));
+}
+
 void TraceM68kInterrupts(string romPath, string outputPath, int frames, int instructionsPerFrame, int maxLines, int startFrame)
 {
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
@@ -14683,6 +14800,26 @@ file sealed record VisualCheckpointSpec(string Id, string Name, string[] RomName
 file sealed record VisualCheckpointBaseline(string Id, string Sha256, string BmpPath);
 file sealed record MovieCheckpointSpec(string Id, string Name, string MoviePath, string RelativeMovie, int TargetFrame);
 file sealed record MovieVisualCheckpointBaseline(string Id, string Sha256);
+
+file struct M68kPcProfileSample
+{
+    public long Count;
+    public ushort Opcode;
+    public uint NextPc;
+    public int Frame;
+    public ushort Sr;
+    public uint D0;
+    public uint D1;
+    public uint D2;
+    public uint D3;
+    public uint A0;
+    public uint A1;
+    public uint A6;
+    public ushort Sys20;
+    public ushort Sys22;
+    public uint MasterPc;
+    public uint SlavePc;
+}
 
 file sealed record VisualCheckpointResult(
     string Id,
