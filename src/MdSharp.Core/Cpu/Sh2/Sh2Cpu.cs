@@ -2942,6 +2942,177 @@ Done:
         return MatchesInstructionSequence(peekBus, loopPc, expected);
     }
 
+    public bool TryFastForwardMaskedWordDeltaBackfillLoop(
+        int maxCycles,
+        Func<uint, ushort?> readWord,
+        Func<uint, ushort, bool> writeWord,
+        int cyclesPerIteration,
+        out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < cyclesPerIteration ||
+            cyclesPerIteration <= 0 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint loopPc = PC;
+        if (!MatchesMaskedWordDeltaBackfillPattern(peekBus, loopPc))
+        {
+            return false;
+        }
+
+        uint maxIterations = (uint)(maxCycles / cyclesPerIteration);
+        uint completed = 0;
+        uint r0 = R[0];
+        uint r1 = R[1];
+        uint r2 = R[2];
+        uint r3 = R[3];
+        uint r8 = R[8];
+        uint r9 = R[9];
+        uint r10 = R[10];
+        uint r11 = R[11];
+        uint r12 = R[12];
+        uint maskHigh = R[4];
+        uint maskMid = R[5];
+        uint maskLow = R[6];
+
+        while (completed < maxIterations && r8 != 0)
+        {
+            uint nextR10 = unchecked(r10 - 2);
+            uint nextR9 = unchecked(r9 - 2);
+            ushort? gateWord = readWord(nextR9);
+            if (!gateWord.HasValue)
+            {
+                break;
+            }
+
+            uint nextR11 = unchecked(r11 - 2);
+            uint nextR12 = unchecked(r12 - 2);
+            r2 = SignExtendWord(gateWord.Value);
+            if (gateWord.Value == 0)
+            {
+                r10 = nextR10;
+                r9 = nextR9;
+                r11 = nextR11;
+                r12 = nextR12;
+                r8 = unchecked(r8 - 1);
+                completed++;
+                continue;
+            }
+
+            ushort? currentWord = readWord(nextR11);
+            ushort? sourceWord = readWord(nextR10);
+            if (!currentWord.HasValue || !sourceWord.HasValue)
+            {
+                break;
+            }
+
+            r1 = SignExtendWord(sourceWord.Value);
+            r2 = SignExtendWord(currentWord.Value);
+            if (r2 == r1)
+            {
+                r10 = nextR10;
+                r9 = nextR9;
+                r11 = nextR11;
+                r12 = nextR12;
+                r8 = unchecked(r8 - 1);
+                completed++;
+                continue;
+            }
+
+            uint updated = r2;
+            updated = unchecked(updated + MaskedDeltaContribution(r1, updated, maskLow, shift: 0, out r0, out r3));
+            updated = unchecked(updated + MaskedDeltaContribution(r1, updated, maskMid, shift: 5, out r0, out r3));
+            updated = unchecked(updated + MaskedDeltaContribution(r1, updated, maskHigh, shift: 10, out r0, out r3));
+
+            if (!writeWord(nextR11, (ushort)updated) ||
+                !writeWord(nextR12, (ushort)updated))
+            {
+                break;
+            }
+
+            r2 = updated;
+            r10 = nextR10;
+            r9 = nextR9;
+            r11 = nextR11;
+            r12 = nextR12;
+            r8 = unchecked(r8 - 1);
+            completed++;
+        }
+
+        if (completed == 0)
+        {
+            return false;
+        }
+
+        R[0] = r0;
+        R[1] = r1;
+        R[2] = r2;
+        R[3] = r3;
+        R[8] = r8;
+        R[9] = r9;
+        R[10] = r10;
+        R[11] = r11;
+        R[12] = r12;
+
+        bool finished = r8 == 0;
+        SetT(finished);
+        cycles = checked((int)(completed * (uint)cyclesPerIteration));
+        Cycles += cycles;
+        LastOpcode = 0x8BCD;
+        LastOpcodePc = loopPc + 98;
+        PC = finished ? loopPc + 100 : loopPc;
+        return true;
+    }
+
+    private static bool MatchesMaskedWordDeltaBackfillPattern(ISh2PeekBus peekBus, uint loopPc)
+    {
+        if (!peekBus.TryPeekWord(loopPc, out ushort first) ||
+            !peekBus.TryPeekWord(loopPc + 2, out ushort second) ||
+            !((first == 0x7AFE && second == 0x79FE) ||
+                (first == 0x79FE && second == 0x7AFE)))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<ushort> expectedTail =
+        [
+            0x6291, 0x7BFE, 0x7CFE, 0x2228, 0x8928, 0x62B1, 0x61A1, 0x3210,
+            0x8924, 0x6013, 0x6323, 0x2069, 0x2369, 0x3038, 0x4015, 0x0329,
+            0x4029, 0x203B, 0x320C, 0x6013, 0x6323, 0x2059, 0x2359, 0x3038,
+            0x4015, 0x0329, 0x4029, 0x203B, 0x4008, 0x4008, 0x4000, 0x320C,
+            0x6013, 0x6323, 0x2049, 0x2349, 0x3038, 0x4015, 0x0329, 0x4029,
+            0x203B, 0x4018, 0x4008, 0x320C, 0x2B21, 0x2C21, 0x4810, 0x8BCD
+        ];
+
+        if (!MatchesInstructionSequence(peekBus, loopPc + 4, expectedTail))
+        {
+            return false;
+        }
+
+        return BranchByteTarget(loopPc + 98, 0x8BCD) == loopPc;
+    }
+
+    private static uint MaskedDeltaContribution(uint source, uint current, uint mask, int shift, out uint finalDifference, out uint finalMovt)
+    {
+        uint difference = unchecked((source & mask) - (current & mask));
+        finalMovt = (int)difference > 0 ? 1u : 0u;
+        uint contribution = (difference >> 16) | finalMovt;
+        finalDifference = shift == 0 ? contribution : contribution << shift;
+        return finalDifference;
+    }
+
+    private static uint SignExtendWord(ushort value)
+    {
+        return unchecked((uint)(int)(short)value);
+    }
+
     public bool TryFastForwardByteSpanCompareLoop(
         int maxCycles,
         Func<uint, byte?> readByte,

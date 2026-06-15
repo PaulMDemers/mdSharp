@@ -45,6 +45,7 @@ Run("32X SH-2 word high-bit mask transform outer fast-forward", ThirtyTwoXSh2Wor
 Run("32X SH-2 byte lookup word row expand fast-forward", ThirtyTwoXSh2ByteLookupWordRowExpandFastForward);
 Run("32X SH-2 byte lookup word store step fast-forward", ThirtyTwoXSh2ByteLookupWordStoreStepFastForward);
 Run("32X SH-2 masked strided byte span fast-forward", ThirtyTwoXSh2MaskedStridedByteSpanFastForward);
+Run("32X SH-2 masked word delta backfill fast-forward", ThirtyTwoXSh2MaskedWordDeltaBackfillFastForward);
 Run("32X SH-2 backward long record scan fast-forward", ThirtyTwoXSh2BackwardLongRecordScanFastForward);
 Run("32X SH-2 word fill CMP/EQ -1 BF/S loop fast-forward", ThirtyTwoXSh2WordFillCmpEqMinusOneBfsLoopFastForward);
 Run("32X SH-2 word fill ADD CMP/GT BF/S loop fast-forward", ThirtyTwoXSh2WordFillAddCompareGtBfsLoopFastForward);
@@ -3736,6 +3737,112 @@ void ThirtyTwoXSh2MaskedStridedByteSpanFastForward()
         uint sourceIndex = 4 + i;
         AssertEqual((byte)((0x80 | sourceIndex) | 1), bus.ReadByte(Destination + 0x40 + i));
     }
+}
+
+void ThirtyTwoXSh2MaskedWordDeltaBackfillFastForward()
+{
+    const uint LoopPc = 0x0600_168C;
+    const uint GateEnd = 0x2000_1208;
+    const uint SourceEnd = 0x2000_2208;
+    const uint DestinationOneEnd = 0x2000_3208;
+    const uint DestinationTwoEnd = 0x2000_4208;
+
+    SyntheticSh2Bus interpretedBus = new();
+    SyntheticSh2Bus fastBus = new();
+    WriteMaskedWordDeltaBackfillLoop(interpretedBus, LoopPc, firstR10: true);
+    WriteMaskedWordDeltaBackfillLoop(fastBus, LoopPc, firstR10: true);
+    for (int i = 0; i < 4; i++)
+    {
+        ushort source = (ushort)(0x0421 + (i * 0x0200));
+        ushort current = (ushort)(0x0001 + i);
+        uint gateAddress = GateEnd - (uint)((i + 1) * 2);
+        uint sourceAddress = SourceEnd - (uint)((i + 1) * 2);
+        uint destinationAddress = DestinationOneEnd - (uint)((i + 1) * 2);
+        interpretedBus.WriteWord(gateAddress, 0xFFFF);
+        fastBus.WriteWord(gateAddress, 0xFFFF);
+        interpretedBus.WriteWord(sourceAddress, source);
+        fastBus.WriteWord(sourceAddress, source);
+        interpretedBus.WriteWord(destinationAddress, current);
+        fastBus.WriteWord(destinationAddress, current);
+    }
+
+    Sh2Cpu interpreted = new(interpretedBus, "interpreted");
+    Sh2Cpu fast = new(fastBus, "fast");
+    SeedMaskedWordDeltaBackfillCpu(interpreted, LoopPc, GateEnd, SourceEnd, DestinationOneEnd, DestinationTwoEnd, count: 4);
+    SeedMaskedWordDeltaBackfillCpu(fast, LoopPc, GateEnd, SourceEnd, DestinationOneEnd, DestinationTwoEnd, count: 4);
+
+    interpreted.Run(512);
+    AssertTrue(
+        fast.TryFastForwardMaskedWordDeltaBackfillLoop(130 * 4, fastBus.TryReadWord, fastBus.TryWriteWord, 130, out int cycles),
+        "masked word delta backfill loop should fast-forward full transform iterations");
+    AssertEqual(130 * 4, cycles);
+    fast.Step();
+    AssertEqual(interpreted.PC, fast.PC);
+    AssertEqual(interpreted.SR, fast.SR);
+    for (int register = 0; register <= 12; register++)
+    {
+        AssertEqual(interpreted.R[register], fast.R[register]);
+    }
+
+    for (uint offset = 0; offset < 8; offset += 2)
+    {
+        AssertEqual(interpretedBus.ReadWord(DestinationOneEnd - 8 + offset), fastBus.ReadWord(DestinationOneEnd - 8 + offset));
+        AssertEqual(interpretedBus.ReadWord(DestinationTwoEnd - 8 + offset), fastBus.ReadWord(DestinationTwoEnd - 8 + offset));
+    }
+
+    SyntheticSh2Bus earlyBus = new();
+    WriteMaskedWordDeltaBackfillLoop(earlyBus, LoopPc, firstR10: false);
+    earlyBus.WriteWord(GateEnd - 2, 0x0000);
+    Sh2Cpu early = new(earlyBus, "early");
+    SeedMaskedWordDeltaBackfillCpu(early, LoopPc, GateEnd, SourceEnd, DestinationOneEnd, DestinationTwoEnd, count: 1);
+    AssertTrue(
+        early.TryFastForwardMaskedWordDeltaBackfillLoop(130, earlyBus.TryReadWord, earlyBus.TryWriteWord, 130, out int earlyCycles),
+        "zero gate word should fast-forward through the early branch");
+    AssertEqual(130, earlyCycles);
+    AssertEqual(LoopPc + 100, early.PC);
+    AssertEqual(0u, early.R[8]);
+    AssertEqual(1u, early.SR & 1);
+}
+
+void WriteMaskedWordDeltaBackfillLoop(SyntheticSh2Bus bus, uint loopPc, bool firstR10)
+{
+    ushort[] opcodes =
+    [
+        firstR10 ? (ushort)0x7AFE : (ushort)0x79FE,
+        firstR10 ? (ushort)0x79FE : (ushort)0x7AFE,
+        0x6291, 0x7BFE, 0x7CFE, 0x2228, 0x8928, 0x62B1, 0x61A1, 0x3210,
+        0x8924, 0x6013, 0x6323, 0x2069, 0x2369, 0x3038, 0x4015, 0x0329,
+        0x4029, 0x203B, 0x320C, 0x6013, 0x6323, 0x2059, 0x2359, 0x3038,
+        0x4015, 0x0329, 0x4029, 0x203B, 0x4008, 0x4008, 0x4000, 0x320C,
+        0x6013, 0x6323, 0x2049, 0x2349, 0x3038, 0x4015, 0x0329, 0x4029,
+        0x203B, 0x4018, 0x4008, 0x320C, 0x2B21, 0x2C21, 0x4810, 0x8BCD,
+        0x001B
+    ];
+
+    for (int i = 0; i < opcodes.Length; i++)
+    {
+        bus.WriteInstructionWord(loopPc + (uint)(i * 2), opcodes[i]);
+    }
+}
+
+void SeedMaskedWordDeltaBackfillCpu(
+    Sh2Cpu cpu,
+    uint loopPc,
+    uint gateEnd,
+    uint sourceEnd,
+    uint destinationOneEnd,
+    uint destinationTwoEnd,
+    uint count)
+{
+    cpu.Reset(loopPc);
+    cpu.R[4] = 0x7C00;
+    cpu.R[5] = 0x03E0;
+    cpu.R[6] = 0x001F;
+    cpu.R[8] = count;
+    cpu.R[9] = gateEnd;
+    cpu.R[10] = sourceEnd;
+    cpu.R[11] = destinationOneEnd;
+    cpu.R[12] = destinationTwoEnd;
 }
 
 void ThirtyTwoXSh2BackwardLongRecordScanFastForward()

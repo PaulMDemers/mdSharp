@@ -1486,6 +1486,20 @@ public sealed class ThirtyTwoXDevice
             }
 
             if (IsSh2FastPathGroupEnabled("memtransform") &&
+                (nextOpcode == 0x7AFE || nextOpcode == 0x79FE) &&
+                cpu.TryFastForwardMaskedWordDeltaBackfillLoop(
+                    Math.Min(cycleBudget, 130 * 512),
+                    _sh2WordReaders[cpuIndex],
+                    _sh2WordWriters[cpuIndex],
+                    130,
+                    out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memtransform") &&
                 nextOpcode == 0x64A3 &&
                 cpu.TryFastForwardWordHighBitMaskTransformOuterLoop(
                     cycleBudget,
