@@ -9104,8 +9104,25 @@ Done:
             return false;
         }
 
-        if (!TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out uint loopPc, out ushort loadOpcode, out ushort testOpcode, out ushort branchOpcode) ||
-            (loadOpcode & 0xF00F) != 0x6001 ||
+        ushort loadOpcode;
+        ushort testOpcode;
+        ushort branchOpcode;
+        uint loopPc;
+        uint branchPc;
+        if (TryFindThreeWordPollLoop(peekBus, [0, -2, -4], out loopPc, out loadOpcode, out testOpcode, out branchOpcode))
+        {
+            branchPc = loopPc + 4;
+        }
+        else if (!TryFindNopPaddedWordPollLoop(peekBus, [0, -2, -4, -6], out loopPc, out loadOpcode, out testOpcode, out branchOpcode))
+        {
+            return false;
+        }
+        else
+        {
+            branchPc = loopPc + 6;
+        }
+
+        if ((loadOpcode & 0xF00F) != 0x6001 ||
             (testOpcode & 0xF00F) != 0x2008 ||
             (branchOpcode & 0xFF00) != 0x8B00)
         {
@@ -9124,7 +9141,7 @@ Done:
 
         int maskRegister = testLeft == loadDestination ? testRight : testLeft;
 
-        if (BranchByteTarget(loopPc + 4, branchOpcode) != loopPc)
+        if (BranchByteTarget(branchPc, branchOpcode) != loopPc)
         {
             return false;
         }
@@ -9147,7 +9164,7 @@ Done:
         cycles = maxCycles;
         Cycles += cycles;
         LastOpcode = branchOpcode;
-        LastOpcodePc = loopPc + 4;
+        LastOpcodePc = branchPc;
         return true;
     }
 
@@ -12088,6 +12105,41 @@ Done:
         loopPc = 0;
         firstOpcode = 0;
         secondOpcode = 0;
+        branchOpcode = 0;
+        return false;
+    }
+
+    private bool TryFindNopPaddedWordPollLoop(
+        ISh2PeekBus peekBus,
+        ReadOnlySpan<int> offsets,
+        out uint loopPc,
+        out ushort loadOpcode,
+        out ushort testOpcode,
+        out ushort branchOpcode)
+    {
+        foreach (int offset in offsets)
+        {
+            if (offset < 0 && PC < (uint)-offset)
+            {
+                continue;
+            }
+
+            uint candidate = unchecked(PC + (uint)offset);
+            if (peekBus.TryPeekWord(candidate, out loadOpcode) &&
+                peekBus.TryPeekWord(candidate + 2, out ushort nopOpcode) &&
+                nopOpcode == 0x0009 &&
+                peekBus.TryPeekWord(candidate + 4, out testOpcode) &&
+                peekBus.TryPeekWord(candidate + 6, out branchOpcode) &&
+                BranchByteTarget(candidate + 6, branchOpcode) == candidate)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        loopPc = 0;
+        loadOpcode = 0;
+        testOpcode = 0;
         branchOpcode = 0;
         return false;
     }

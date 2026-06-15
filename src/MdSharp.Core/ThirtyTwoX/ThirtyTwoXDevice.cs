@@ -2104,7 +2104,10 @@ public sealed class ThirtyTwoXDevice
                 return fastCycles;
             }
 
-            if ((nextOpcode & 0xF00F) == 0x6001 &&
+            if (((nextOpcode & 0xF00F) == 0x6001 ||
+                    nextOpcode == 0x0009 ||
+                    (nextOpcode & 0xF00F) == 0x2008 ||
+                    (nextOpcode & 0xFF00) == 0x8B00) &&
                 cpu.TryFastForwardWordTstBfPollLoop(cycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);

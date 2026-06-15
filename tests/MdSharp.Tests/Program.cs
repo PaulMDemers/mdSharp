@@ -5481,6 +5481,32 @@ void ThirtyTwoXSh2WordTstBfPollLoopFastForward()
 
     bus.WriteWord(0x2000_4020, 0x7FFF);
     AssertTrue(!cpu.TryFastForwardWordTstBfPollLoop(300, out _), "clear masked TST poll value should fall back to normal execution");
+
+    const uint PaddedLoopPc = 0x0600_0300;
+    const uint PaddedFlagAddress = 0x2000_4050;
+    SyntheticSh2Bus paddedBus = new();
+    paddedBus.WriteInstructionWord(PaddedLoopPc + 0, 0x6011); // MOV.W @R1,R0
+    paddedBus.WriteInstructionWord(PaddedLoopPc + 2, 0x0009); // NOP
+    paddedBus.WriteInstructionWord(PaddedLoopPc + 4, 0x2008); // TST R0,R0
+    paddedBus.WriteInstructionWord(PaddedLoopPc + 6, 0x8BFB); // BF loop
+    paddedBus.WriteWord(PaddedFlagAddress, 0x0002);
+
+    Sh2Cpu padded = new(paddedBus, "test");
+    padded.Reset(PaddedLoopPc);
+    padded.R[1] = PaddedFlagAddress;
+    AssertTrue(padded.TryFastForwardWordTstBfPollLoop(300, out int paddedCycles), "NOP-padded MOV.W/NOP/TST/BF nonzero poll should fast-forward");
+    AssertEqual(300, paddedCycles);
+    AssertEqual(PaddedLoopPc, padded.PC);
+    AssertEqual(2u, padded.R[0]);
+    AssertEqual(0u, padded.SR & 1);
+
+    padded.Reset(PaddedLoopPc + 2);
+    padded.R[1] = PaddedFlagAddress;
+    AssertTrue(padded.TryFastForwardWordTstBfPollLoop(300, out _), "NOP-padded poll should fast-forward from the NOP slot");
+    AssertEqual(PaddedLoopPc, padded.PC);
+
+    paddedBus.WriteWord(PaddedFlagAddress, 0x0000);
+    AssertTrue(!padded.TryFastForwardWordTstBfPollLoop(300, out _), "zero NOP-padded poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordLoadAndImmediateCmpEqBfPollLoopFastForward()
