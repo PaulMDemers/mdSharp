@@ -8782,6 +8782,7 @@ Done:
     public bool TryFastForwardLongTstBtPaddedPollLoop(int maxCycles, out int cycles)
     {
         const int MaxBurstCycles = 4096;
+        const int MaxSdramBurstCycles = 16_384;
         cycles = 0;
         if (maxCycles <= 0 ||
             Halted ||
@@ -8841,7 +8842,10 @@ Done:
         R[0] = 0;
         SetT(true);
         PC = loopPc;
-        cycles = Math.Min(maxCycles, MaxBurstCycles);
+        int maxBurstCycles = IsSdramAliasAddress(R[loadSource])
+            ? MaxSdramBurstCycles
+            : MaxBurstCycles;
+        cycles = Math.Min(maxCycles, maxBurstCycles);
         Cycles += cycles;
         LastOpcode = branchOpcode;
         LastOpcodePc = loopPc + 6;
@@ -9163,6 +9167,13 @@ Done:
             nopOpcode == 0x0009 &&
             (testOpcode & 0xF00F) == 0x2008 &&
             (branchOpcode & 0xFF00) == 0x8900;
+    }
+
+    private static bool IsSdramAliasAddress(uint address)
+    {
+        uint normalized = address & 0x07FF_FFFFu;
+        return normalized >= 0x0600_0000u &&
+            normalized < 0x0604_0000u;
     }
 
     private static bool TryReadLongMaskedChangeBtSDelayPollPattern(

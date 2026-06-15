@@ -5747,6 +5747,21 @@ void ThirtyTwoXSh2LongTstBtPaddedPollLoopFastForward()
 
     bus.WriteLong(0x2000_4020, 0x0000_0001);
     AssertTrue(!cpu.TryFastForwardLongTstBtPaddedPollLoop(300, out _), "nonzero padded long poll should fall back to normal execution");
+
+    const uint SdramAlias = 0x2600_4C20;
+    SyntheticSh2Bus sdramBus = new();
+    sdramBus.WriteInstructionWord(LoopPc + 0, 0x6012); // MOV.L @R1,R0
+    sdramBus.WriteInstructionWord(LoopPc + 2, 0x0009); // NOP
+    sdramBus.WriteInstructionWord(LoopPc + 4, 0x2008); // TST R0,R0
+    sdramBus.WriteInstructionWord(LoopPc + 6, 0x89FB); // BT loop
+    sdramBus.WriteLong(SdramAlias, 0x0000_0000);
+
+    Sh2Cpu sdramCpu = new(sdramBus, "test");
+    sdramCpu.Reset(LoopPc + 6);
+    sdramCpu.R[1] = SdramAlias;
+    AssertTrue(sdramCpu.TryFastForwardLongTstBtPaddedPollLoop(20_000, out int sdramCycles), "SDRAM padded long zero poll should use the larger burst cap");
+    AssertEqual(16_384, sdramCycles);
+    AssertEqual(LoopPc, sdramCpu.PC);
 }
 
 void ThirtyTwoXSh2LongMaskedChangeBtSDelayPollLoopFastForward()
