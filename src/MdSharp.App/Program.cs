@@ -8105,10 +8105,10 @@ MegaDrive CreateMachineFromCartridge(CartridgeImage cartridge)
         m68kBios,
         masterSh2Bios,
         slaveSh2Bios,
-        UseRealThirtyTwoXSh2BiosBoot(cartridge, masterSh2Bios, slaveSh2Bios));
+        UseRealThirtyTwoXSh2BiosBoot());
 }
 
-bool UseRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge, ReadOnlyMemory<byte>? masterSh2Bios, ReadOnlyMemory<byte>? slaveSh2Bios)
+bool UseRealThirtyTwoXSh2BiosBoot()
 {
     string? value = Environment.GetEnvironmentVariable("MDSHARP_32X_REAL_SH2_BIOS_BOOT");
     if (value is not null)
@@ -8128,30 +8128,7 @@ bool UseRealThirtyTwoXSh2BiosBoot(CartridgeImage cartridge, ReadOnlyMemory<byte>
         }
     }
 
-    return masterSh2Bios.HasValue &&
-        !masterSh2Bios.Value.IsEmpty &&
-        slaveSh2Bios.HasValue &&
-        !slaveSh2Bios.Value.IsEmpty &&
-        !CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(cartridge);
-}
-
-bool CartridgePrefersSyntheticThirtyTwoXSh2BiosBoot(CartridgeImage cartridge)
-{
-    string product = cartridge.Header.ProductCode.ToUpperInvariant();
-    string domestic = cartridge.Header.DomesticName.ToUpperInvariant();
-    string overseas = cartridge.Header.OverseasName.ToUpperInvariant();
-
-    return product is "GM MK-84506-00" or "GM T-04803F-00" or "GM MK-84701-00" or "GM G-XXXX   00" ||
-        domestic == "DOOM" ||
-        overseas == "DOOM" ||
-        domestic.Contains("NBA JAM", StringComparison.Ordinal) ||
-        overseas.Contains("NBA JAM", StringComparison.Ordinal) ||
-        domestic.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
-        overseas.Contains("RBI BASEBALL", StringComparison.Ordinal) ||
-        domestic.Contains("VIRTUA FIGHTER", StringComparison.Ordinal) ||
-        overseas.Contains("VIRTUA FIGHTER", StringComparison.Ordinal) ||
-        domestic.Contains("MARS TEST PROGRAM", StringComparison.Ordinal) ||
-        overseas.Contains("MARS TEST PROGRAM", StringComparison.Ordinal);
+    return false;
 }
 
 ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()

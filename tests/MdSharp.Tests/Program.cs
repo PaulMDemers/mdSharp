@@ -491,7 +491,7 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x1357, device.ReadPaletteWord(0x0040));
     WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart + ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8000);
     device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001, "M68K");
-    AssertEqual((ushort)0x2000, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
+    AssertEqual((ushort)0x2001, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset));
     device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset, 0x0004, "M68K");
     AssertEqual((ushort)0x0004, device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.AutoFillLengthOffset));
     device.WritePaletteWord(0x0042, 0x8000, "M68K");
@@ -1360,12 +1360,14 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((byte)255, runLengthTerminatorFramebuffer[7]);
     AssertEqual((byte)0, runLengthTerminatorFramebuffer[8]);
 
-    AssertEqual(1, device.DrawFrameBufferIndex);
-    device.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
-    device.StepScanline(224, pal: false);
-    AssertEqual(0, device.DrawFrameBufferIndex);
-    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, device.DrawFrameBuffer.Length);
-    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, device.DisplayFrameBuffer.Length);
+    ThirtyTwoXDevice frameSelectDevice = new();
+    frameSelectDevice.Reset();
+    AssertEqual(1, frameSelectDevice.DrawFrameBufferIndex);
+    frameSelectDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    frameSelectDevice.StepScanline(224, pal: false);
+    AssertEqual(0, frameSelectDevice.DrawFrameBufferIndex);
+    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, frameSelectDevice.DrawFrameBuffer.Length);
+    AssertEqual(ThirtyTwoXHardwareProfile.FrameBufferBytes, frameSelectDevice.DisplayFrameBuffer.Length);
 
     device.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.AdapterControlOffset, 0x8083);
     AssertTrue(device.AdapterEnabled, "ADEN should enable 32X adapter state");
@@ -1541,10 +1543,17 @@ void ThirtyTwoXDeviceShell()
     accessDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
     AssertTrue((accessDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset) & 0x0002) != 0, "FEN should be visible while the 32X framebuffer is engaged during active display");
 
+    ThirtyTwoXDevice m68kBlankVdpOwnershipDevice = new();
+    m68kBlankVdpOwnershipDevice.Reset();
+    m68kBlankVdpOwnershipDevice.GrantVdpAccessToSh2();
+    m68kBlankVdpOwnershipDevice.WriteVdpRegisterByte(ThirtyTwoXHardwareProfile.FrameBufferControlOffset + 1, 0x01, "M68K");
+    AssertEqual(1, m68kBlankVdpOwnershipDevice.DisplayFrameBufferIndex);
+
     ThirtyTwoXDevice m68kVdpOwnershipDevice = new();
     m68kVdpOwnershipDevice.Reset();
     m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001, "M68K");
     AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);
+    m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
     m68kVdpOwnershipDevice.GrantVdpAccessToSh2();
     m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000, "M68K");
     AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);

@@ -3776,6 +3776,13 @@ public sealed class ThirtyTwoXDevice
     private bool IsM68kVdpRegisterAccessDenied(string source, ushort alignedOffset)
     {
         if (source == "M68K" &&
+            alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset &&
+            IsBlankModeRaw())
+        {
+            return false;
+        }
+
+        if (source == "M68K" &&
             (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
                 alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset) &&
             IsHiddenPostStartBootVdpControlHandoff())
@@ -3787,6 +3794,11 @@ public sealed class ThirtyTwoXDevice
             _vdpAccessGrantedToSh2 &&
             (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
                 alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
+    }
+
+    private bool IsBlankModeRaw()
+    {
+        return (ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03) == 0;
     }
 
     private bool IsHiddenPostStartBootVdpControlHandoff()
