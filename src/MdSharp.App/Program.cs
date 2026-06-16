@@ -5845,6 +5845,18 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         thirtyTwoXState is null ? (ushort)0 : ReadBigEndianWord(thirtyTwoXState.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6),
         thirtyTwoXState?.MasterSh2.PC ?? 0,
         thirtyTwoXState?.SlaveSh2.PC ?? 0,
+        thirtyTwoXState?.MasterSh2.SR ?? 0,
+        thirtyTwoXState?.SlaveSh2.SR ?? 0,
+        thirtyTwoXState?.MasterSh2.GBR ?? 0,
+        thirtyTwoXState?.SlaveSh2.GBR ?? 0,
+        thirtyTwoXState?.MasterSh2.PR ?? 0,
+        thirtyTwoXState?.SlaveSh2.PR ?? 0,
+        ReadSh2Register(thirtyTwoXState?.MasterSh2, 0),
+        ReadSh2Register(thirtyTwoXState?.MasterSh2, 1),
+        ReadSh2Register(thirtyTwoXState?.MasterSh2, 15),
+        ReadSh2Register(thirtyTwoXState?.SlaveSh2, 0),
+        ReadSh2Register(thirtyTwoXState?.SlaveSh2, 1),
+        ReadSh2Register(thirtyTwoXState?.SlaveSh2, 15),
         thirtyTwoXState?.MasterSh2.LastOpcode ?? 0,
         thirtyTwoXState?.SlaveSh2.LastOpcode ?? 0,
         device?.MasterSh2.UnhandledOpcodeCount ?? 0,
@@ -5864,9 +5876,124 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         thirtyTwoXState?.BootRomHandshakePending ?? false,
         thirtyTwoXState?.BootRomSignatureRead ?? false,
         thirtyTwoXState?.BootRomLaunchPending ?? false,
+        FormatThirtyTwoXWaitSignature(thirtyTwoXState),
         hash,
         bmpPath,
         detail);
+}
+
+static uint ReadSh2Register(Sh2Cpu.Sh2State? state, int register)
+{
+    return state is not null && (uint)register < (uint)state.R.Length ? state.R[register] : 0;
+}
+
+string FormatThirtyTwoXWaitSignature(ThirtyTwoXDevice.ThirtyTwoXState? state)
+{
+    if (state is null)
+    {
+        return string.Empty;
+    }
+
+    List<string> tags = [];
+    ushort comm0 = ReadBigEndianWord(state.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset);
+    ushort comm2 = ReadBigEndianWord(state.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 2);
+    ushort comm4 = ReadBigEndianWord(state.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 4);
+    ushort comm6 = ReadBigEndianWord(state.SystemRegisters, ThirtyTwoXHardwareProfile.CommunicationPortOffset + 6);
+    uint commLong0 = ((uint)comm0 << 16) | comm2;
+    uint commLong4 = ((uint)comm4 << 16) | comm6;
+
+    if (state.BootRomHandshakePending)
+    {
+        tags.Add("boot-handshake");
+    }
+
+    if (state.BootRomLaunchPending)
+    {
+        tags.Add("boot-launch");
+    }
+
+    if (state.BootRomPostStartSignaturePending)
+    {
+        tags.Add(state.BootRomPostStartSignatureHiddenFromSh2 ? "post-start-hidden" : "post-start-visible");
+    }
+
+    AddSh2WaitSignature(tags, "m", state.MasterSh2, commLong0, commLong4);
+    AddSh2WaitSignature(tags, "s", state.SlaveSh2, commLong0, commLong4);
+
+    return string.Join('|', tags.Distinct(StringComparer.Ordinal));
+}
+
+static void AddSh2WaitSignature(List<string> tags, string prefix, Sh2Cpu.Sh2State state, uint commLong0, uint commLong4)
+{
+    if ((state.SR & 0xF0) == 0xF0)
+    {
+        tags.Add($"{prefix}:imask-f");
+    }
+
+    if (state.PC is >= 0x0200_0000 and < 0x0240_0000)
+    {
+        tags.Add($"{prefix}:cached-rom-pc");
+    }
+    else if (state.PC is >= 0x2200_0000 and < 0x2240_0000)
+    {
+        tags.Add($"{prefix}:rom-pc");
+    }
+
+    if (state.R.Length > 0)
+    {
+        if (state.R[0] == commLong0)
+        {
+            tags.Add($"{prefix}:r0-comm0");
+        }
+        else if (state.R[0] == commLong4)
+        {
+            tags.Add($"{prefix}:r0-comm4");
+        }
+    }
+
+    if (state.R.Length > 1)
+    {
+        if (state.R[1] == commLong0)
+        {
+            tags.Add($"{prefix}:r1-comm0");
+        }
+        else if (state.R[1] == commLong4)
+        {
+            tags.Add($"{prefix}:r1-comm4");
+        }
+    }
+
+    if (commLong0 == 0x4D52_4459u)
+    {
+        tags.Add("comm0=MRDY");
+    }
+    else if (commLong0 == 0x4D5F_4F4Bu)
+    {
+        tags.Add("comm0=M_OK");
+    }
+    else if (commLong0 == 0x475F_4F4Bu)
+    {
+        tags.Add("comm0=G_OK");
+    }
+
+    if (commLong4 == 0x5352_4459u)
+    {
+        tags.Add("comm4=SRDY");
+    }
+    else if (commLong4 == 0x535F_4F4Bu)
+    {
+        tags.Add("comm4=S_OK");
+    }
+
+    ushort opcode = state.LastOpcode;
+    if ((opcode & 0xFF00) is 0x8900 or 0x8B00 or 0x8D00 or 0x8F00)
+    {
+        tags.Add($"{prefix}:conditional-branch");
+    }
+    else if ((opcode & 0xF000) == 0xA000)
+    {
+        tags.Add($"{prefix}:bra");
+    }
 }
 
 static ushort ReadBigEndianWord(byte[] data, int offset)
@@ -14973,6 +15100,18 @@ file sealed record ThirtyTwoXSweepResult(
     ushort Comm6,
     uint MasterPc,
     uint SlavePc,
+    uint MasterSr,
+    uint SlaveSr,
+    uint MasterGbr,
+    uint SlaveGbr,
+    uint MasterPr,
+    uint SlavePr,
+    uint MasterR0,
+    uint MasterR1,
+    uint MasterR15,
+    uint SlaveR0,
+    uint SlaveR1,
+    uint SlaveR15,
     ushort MasterLastOpcode,
     ushort SlaveLastOpcode,
     int MasterUnhandledOpcodes,
@@ -14992,11 +15131,12 @@ file sealed record ThirtyTwoXSweepResult(
     bool BootPending,
     bool BootRead,
     bool BootLaunch,
+    string WaitSignature,
     string Sha256,
     string BmpPath,
     string Detail)
 {
-    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,m68kFaults,m68kTraps,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,sha256,bmp,detail";
+    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,m68kFaults,m68kTraps,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterSr,slaveSr,masterGbr,slaveGbr,masterPr,slavePr,masterR0,masterR1,masterR15,slaveR0,slaveR1,slaveR15,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,waitSignature,sha256,bmp,detail";
 
     public string ToCsv()
     {
@@ -15037,6 +15177,18 @@ file sealed record ThirtyTwoXSweepResult(
             $"${Comm6:X4}",
             $"${MasterPc:X8}",
             $"${SlavePc:X8}",
+            $"${MasterSr:X8}",
+            $"${SlaveSr:X8}",
+            $"${MasterGbr:X8}",
+            $"${SlaveGbr:X8}",
+            $"${MasterPr:X8}",
+            $"${SlavePr:X8}",
+            $"${MasterR0:X8}",
+            $"${MasterR1:X8}",
+            $"${MasterR15:X8}",
+            $"${SlaveR0:X8}",
+            $"${SlaveR1:X8}",
+            $"${SlaveR15:X8}",
             $"${MasterLastOpcode:X4}",
             $"${SlaveLastOpcode:X4}",
             MasterUnhandledOpcodes.ToString(CultureInfo.InvariantCulture),
@@ -15056,6 +15208,7 @@ file sealed record ThirtyTwoXSweepResult(
             BootPending ? "true" : "false",
             BootRead ? "true" : "false",
             BootLaunch ? "true" : "false",
+            $"\"{Escape(WaitSignature)}\"",
             Sha256,
             $"\"{Escape(BmpPath)}\"",
             $"\"{Escape(Detail)}\"");
