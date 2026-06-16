@@ -66,6 +66,7 @@ Run("32X SH-2 MOV literal word TST/BT poll loop fast-forward", ThirtyTwoXSh2MovL
 Run("32X SH-2 MOV literal word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 MOV literal word displacement TST/BF poll loop fast-forward", ThirtyTwoXSh2MovLiteralWordDisplacementTstBfPollLoopFastForward);
 Run("32X SH-2 MOV literal byte CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward);
+Run("32X SH-2 MOV literal byte delayed CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2MovLiteralByteCmpEqBtDelayBraPollLoopFastForward);
 Run("32X SH-2 word CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward);
 Run("32X SH-2 stable word pair CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2StableWordPairCmpEqBtPollLoopFastForward);
 Run("32X SH-2 long register CMP/EQ BT poll loop fast-forward", ThirtyTwoXSh2LongRegisterCmpEqBtPollLoopFastForward);
@@ -5113,6 +5114,42 @@ void ThirtyTwoXSh2MovLiteralByteCmpEqBtPollLoopFastForward()
 
     bus.WriteByte(0x2000_4020, 0x01);
     AssertTrue(!cpu.TryFastForwardMovLiteralByteCmpEqBtPollLoop(300, out _), "non-matching byte poll value should fall back to normal execution");
+}
+
+void ThirtyTwoXSh2MovLiteralByteCmpEqBtDelayBraPollLoopFastForward()
+{
+    const uint LoopPc = 0x0600_0592;
+    const uint DelayPc = 0x0600_0608;
+    SyntheticSh2Bus bus = new();
+    bus.WriteInstructionWord(LoopPc + 0, 0xD10C); // MOV.L @($0C,PC),R1
+    bus.WriteInstructionWord(LoopPc + 2, 0x6010); // MOV.B @R1,R0
+    bus.WriteInstructionWord(LoopPc + 4, 0x8800); // CMP/EQ #0,R0
+    bus.WriteInstructionWord(LoopPc + 6, 0x8936); // BT delay
+    bus.WriteInstructionWord(DelayPc + 0, 0xE740); // MOV #$40,R7
+    bus.WriteInstructionWord(DelayPc + 2, 0x0009); // NOP
+    bus.WriteInstructionWord(DelayPc + 4, 0x4710); // DT R7
+    bus.WriteInstructionWord(DelayPc + 6, 0x8BFC); // BF delay loop
+    bus.WriteInstructionWord(DelayPc + 8, 0xAFBF); // BRA poll
+    bus.WriteInstructionWord(DelayPc + 10, 0x0009); // NOP
+    bus.WriteLong(LoopPc + 0x32, 0x2000_4024);
+    bus.WriteByte(0x2000_4024, 0x00);
+
+    Sh2Cpu cpu = new(bus, "test");
+    cpu.Reset(DelayPc + 2);
+    AssertTrue(cpu.TryFastForwardMovLiteralByteCmpEqBtDelayBraPollLoop(1000, out int cycles), "MOV literal byte delayed poll should fast-forward from the delay loop");
+    AssertEqual(995, cycles);
+    AssertEqual(LoopPc, cpu.PC);
+    AssertEqual(0x2000_4024u, cpu.R[1]);
+    AssertEqual(0u, cpu.R[0]);
+    AssertEqual(0u, cpu.R[7]);
+    AssertEqual(1u, cpu.SR & 1);
+
+    cpu.Reset(LoopPc + 4);
+    AssertTrue(cpu.TryFastForwardMovLiteralByteCmpEqBtDelayBraPollLoop(1000, out _), "MOV literal byte delayed poll should fast-forward from the compare instruction");
+    AssertEqual(LoopPc, cpu.PC);
+
+    bus.WriteByte(0x2000_4024, 0x01);
+    AssertTrue(!cpu.TryFastForwardMovLiteralByteCmpEqBtDelayBraPollLoop(1000, out _), "non-matching byte poll value should fall back to normal execution");
 }
 
 void ThirtyTwoXSh2WordCmpEqBtPollLoopFastForward()

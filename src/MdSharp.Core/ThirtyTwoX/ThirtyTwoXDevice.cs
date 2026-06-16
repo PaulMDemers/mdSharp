@@ -434,6 +434,8 @@ public sealed class ThirtyTwoXDevice
     public int GbrBytePairInterruptIdleFastPathHits { get; private set; }
     public int GbrByteZeroComm20PollFastPathAttempts { get; private set; }
     public int GbrByteZeroComm20PollFastPathHits { get; private set; }
+    public int DelayedBytePollFastPathAttempts { get; private set; }
+    public int DelayedBytePollFastPathHits { get; private set; }
     public int LiteralByteDisplacementTstRegisterPollFastPathAttempts { get; private set; }
     public int LiteralByteDisplacementTstRegisterPollFastPathHits { get; private set; }
     public int ByteDisplacementZeroWaitFastPathAttempts { get; private set; }
@@ -1970,6 +1972,28 @@ public sealed class ThirtyTwoXDevice
                 RecordSh2FastPath(fastCycles);
                 AdvanceSh2InternalTimers(cpuIndex, fastCycles);
                 return fastCycles;
+            }
+
+            if (((nextOpcode & 0xF000) == 0xD000) ||
+                ((nextOpcode & 0xF00F) == 0x6000) ||
+                ((nextOpcode & 0xFF00) == 0x8800) ||
+                ((nextOpcode & 0xFF00) == 0x8900) ||
+                ((nextOpcode & 0xFF00) == 0xE000) ||
+                nextOpcode == 0x0009 ||
+                ((nextOpcode & 0xF0FF) == 0x4010) ||
+                ((nextOpcode & 0xF000) == 0xA000))
+            {
+                DelayedBytePollFastPathAttempts++;
+                if (cpu.TryFastForwardMovLiteralByteCmpEqBtDelayBraPollLoop(cycleBudget, out fastCycles))
+                {
+                    DelayedBytePollFastPathHits++;
+                    RecordSh2FastPathProbe("delayedBytePoll", cpuIndex, cpu.PC, nextOpcode, hit: true);
+                    RecordSh2FastPath(fastCycles);
+                    AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                    return fastCycles;
+                }
+
+                RecordSh2FastPathProbe("delayedBytePoll", cpuIndex, cpu.PC, nextOpcode, hit: false);
             }
 
             if ((((nextOpcode & 0xF00F) == 0x6000) ||

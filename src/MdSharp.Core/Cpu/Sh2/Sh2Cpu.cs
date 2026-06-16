@@ -6893,6 +6893,234 @@ Done:
         return true;
     }
 
+    public bool TryFastForwardMovLiteralByteCmpEqBtDelayBraPollLoop(int maxCycles, out int cycles)
+    {
+        cycles = 0;
+        if (maxCycles < 8 ||
+            Halted ||
+            HasAcceptablePendingInterrupt ||
+            DelaySlotActive ||
+            InstructionObserver is not null ||
+            _bus is not ISh2PeekBus peekBus)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        if (!TryFindMovLiteralByteCmpEqBtDelayBraPollPattern(
+                peekBus,
+                pc,
+                out uint loopPc,
+                out ushort literalOpcode,
+                out ushort loadOpcode,
+                out ushort compareOpcode,
+                out uint delayPc,
+                out ushort moveImmediateOpcode,
+                out int nopCount,
+                out uint dtPc,
+                out ushort dtOpcode,
+                out uint braPc,
+                out ushort braOpcode))
+        {
+            return false;
+        }
+
+        int literalRegister = (literalOpcode >> 8) & 0x0F;
+        int loadDestination = (loadOpcode >> 8) & 0x0F;
+        int loadSource = (loadOpcode >> 4) & 0x0F;
+        int delayRegister = (moveImmediateOpcode >> 8) & 0x0F;
+        int dtRegister = (dtOpcode >> 8) & 0x0F;
+        int delayCount = (sbyte)(byte)moveImmediateOpcode;
+        if (loadSource != literalRegister ||
+            loadDestination != 0 ||
+            delayRegister != dtRegister ||
+            delayCount <= 0)
+        {
+            return false;
+        }
+
+        uint address = ReadPcRelativeLongLiteral(peekBus, loopPc, literalOpcode);
+        if (!peekBus.TryPeekByte(address, out byte byteValue))
+        {
+            return false;
+        }
+
+        byte immediate = (byte)compareOpcode;
+        if (byteValue != immediate)
+        {
+            return false;
+        }
+
+        int delayLoopCycles = delayCount * (nopCount + 2);
+        int cyclesPerIteration = 7 + delayLoopCycles;
+        int iterations = maxCycles / cyclesPerIteration;
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        R[literalRegister] = address;
+        R[0] = (uint)(sbyte)byteValue;
+        R[delayRegister] = 0;
+        SetT(true);
+        PC = loopPc;
+        cycles = iterations * cyclesPerIteration;
+        Cycles += cycles;
+        LastOpcode = braOpcode;
+        LastOpcodePc = braPc;
+        return true;
+    }
+
+    private static bool TryFindMovLiteralByteCmpEqBtDelayBraPollPattern(
+        ISh2PeekBus peekBus,
+        uint pc,
+        out uint loopPc,
+        out ushort literalOpcode,
+        out ushort loadOpcode,
+        out ushort compareOpcode,
+        out uint delayPc,
+        out ushort moveImmediateOpcode,
+        out int nopCount,
+        out uint dtPc,
+        out ushort dtOpcode,
+        out uint braPc,
+        out ushort braOpcode)
+    {
+        const uint MaxBackBytes = 0x100;
+
+        loopPc = 0;
+        literalOpcode = 0;
+        loadOpcode = 0;
+        compareOpcode = 0;
+        delayPc = 0;
+        moveImmediateOpcode = 0;
+        nopCount = 0;
+        dtPc = 0;
+        dtOpcode = 0;
+        braPc = 0;
+        braOpcode = 0;
+
+        uint maxBack = Math.Min(pc & 0xFFFF_FFFEu, MaxBackBytes);
+        for (uint back = 0; back <= maxBack; back += 2)
+        {
+            uint candidate = (pc - back) & 0xFFFF_FFFEu;
+            if (TryReadMovLiteralByteCmpEqBtDelayBraPollPattern(
+                    peekBus,
+                    candidate,
+                    out literalOpcode,
+                    out loadOpcode,
+                    out compareOpcode,
+                    out delayPc,
+                    out moveImmediateOpcode,
+                    out nopCount,
+                    out dtPc,
+                    out dtOpcode,
+                    out braPc,
+                    out braOpcode) &&
+                pc >= candidate &&
+                pc <= braPc + 2)
+            {
+                loopPc = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryReadMovLiteralByteCmpEqBtDelayBraPollPattern(
+        ISh2PeekBus peekBus,
+        uint loopPc,
+        out ushort literalOpcode,
+        out ushort loadOpcode,
+        out ushort compareOpcode,
+        out uint delayPc,
+        out ushort moveImmediateOpcode,
+        out int nopCount,
+        out uint dtPc,
+        out ushort dtOpcode,
+        out uint braPc,
+        out ushort braOpcode)
+    {
+        literalOpcode = 0;
+        loadOpcode = 0;
+        compareOpcode = 0;
+        delayPc = 0;
+        moveImmediateOpcode = 0;
+        nopCount = 0;
+        dtPc = 0;
+        dtOpcode = 0;
+        braPc = 0;
+        braOpcode = 0;
+
+        if (!peekBus.TryPeekWord(loopPc, out literalOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 2, out loadOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 4, out compareOpcode) ||
+            !peekBus.TryPeekWord(loopPc + 6, out ushort branchOpcode) ||
+            (literalOpcode & 0xF000) != 0xD000 ||
+            (loadOpcode & 0xF00F) != 0x6000 ||
+            (compareOpcode & 0xFF00) != 0x8800 ||
+            (branchOpcode & 0xFF00) != 0x8900)
+        {
+            return false;
+        }
+
+        delayPc = BranchByteTarget(loopPc + 6, branchOpcode);
+        if (delayPc <= loopPc + 6 || delayPc - loopPc > 0x100)
+        {
+            return false;
+        }
+
+        if (!peekBus.TryPeekWord(delayPc, out moveImmediateOpcode) ||
+            (moveImmediateOpcode & 0xF000) != 0xE000)
+        {
+            return false;
+        }
+
+        uint nopPc = delayPc + 2;
+        while (nopCount < 8)
+        {
+            if (!peekBus.TryPeekWord(nopPc + (uint)(nopCount * 2), out ushort opcode))
+            {
+                return false;
+            }
+
+            if (opcode != 0x0009)
+            {
+                break;
+            }
+
+            nopCount++;
+        }
+
+        if (nopCount == 0)
+        {
+            return false;
+        }
+
+        dtPc = nopPc + (uint)(nopCount * 2);
+        if (!peekBus.TryPeekWord(dtPc, out dtOpcode) ||
+            (dtOpcode & 0xF0FF) != 0x4010 ||
+            !peekBus.TryPeekWord(dtPc + 2, out ushort delayBranchOpcode) ||
+            (delayBranchOpcode & 0xFF00) != 0x8B00 ||
+            BranchByteTarget(dtPc + 2, delayBranchOpcode) != nopPc)
+        {
+            return false;
+        }
+
+        braPc = dtPc + 4;
+        if (!peekBus.TryPeekWord(braPc, out braOpcode) ||
+            (braOpcode & 0xF000) != 0xA000 ||
+            BranchWordTarget(braPc, braOpcode) != loopPc ||
+            !peekBus.TryPeekWord(braPc + 2, out ushort delaySlotOpcode) ||
+            delaySlotOpcode != 0x0009)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool TryReadMovLiteralByteCmpEqBtPattern(
         ISh2PeekBus peekBus,
         uint pc,

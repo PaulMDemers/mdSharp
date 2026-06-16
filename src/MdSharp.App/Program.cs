@@ -14153,6 +14153,7 @@ static void PrintThirtyTwoXFastPathDiagnostics(ThirtyTwoXDevice device)
         $"sdramTaskletDispatcher={device.SdramFlagTaskletDispatcherFastPathHits:N0}/{device.SdramFlagTaskletDispatcherFastPathAttempts:N0} " +
         $"gbrBytePairIdle={device.GbrBytePairInterruptIdleFastPathHits:N0}/{device.GbrBytePairInterruptIdleFastPathAttempts:N0} " +
         $"gbrByteZero20={device.GbrByteZeroComm20PollFastPathHits:N0}/{device.GbrByteZeroComm20PollFastPathAttempts:N0} " +
+        $"delayedBytePoll={device.DelayedBytePollFastPathHits:N0}/{device.DelayedBytePollFastPathAttempts:N0} " +
         $"literalByteTstReg={device.LiteralByteDisplacementTstRegisterPollFastPathHits:N0}/{device.LiteralByteDisplacementTstRegisterPollFastPathAttempts:N0} " +
         $"byteDispZeroWait={device.ByteDisplacementZeroWaitFastPathHits:N0}/{device.ByteDisplacementZeroWaitFastPathAttempts:N0} " +
         $"twoStageWordZero={device.TwoStageWordZeroPollRingFastPathHits:N0}/{device.TwoStageWordZeroPollRingFastPathAttempts:N0} " +
