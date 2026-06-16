@@ -1603,9 +1603,12 @@ void ThirtyTwoXDeviceShell()
     m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001, "M68K");
     AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);
     m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0001);
+    LatchThirtyTwoXVdp(m68kVdpOwnershipDevice);
     m68kVdpOwnershipDevice.GrantVdpAccessToSh2();
     m68kVdpOwnershipDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0000, "M68K");
     AssertEqual(1, m68kVdpOwnershipDevice.DisplayFrameBufferIndex);
+    AssertEqual(0, m68kVdpOwnershipDevice.RequestedDisplayFrameBufferIndex);
+    AssertTrue(m68kVdpOwnershipDevice.FrameBufferSwapPending, "68000 FS writes should queue a frame-buffer swap even while SH-2 VDP access is active");
 
     ThirtyTwoXDevice latchDevice = new();
     latchDevice.Reset();

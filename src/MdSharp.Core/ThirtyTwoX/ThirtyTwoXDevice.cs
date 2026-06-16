@@ -3811,42 +3811,7 @@ public sealed class ThirtyTwoXDevice
 
     private bool IsM68kVdpRegisterAccessDenied(string source, ushort alignedOffset)
     {
-        if (source == "M68K" &&
-            alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset &&
-            IsBlankModeRaw())
-        {
-            return false;
-        }
-
-        if (source == "M68K" &&
-            (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
-                alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset) &&
-            IsHiddenPostStartBootVdpControlHandoff())
-        {
-            return false;
-        }
-
-        return source == "M68K" &&
-            _vdpAccessGrantedToSh2 &&
-            (alignedOffset == ThirtyTwoXHardwareProfile.BitmapModeOffset ||
-                alignedOffset == ThirtyTwoXHardwareProfile.FrameBufferControlOffset);
-    }
-
-    private bool IsBlankModeRaw()
-    {
-        return (ReadBigEndianWord(_vdpRegisters, ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03) == 0;
-    }
-
-    private bool IsHiddenPostStartBootVdpControlHandoff()
-    {
-        return _bootRomPostStartSignatureHiddenFromSh2 &&
-            !_bootRomHandshakePending &&
-            !_bootRomLaunchPending &&
-            ((MasterSh2.PC is >= 0x0600_0890 and <= 0x0600_089C &&
-                SlaveSh2.PC == 0x0600_0DCC) ||
-                (MasterSh2.PC is >= 0x0600_052E and <= 0x0600_064C &&
-                    (SlaveSh2.PC == 0x0600_01B0 ||
-                        SlaveSh2.PC is >= 0x0600_04C0 and <= 0x0600_04C8)));
+        return false;
     }
 
     private ushort ApplyTvFormatBit(ushort value)
