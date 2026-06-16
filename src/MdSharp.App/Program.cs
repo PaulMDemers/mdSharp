@@ -644,8 +644,9 @@ if (args[0].Equals("--32x-sweep", StringComparison.OrdinalIgnoreCase))
         return;
     }
 
-    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 600;
-    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    string[] positional = GetOptionAwarePositionals(args, startIndex: 3);
+    int frames = positional.Length > 0 && int.TryParse(positional[0], out int parsedFrames) ? parsedFrames : 600;
+    int instructionsPerFrame = positional.Length > 1 && int.TryParse(positional[1], out int parsedInstructions) ? parsedInstructions : 300_000;
     bool screenshots = args.Any(arg => arg.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));
     bool resume = args.Any(arg => arg.Equals("--resume", StringComparison.OrdinalIgnoreCase));
     string? filter = GetOptionValue(args, "--filter");
@@ -8407,6 +8408,35 @@ string[] EnumerateRomFiles(string folder)
         .Where(path => romExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
         .ToArray();
+}
+
+string[] GetOptionAwarePositionals(string[] values, int startIndex)
+{
+    List<string> positionals = [];
+    for (int i = startIndex; i < values.Length; i++)
+    {
+        string value = values[i];
+        if (!value.StartsWith("--", StringComparison.Ordinal))
+        {
+            positionals.Add(value);
+            continue;
+        }
+
+        if (!value.Contains('=', StringComparison.Ordinal) && OptionConsumesFollowingValue(value) && i + 1 < values.Length)
+        {
+            i++;
+        }
+    }
+
+    return [.. positionals];
+}
+
+bool OptionConsumesFollowingValue(string option)
+{
+    return option.Equals("--filter", StringComparison.OrdinalIgnoreCase) ||
+        option.Equals("--limit", StringComparison.OrdinalIgnoreCase) ||
+        option.Equals("--adaptive-seconds", StringComparison.OrdinalIgnoreCase) ||
+        option.Equals("--case-seconds", StringComparison.OrdinalIgnoreCase);
 }
 
 string? GetOptionValue(string[] values, string option)
