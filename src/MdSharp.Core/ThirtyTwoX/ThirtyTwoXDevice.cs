@@ -6846,6 +6846,11 @@ public sealed class ThirtyTwoXDevice
             }
 
             ushort color = ReadBigEndianWord(source, sourceIndex);
+            if (!HasVisibleDirectColorBits(color))
+            {
+                continue;
+            }
+
             if (WriteRgb555IfVisible(framebuffer, y, x, color, blueFirst, thirtyTwoXPriority, mdOpaquePixels))
             {
                 _lastCompositeWrittenPixels++;

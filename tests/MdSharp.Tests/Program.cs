@@ -1458,6 +1458,22 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((byte)0, directColorLineTableFramebuffer[1]);
     AssertEqual((byte)0, directColorLineTableFramebuffer[2]);
 
+    ThirtyTwoXDevice directColorTransparentDevice = new();
+    directColorTransparentDevice.Reset();
+    directColorTransparentDevice.WriteFrameBufferWord(0, 0x0100);
+    directColorTransparentDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset, 0x0002);
+    LatchThirtyTwoXVdp(directColorTransparentDevice);
+    directColorTransparentDevice.WriteVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset, 0x0001);
+    byte[] directColorTransparentFramebuffer = new byte[MdSharp.Core.Video.Vdp.ScreenWidth * MdSharp.Core.Video.Vdp.ScreenHeight * 3];
+    directColorTransparentFramebuffer[0] = 9;
+    directColorTransparentFramebuffer[1] = 8;
+    directColorTransparentFramebuffer[2] = 7;
+    directColorTransparentDevice.CompositeFrameRgbInto(directColorTransparentFramebuffer);
+    AssertEqual((byte)9, directColorTransparentFramebuffer[0]);
+    AssertEqual((byte)8, directColorTransparentFramebuffer[1]);
+    AssertEqual((byte)7, directColorTransparentFramebuffer[2]);
+    AssertEqual(0, directColorTransparentDevice.LastCompositeWrittenPixels);
+
     ThirtyTwoXDevice shiftedDevice = new();
     shiftedDevice.Reset();
     shiftedDevice.WriteFrameBufferWord(0, 0x0100);
