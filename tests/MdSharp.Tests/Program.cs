@@ -751,8 +751,10 @@ void ThirtyTwoXDeviceShell()
     ThirtyTwoXDevice bcHostReadyDevice = new(bcHostReadyRom);
     bcHostReadyDevice.Reset();
     bcHostReadyDevice.MasterSh2.Reset(0x0600_1BB2);
+    AssertTrue(!bcHostReadyDevice.VdpAccessGrantedToSh2, "BC host-ready test should start with 68000 VDP ownership");
     WriteSh2WordForTest(bcHostReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0001);
     AssertEqual((ushort)0x0000, ReadSh2WordForTest(bcHostReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertTrue(bcHostReadyDevice.VdpAccessGrantedToSh2, "BC-style synthetic host-ready ack should return 32X VDP ownership to the SH-2");
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;

@@ -6262,7 +6262,15 @@ public sealed class ThirtyTwoXDevice
         WriteBigEndianWord(_systemRegisters, comm + 14, 0x4F4B);
         ClearM68kCommunicationTrackingForWord(12);
         ClearM68kCommunicationTrackingForWord(14);
-        GrantVdpAccessToM68k();
+        if (IsBcRacersBootProfile())
+        {
+            GrantVdpAccessToSh2();
+        }
+        else
+        {
+            GrantVdpAccessToM68k();
+        }
+
         TransferSh2SciByte(sourceCpuIndex: 0, value: 0);
     }
 
@@ -6401,9 +6409,7 @@ public sealed class ThirtyTwoXDevice
             offset != comm + 14 ||
             value != 0x0001 ||
             MasterSh2.PC is < 0x0600_1000 or > 0x0600_4000 ||
-            !_userHeader.IsValid ||
-            _userHeader.MasterStart != 0x0600_17E4u ||
-            _userHeader.SlaveStart != 0x0603_2CC0u)
+            !IsBcRacersBootProfile())
         {
             return;
         }
@@ -6414,7 +6420,15 @@ public sealed class ThirtyTwoXDevice
         _m68kCommunicationPendingHostBytes[15] = false;
         _m68kCommunicationDeferredSh2ClearBytes[14] = false;
         _m68kCommunicationDeferredSh2ClearBytes[15] = false;
+        GrantVdpAccessToSh2();
         TraceSystemRegisterAccess("MSH2", "W16", (ushort)(comm + 14), 0);
+    }
+
+    private bool IsBcRacersBootProfile()
+    {
+        return _userHeader.IsValid &&
+            _userHeader.MasterStart == 0x0600_17E4u &&
+            _userHeader.SlaveStart == 0x0603_2CC0u;
     }
 
     private bool MatchesCommunicationRange(int relative, int bytes, ReadOnlySpan<byte> expected, int baseRelative)
