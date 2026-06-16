@@ -5623,6 +5623,9 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
     string detail = string.Empty;
     string hash = string.Empty;
     string bmpPath = string.Empty;
+    Func<bool>? shouldAbortCase = caseTimeLimitSeconds > 0.0
+        ? () => stopwatch.Elapsed.TotalSeconds >= caseTimeLimitSeconds
+        : null;
 
     try
     {
@@ -5646,7 +5649,13 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                     break;
                 }
 
-                machine.RunFrameCycles(instructionsPerFrame);
+                if (!machine.TryRunFrameCycles(instructionsPerFrame, shouldAbortCase))
+                {
+                    status = "case-timeout";
+                    detail = $"case time cap during frame {completedFrames + 1:N0}";
+                    break;
+                }
+
                 machine.RenderFrameRgbInto(rgb);
                 nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
                 maxNonBackground = Math.Max(maxNonBackground, nonBackground);
@@ -5717,7 +5726,12 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                             break;
                         }
 
-                        adaptiveMachine.RunFrameCycles(adaptiveInstructionBudget);
+                        if (!adaptiveMachine.TryRunFrameCycles(adaptiveInstructionBudget, shouldAbortCase))
+                        {
+                            detail = $"case time cap during restarted adaptive frame {adaptiveFrames + 1:N0}";
+                            break;
+                        }
+
                         adaptiveMachine.RenderFrameRgbInto(adaptiveRgb);
                         adaptiveNonBackground = CountNonBackgroundPixels(adaptiveMachine.Vdp, adaptiveRgb);
                         adaptiveMaxNonBackground = Math.Max(adaptiveMaxNonBackground, adaptiveNonBackground);
@@ -5756,7 +5770,12 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                             break;
                         }
 
-                        machine.RunFrameCycles(adaptiveInstructionBudget);
+                        if (!machine.TryRunFrameCycles(adaptiveInstructionBudget, shouldAbortCase))
+                        {
+                            detail = $"case time cap during adaptive frame {completedFrames + 1:N0}";
+                            break;
+                        }
+
                         machine.RenderFrameRgbInto(rgb);
                         nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
                         maxNonBackground = Math.Max(maxNonBackground, nonBackground);

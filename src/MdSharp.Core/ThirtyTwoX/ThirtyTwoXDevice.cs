@@ -420,6 +420,7 @@ public sealed class ThirtyTwoXDevice
     public int DreqFifoWriteCount => _dreqFifoWriteCount;
     public int DreqDmaWordTransferCount => _dreqDmaWordTransferCount;
     public int DreqFifoCount => _dreqFifo.Count;
+    public Func<bool>? DiagnosticAbort { get; set; }
     public int EmptyDescriptorSpanFastPathAttempts { get; private set; }
     public int EmptyDescriptorSpanFastPathHits { get; private set; }
     public int EmptyDescriptorSpanTailFastPathAttempts { get; private set; }
@@ -810,7 +811,7 @@ public sealed class ThirtyTwoXDevice
         return executed;
     }
 
-    public int RunSh2Cycles(int maxCyclesPerCpu)
+    public int RunSh2Cycles(int maxCyclesPerCpu, Func<bool>? shouldAbort = null)
     {
         RetireNonLaunchPostStartSignatureBeforeSh2Run();
         if (Sh2HeldInReset || _bootRomHandshakePending || _bootRomLaunchPending || maxCyclesPerCpu <= 0)
@@ -823,9 +824,15 @@ public sealed class ThirtyTwoXDevice
         long slaveStartCycles = SlaveSh2.Cycles;
         long runStartMasterCycle = _currentMasterCycle;
         long lastPwmElapsedCycles = 0;
+        Func<bool>? abort = shouldAbort ?? DiagnosticAbort;
         int executed = 0;
         while (true)
         {
+            if (abort?.Invoke() == true)
+            {
+                return -executed - 1;
+            }
+
             bool ranAny = false;
             if ((!MasterSh2.Halted || MasterSh2.HasAcceptablePendingInterrupt) && MasterSh2.Cycles - masterStartCycles < maxCyclesPerCpu)
             {
@@ -841,6 +848,11 @@ public sealed class ThirtyTwoXDevice
 
             if ((!SlaveSh2.Halted || SlaveSh2.HasAcceptablePendingInterrupt) && SlaveSh2.Cycles - slaveStartCycles < maxCyclesPerCpu)
             {
+                if (abort?.Invoke() == true)
+                {
+                    return -executed - 1;
+                }
+
                 AdvanceCurrentMasterCycleForSh2Elapsed(runStartMasterCycle, masterStartCycles, slaveStartCycles);
                 RequestPendingInterrupts();
                 StepSh2Cpu(1, maxCyclesPerCpu - (int)Math.Min(SlaveSh2.Cycles - slaveStartCycles, int.MaxValue));
@@ -934,7 +946,7 @@ public sealed class ThirtyTwoXDevice
 
         if (canProbeFastPath && IsSh2FastPathGroupEnabled("early"))
         {
-            if (IsSh2FastPathGroupEnabled("idle"))
+            if (DiagnosticAbort is null && IsSh2FastPathGroupEnabled("idle"))
             {
                 int braIdleBudget = IsPwmTimerActive()
                     ? Math.Min(fastPathCycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)

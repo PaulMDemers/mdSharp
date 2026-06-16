@@ -163,6 +163,11 @@ public sealed class MegaDrive
 
     public void RunFrameCycles(int maxInstructions = 200_000)
     {
+        TryRunFrameCycles(maxInstructions);
+    }
+
+    public bool TryRunFrameCycles(int maxInstructions = 200_000, Func<bool>? shouldAbort = null)
+    {
         bool collectPerformance = CollectFramePerformance;
         if (collectPerformance)
         {
@@ -184,88 +189,128 @@ public sealed class MegaDrive
         bool z80InterruptPending = false;
         Bus.MasterCyclesPerScanline = Scheduler.MasterCyclesPerScanline;
         Bus.BeginLightGunFrame();
-
-        for (int line = 0; line < scanlines; line++)
+        ThirtyTwoXDevice? diagnosticAbortDevice = shouldAbort is null ? null : Bus.ThirtyTwoX;
+        Func<bool>? previousDiagnosticAbort = diagnosticAbortDevice?.DiagnosticAbort;
+        if (diagnosticAbortDevice is not null)
         {
-            Vdp.Interrupts interrupts;
-            if (collectPerformance)
-            {
-                long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-                long start = System.Diagnostics.Stopwatch.GetTimestamp();
-                interrupts = Vdp.StepScanline(line, IsPal);
-                _framePerformance.VdpTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-                _framePerformance.VdpAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-            }
-            else
-            {
-                interrupts = Vdp.StepScanline(line, IsPal);
-            }
-            Bus.ThirtyTwoX?.StepScanline(line, IsPal);
-            Bus.UpdateLightGunForScanline(line);
-
-            if ((interrupts & Vdp.Interrupts.Horizontal) != 0 && HBlankInterruptEnabled())
-            {
-                if (MainCpu.RequestInterrupt(4))
-                {
-                    Vdp.AcknowledgeM68kInterrupt(4);
-                }
-            }
-
-            if ((interrupts & Vdp.Interrupts.Vertical) != 0)
-            {
-                z80InterruptPending = true;
-                if (VBlankInterruptEnabled())
-                {
-                    QueueM68kInterrupt(GetM68kVBlankInterruptLevel());
-                }
-            }
-
-            int activeLineCycles = Scheduler.ActiveDisplayM68kCycles;
-            int hblankLineCycles = Math.Max(1, Scheduler.M68kCyclesPerScanline - activeLineCycles);
-            int activeDmaDebt = Vdp.ConsumeDmaCycleDebt(activeLineCycles);
-            RunThirtyTwoXForMasterCycles((long)activeDmaDebt * GenesisScheduler.M68kDivider);
-            int activeBudget = Math.Max(0, activeLineCycles - activeDmaDebt);
-            Bus.ThirtyTwoX?.SetHBlank(false);
-            int consumed = RunCpuSlice(activeBudget, 0, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending);
-
-            Vdp.SetHBlank(true);
-            Bus.ThirtyTwoX?.SetHBlank(true);
-            int hblankDmaDebt = Vdp.ConsumeDmaCycleDebt(hblankLineCycles);
-            RunThirtyTwoXForMasterCycles((long)hblankDmaDebt * GenesisScheduler.M68kDivider);
-            int hblankBudget = Math.Max(0, hblankLineCycles - hblankDmaDebt);
-            consumed += RunCpuSlice(hblankBudget, activeLineCycles, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending);
-            Vdp.SetHBlank(false);
-            Bus.ThirtyTwoX?.SetHBlank(false);
-
-            int elapsedLineCycles = Scheduler.M68kCyclesPerScanline;
-            if (collectPerformance)
-            {
-                long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-                long start = System.Diagnostics.Stopwatch.GetTimestamp();
-                Ym2612.Step(elapsedLineCycles);
-                _framePerformance.YmTimerTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-                _framePerformance.YmTimerAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-            }
-            else
-            {
-                Ym2612.Step(elapsedLineCycles);
-            }
-
-            Bus.CurrentMasterCycle = Scheduler.MasterCycles + Scheduler.MasterCyclesPerScanline;
-            Bus.SyncSvpToCurrentMasterCycle();
-
-            Scheduler.AdvanceScanline();
+            diagnosticAbortDevice.DiagnosticAbort = shouldAbort;
         }
 
-        if (collectPerformance)
+        try
         {
-            LastFramePerformance = _framePerformance.ToCounters();
-        }
+            for (int line = 0; line < scanlines; line++)
+            {
+                if (shouldAbort?.Invoke() == true)
+                {
+                    return false;
+                }
 
-        Frames++;
+                Vdp.Interrupts interrupts;
+                if (collectPerformance)
+                {
+                    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    interrupts = Vdp.StepScanline(line, IsPal);
+                    _framePerformance.VdpTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+                    _framePerformance.VdpAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                }
+                else
+                {
+                    interrupts = Vdp.StepScanline(line, IsPal);
+                }
+                Bus.ThirtyTwoX?.StepScanline(line, IsPal);
+                Bus.UpdateLightGunForScanline(line);
+
+                if ((interrupts & Vdp.Interrupts.Horizontal) != 0 && HBlankInterruptEnabled())
+                {
+                    if (MainCpu.RequestInterrupt(4))
+                    {
+                        Vdp.AcknowledgeM68kInterrupt(4);
+                    }
+                }
+
+                if ((interrupts & Vdp.Interrupts.Vertical) != 0)
+                {
+                    z80InterruptPending = true;
+                    if (VBlankInterruptEnabled())
+                    {
+                        QueueM68kInterrupt(GetM68kVBlankInterruptLevel());
+                    }
+                }
+
+                int activeLineCycles = Scheduler.ActiveDisplayM68kCycles;
+                int hblankLineCycles = Math.Max(1, Scheduler.M68kCyclesPerScanline - activeLineCycles);
+                int activeDmaDebt = Vdp.ConsumeDmaCycleDebt(activeLineCycles);
+                if (!RunThirtyTwoXForMasterCycles((long)activeDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return false;
+                }
+
+                int activeBudget = Math.Max(0, activeLineCycles - activeDmaDebt);
+                Bus.ThirtyTwoX?.SetHBlank(false);
+                int consumed = RunCpuSlice(activeBudget, 0, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending, shouldAbort);
+                if (consumed < 0)
+                {
+                    return false;
+                }
+
+                Vdp.SetHBlank(true);
+                Bus.ThirtyTwoX?.SetHBlank(true);
+                int hblankDmaDebt = Vdp.ConsumeDmaCycleDebt(hblankLineCycles);
+                if (!RunThirtyTwoXForMasterCycles((long)hblankDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return false;
+                }
+
+                int hblankBudget = Math.Max(0, hblankLineCycles - hblankDmaDebt);
+                int hblankConsumed = RunCpuSlice(hblankBudget, activeLineCycles, ref remainingInstructions, ref _z80MasterCycleCursor, ref z80InterruptPending, shouldAbort);
+                if (hblankConsumed < 0)
+                {
+                    return false;
+                }
+
+                consumed += hblankConsumed;
+                Vdp.SetHBlank(false);
+                Bus.ThirtyTwoX?.SetHBlank(false);
+
+                int elapsedLineCycles = Scheduler.M68kCyclesPerScanline;
+                if (collectPerformance)
+                {
+                    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    Ym2612.Step(elapsedLineCycles);
+                    _framePerformance.YmTimerTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+                    _framePerformance.YmTimerAllocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                }
+                else
+                {
+                    Ym2612.Step(elapsedLineCycles);
+                }
+
+                Bus.CurrentMasterCycle = Scheduler.MasterCycles + Scheduler.MasterCyclesPerScanline;
+                Bus.SyncSvpToCurrentMasterCycle();
+
+                Scheduler.AdvanceScanline();
+            }
+
+            if (collectPerformance)
+            {
+                LastFramePerformance = _framePerformance.ToCounters();
+            }
+
+            Frames++;
+            return true;
+        }
+        finally
+        {
+            if (diagnosticAbortDevice is not null)
+            {
+                diagnosticAbortDevice.DiagnosticAbort = previousDiagnosticAbort;
+            }
+        }
     }
 
-    private int RunCpuSlice(int cycleBudget, int lineCycleOffset, ref int remainingInstructions, ref long z80MasterCycleCursor, ref bool z80InterruptPending)
+    private int RunCpuSlice(int cycleBudget, int lineCycleOffset, ref int remainingInstructions, ref long z80MasterCycleCursor, ref bool z80InterruptPending, Func<bool>? shouldAbort)
     {
         if (cycleBudget <= 0)
         {
@@ -279,7 +324,11 @@ public sealed class MegaDrive
         {
             Bus.CurrentMasterCycle = lineStartMasterCycle + (lineCycleOffset * GenesisScheduler.M68kDivider);
             Bus.CurrentScanlineMasterCycleOffset = lineCycleOffset * GenesisScheduler.M68kDivider;
-            RunThirtyTwoXForMasterCycles((long)cycleBudget * GenesisScheduler.M68kDivider);
+            if (!RunThirtyTwoXForMasterCycles((long)cycleBudget * GenesisScheduler.M68kDivider, shouldAbort))
+            {
+                return -1;
+            }
+
             long exhaustedSliceEndMasterCycle = lineStartMasterCycle + ((lineCycleOffset + cycleBudget) * GenesisScheduler.M68kDivider);
             RunZ80Until(lineStartMasterCycle, exhaustedSliceEndMasterCycle, ref z80MasterCycleCursor, ref z80InterruptPending, z80Observer);
             Bus.CurrentMasterCycle = exhaustedSliceEndMasterCycle;
@@ -289,6 +338,11 @@ public sealed class MegaDrive
 
         while (consumed < cycleBudget && remainingInstructions > 0)
         {
+            if (shouldAbort?.Invoke() == true)
+            {
+                return -1;
+            }
+
             Bus.CurrentMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
             Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
             ServicePendingM68kInterrupts();
@@ -298,10 +352,20 @@ public sealed class MegaDrive
                 RecordM68kFastPath(pollCycles, ref _m68kThirtyTwoXSystemWordPollFastPathHits, ref _m68kThirtyTwoXSystemWordPollFastPathCycles);
                 ThirtyTwoXDevice thirtyTwoX = Bus.ThirtyTwoX!;
                 MainCpu.AddWaitCycles(pollCycles);
-                RunThirtyTwoXForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 int skippedPolls = pollCycles / ThirtyTwoXSystemWordPollLoopCycles;
                 thirtyTwoX.SetCurrentMasterCycle(Bus.CurrentMasterCycle);
-                _thirtyTwoXExecutedInstructionSteps += thirtyTwoX.RunSh2Cycles(skippedPolls * 32);
+                int sh2Executed = thirtyTwoX.RunSh2Cycles(skippedPolls * 32, shouldAbort);
+                if (sh2Executed < 0)
+                {
+                    return -1;
+                }
+
+                _thirtyTwoXExecutedInstructionSteps += sh2Executed;
                 ushort value = thirtyTwoX.ReadSystemRegisterWord(0x20);
                 MainCpu.D[0] = (MainCpu.D[0] & 0xFFFF_0000u) | value;
                 consumed += pollCycles;
@@ -316,7 +380,11 @@ public sealed class MegaDrive
                     out int waitLoopInstructions))
             {
                 RecordM68kFastPath(waitLoopCycles, ref _m68kLongTstBneWaitFastPathHits, ref _m68kLongTstBneWaitFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += waitLoopCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - waitLoopInstructions);
                 continue;
@@ -326,7 +394,11 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
                 RecordM68kFastPath(fastCycles, ref _m68kMoveByteFillDbfFastPathHits, ref _m68kMoveByteFillDbfFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += fastCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - fastInstructions);
                 continue;
@@ -340,7 +412,11 @@ public sealed class MegaDrive
                     out int cmpWaitLoopInstructions))
             {
                 RecordM68kFastPath(cmpWaitLoopCycles, ref _m68kLongCmpBeqWaitFastPathHits, ref _m68kLongCmpBeqWaitFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += cmpWaitLoopCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - cmpWaitLoopInstructions);
                 continue;
@@ -350,7 +426,11 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardShiftRegisterBitReaderLoop(cycleBudget - consumed, out int bitReaderCycles, out int bitReaderInstructions))
             {
                 RecordM68kFastPath(bitReaderCycles, ref _m68kBitReaderFastPathHits, ref _m68kBitReaderFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += bitReaderCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - bitReaderInstructions);
                 continue;
@@ -360,7 +440,11 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(cycleBudget - consumed, out int wordPairCycles, out int wordPairInstructions))
             {
                 RecordM68kFastPath(wordPairCycles, ref _m68kWordPairCompareFastPathHits, ref _m68kWordPairCompareFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)wordPairCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)wordPairCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += wordPairCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - wordPairInstructions);
                 continue;
@@ -377,7 +461,11 @@ public sealed class MegaDrive
                 MainCpu.AddWaitCycles(byteCopyWaitCycles);
                 int elapsedCycles = byteCopyCycles + byteCopyWaitCycles;
                 RecordM68kFastPath(elapsedCycles, ref _m68kMoveByteCopyDbfFastPathHits, ref _m68kMoveByteCopyDbfFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += elapsedCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - byteCopyInstructions);
                 continue;
@@ -394,7 +482,11 @@ public sealed class MegaDrive
                 MainCpu.AddWaitCycles(wordFillWaitCycles);
                 int elapsedCycles = wordFillCycles + wordFillWaitCycles;
                 RecordM68kFastPath(elapsedCycles, ref _m68kMoveWordVdpFillDbfFastPathHits, ref _m68kMoveWordVdpFillDbfFastPathCycles);
-                RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += elapsedCycles;
                 remainingInstructions = Math.Max(0, remainingInstructions - wordFillInstructions);
                 continue;
@@ -404,7 +496,11 @@ public sealed class MegaDrive
             {
                 int idleCycles = Math.Min(cycleBudget - consumed, MaxStoppedM68kIdleBatchCycles);
                 MainCpu.AddWaitCycles(idleCycles);
-                RunThirtyTwoXForMasterCycles((long)idleCycles * GenesisScheduler.M68kDivider);
+                if (!RunThirtyTwoXForMasterCycles((long)idleCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
                 consumed += idleCycles;
 
                 long idleSliceEndMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
@@ -430,7 +526,11 @@ public sealed class MegaDrive
             int waitCycles = Bus.ConsumeM68kWaitCycles();
             MainCpu.AddWaitCycles(waitCycles);
             int elapsedM68kCycles = m68kCycles + waitCycles;
-            RunThirtyTwoXForMasterCycles((long)elapsedM68kCycles * GenesisScheduler.M68kDivider);
+            if (!RunThirtyTwoXForMasterCycles((long)elapsedM68kCycles * GenesisScheduler.M68kDivider, shouldAbort))
+            {
+                return -1;
+            }
+
             consumed += elapsedM68kCycles;
             if (!wasStopped || !MainCpu.Stopped)
             {
@@ -558,11 +658,11 @@ public sealed class MegaDrive
         }
     }
 
-    private void RunThirtyTwoXForMasterCycles(long masterCycles)
+    private bool RunThirtyTwoXForMasterCycles(long masterCycles, Func<bool>? shouldAbort = null)
     {
         if (Bus.ThirtyTwoX is null || masterCycles <= 0)
         {
-            return;
+            return true;
         }
 
         double sh2Clock = IsPal ? ThirtyTwoXHardwareProfile.PalSh2ClockHz : ThirtyTwoXHardwareProfile.NtscSh2ClockHz;
@@ -570,13 +670,20 @@ public sealed class MegaDrive
         int cyclesPerCpu = (int)_thirtyTwoXInstructionCarry;
         if (cyclesPerCpu < ThirtyTwoXMinimumCycleBatch)
         {
-            return;
+            return true;
         }
 
         _thirtyTwoXInstructionCarry -= cyclesPerCpu;
         _thirtyTwoXScheduledInstructionRequests += cyclesPerCpu;
         Bus.ThirtyTwoX.SetCurrentMasterCycle(Bus.CurrentMasterCycle);
-        _thirtyTwoXExecutedInstructionSteps += Bus.ThirtyTwoX.RunSh2Cycles(cyclesPerCpu);
+        int executed = Bus.ThirtyTwoX.RunSh2Cycles(cyclesPerCpu, shouldAbort);
+        if (executed < 0)
+        {
+            return false;
+        }
+
+        _thirtyTwoXExecutedInstructionSteps += executed;
+        return true;
     }
 
     private bool TryHandleThirtyTwoXSdkLineF(uint opcodeAddress, ushort opcode)
