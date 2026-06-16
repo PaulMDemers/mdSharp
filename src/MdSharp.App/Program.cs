@@ -5622,6 +5622,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
     int maxNonBackground = 0;
     string status = "ok";
     string detail = string.Empty;
+    string lastLiveStatus = string.Empty;
     string hash = string.Empty;
     string bmpPath = string.Empty;
     Func<bool>? shouldAbortCase = caseTimeLimitSeconds > 0.0
@@ -5663,6 +5664,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                 if (device is not null && completedFrames >= 44)
                 {
                     string liveStatus = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+                    lastLiveStatus = liveStatus;
                     bool shouldStop = IsConfirmedVisibleThirtyTwoXStatus(liveStatus) ||
                         (stopOnVisible && IsThirtyTwoXSweepEarlyStopStatus(liveStatus));
                     if (shouldStop)
@@ -5696,6 +5698,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         if (device is not null && status == "ok")
         {
             status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+            lastLiveStatus = status;
             if (adaptiveTimeLimitSeconds > 0.0 && ShouldAdaptiveResampleThirtyTwoX(status, completedFrames))
             {
                 string initialStatus = status;
@@ -5737,6 +5740,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                         adaptiveNonBackground = CountNonBackgroundPixels(adaptiveMachine.Vdp, adaptiveRgb);
                         adaptiveMaxNonBackground = Math.Max(adaptiveMaxNonBackground, adaptiveNonBackground);
                         adaptiveStatus = ClassifyThirtyTwoXSweep(adaptiveMachine, adaptiveDevice, adaptiveNonBackground, adaptiveMaxNonBackground);
+                        lastLiveStatus = adaptiveStatus;
                         if (adaptiveFrames >= 44 && IsConfirmedVisibleThirtyTwoXStatus(adaptiveStatus))
                         {
                             adaptiveFrames++;
@@ -5781,6 +5785,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                         nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
                         maxNonBackground = Math.Max(maxNonBackground, nonBackground);
                         status = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+                        lastLiveStatus = status;
                         if (IsConfirmedVisibleThirtyTwoXStatus(status))
                         {
                             break;
@@ -5793,6 +5798,18 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
                     detail = $"adaptive resample: {initialStatus} at {initialFrames:N0} frame(s), {status} at {completedFrames:N0} frame(s) with {adaptiveInstructionBudget:N0} instructions/frame";
                 }
             }
+        }
+        else if (device is not null && status == "case-timeout")
+        {
+            if (lastLiveStatus.Length == 0)
+            {
+                machine.RenderFrameRgbInto(rgb);
+                nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
+                maxNonBackground = Math.Max(maxNonBackground, nonBackground);
+                lastLiveStatus = ClassifyThirtyTwoXSweep(machine, device, nonBackground, maxNonBackground);
+            }
+
+            detail = AppendDetail(detail, $"last live status: {lastLiveStatus}");
         }
 
         hash = Convert.ToHexString(SHA256.HashData(rgb));
@@ -5876,6 +5893,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
         thirtyTwoXState?.BootRomHandshakePending ?? false,
         thirtyTwoXState?.BootRomSignatureRead ?? false,
         thirtyTwoXState?.BootRomLaunchPending ?? false,
+        lastLiveStatus,
         FormatThirtyTwoXWaitSignature(thirtyTwoXState),
         hash,
         bmpPath,
@@ -15131,12 +15149,13 @@ file sealed record ThirtyTwoXSweepResult(
     bool BootPending,
     bool BootRead,
     bool BootLaunch,
+    string LastLiveStatus,
     string WaitSignature,
     string Sha256,
     string BmpPath,
     string Detail)
 {
-    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,m68kFaults,m68kTraps,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterSr,slaveSr,masterGbr,slaveGbr,masterPr,slavePr,masterR0,masterR1,masterR15,slaveR0,slaveR1,slaveR15,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,waitSignature,sha256,bmp,detail";
+    public const string CsvHeader = "rom,status,frames,elapsedMs,fps,pc,exceptions,m68kFaults,m68kTraps,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,compositeMode,compositeFallback,compositePixels,bitmapMode,fbctl,modeWrites,fbctlWrites,vdpWrites,fbBytes,paletteBytes,dreqWrites,dreqDmaWords,displayFbNonzero,drawFbNonzero,displayFbPayloadNonzero,drawFbPayloadNonzero,paletteNonzero,comm0,comm2,comm4,comm6,masterPc,slavePc,masterSr,slaveSr,masterGbr,slaveGbr,masterPr,slavePr,masterR0,masterR1,masterR15,slaveR0,slaveR1,slaveR15,masterLast,slaveLast,masterUnhandled,slaveUnhandled,masterMask,slaveMask,pwmAudioL,pwmAudioR,pwmAudioM,pwmHwL,pwmHwR,pwmHwM,pwmCycle,pwmTimer,masterPwmPending,slavePwmPending,bootPending,bootRead,bootLaunch,lastLiveStatus,waitSignature,sha256,bmp,detail";
 
     public string ToCsv()
     {
@@ -15208,6 +15227,7 @@ file sealed record ThirtyTwoXSweepResult(
             BootPending ? "true" : "false",
             BootRead ? "true" : "false",
             BootLaunch ? "true" : "false",
+            $"\"{Escape(LastLiveStatus)}\"",
             $"\"{Escape(WaitSignature)}\"",
             Sha256,
             $"\"{Escape(BmpPath)}\"",
