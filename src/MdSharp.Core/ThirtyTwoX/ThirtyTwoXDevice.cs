@@ -3619,6 +3619,7 @@ public sealed class ThirtyTwoXDevice
         {
             SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace("M68K", (ushort)index, value));
             TraceSystemRegisterAccess("M68K", "W8", (ushort)index, value);
+            TryMirrorHostClearedCommWordToSdramTaskletMailbox((ushort)(index & ~1));
             ReleaseBootRomLaunchOnHostCommand();
             UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
             RetireObservedPostStartSignatureOnHostWrite((ushort)(index & ~1));
@@ -3647,6 +3648,7 @@ public sealed class ThirtyTwoXDevice
         UpdateBootRomHandshakeAfterM68kWrite((ushort)(index & ~1), hadBootRomSignature);
         TrackBootRomChecksumHostClear(aligned, ReadBigEndianWord(_systemRegisters, aligned));
         PublishBootRomChecksumAfterHostClear((ushort)(index & ~1));
+        TryMirrorHostClearedCommWordToSdramTaskletMailbox(aligned);
         CompleteHiddenPostStartBootAfterHostClear((ushort)index, 1, value);
     }
 
@@ -3685,6 +3687,7 @@ public sealed class ThirtyTwoXDevice
         RetireBootRomSixtyEightUpReadyOnHostWrite(aligned, value);
         PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
         RetireHiddenPostStartGOkAfterHostClear(aligned, value);
+        TryMirrorHostClearedCommWordToSdramTaskletMailbox(aligned);
         CompleteHiddenPostStartBootAfterHostClear(aligned, 2, value);
         AckLateHiddenPostStartHostReady(aligned, value);
     }
@@ -8987,6 +8990,71 @@ public sealed class ThirtyTwoXDevice
         slaveReadyValue = (ushort)queueValue;
         masterReadyValue = 1;
         return true;
+    }
+
+    private void TryMirrorHostClearedCommWordToSdramTaskletMailbox(ushort offset)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (offset != comm + 2 ||
+            ReadBigEndianWord(_systemRegisters, comm + 2) != 0 ||
+            !TryFindSdramFlagTaskletMailbox(requireIdleValue: true, out int valueOffset))
+        {
+            return;
+        }
+
+        WriteSdramWordForSemaphore(valueOffset, 0);
+        WriteSdramWordForSemaphore(valueOffset + 2, 0x0081);
+    }
+
+    private bool TryFindSdramFlagTaskletMailbox(bool requireIdleValue, out int valueOffset)
+    {
+        valueOffset = 0;
+        for (int offset = 0; offset <= ThirtyTwoXHardwareProfile.SdramBytes - 0xD0; offset += 2)
+        {
+            if (ReadBigEndianWord(_sdram, offset) != 0xD132 ||
+                ReadBigEndianWord(_sdram, offset + 0x02) != 0x6011 ||
+                ReadBigEndianWord(_sdram, offset + 0x04) != 0xC801 ||
+                ReadBigEndianWord(_sdram, offset + 0x06) != 0x8950 ||
+                ReadBigEndianWord(_sdram, offset + 0x08) != 0xDE2F ||
+                ReadBigEndianWord(_sdram, offset + 0x0A) != 0x61E2 ||
+                ReadBigEndianWord(_sdram, offset + 0x0C) != 0xD22D ||
+                ReadBigEndianWord(_sdram, offset + 0x0E) != 0x3210 ||
+                ReadBigEndianWord(_sdram, offset + 0x10) != 0x894B)
+            {
+                continue;
+            }
+
+            uint pc = ThirtyTwoXHardwareProfile.Sh2SdramStart + (uint)offset;
+            if (!TryNormalizeSdramOffset(DecodeSh2PcRelativeLongLiteral(pc, 0xD132), out int flagLiteralOffset) ||
+                !TryNormalizeSdramOffset(DecodeSh2PcRelativeLongLiteral(pc + 0x08, 0xDE2F), out int valueLiteralOffset) ||
+                !TryNormalizeSdramOffset(DecodeSh2PcRelativeLongLiteral(pc + 0x0C, 0xD22D), out int expectedLiteralOffset))
+            {
+                continue;
+            }
+
+            uint flagAddress = ReadBigEndianLong(_sdram, flagLiteralOffset);
+            uint valueAddress = ReadBigEndianLong(_sdram, valueLiteralOffset);
+            uint expectedValue = ReadBigEndianLong(_sdram, expectedLiteralOffset);
+            if (expectedValue != 0x0000_0080 ||
+                !TryNormalizeSdramOffset(flagAddress, out int flagOffset) ||
+                !TryNormalizeSdramOffset(valueAddress, out int candidateValueOffset) ||
+                candidateValueOffset + 3 >= ThirtyTwoXHardwareProfile.SdramBytes ||
+                (ReadBigEndianWord(_sdram, flagOffset) & 1) == 0 ||
+                (requireIdleValue && ReadBigEndianLong(_sdram, candidateValueOffset) != expectedValue))
+            {
+                continue;
+            }
+
+            valueOffset = candidateValueOffset;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static uint DecodeSh2PcRelativeLongLiteral(uint pc, ushort opcode)
+    {
+        return ((pc + 4) & 0xFFFF_FFFCu) + (uint)((opcode & 0x00FF) * 4);
     }
 
     private static bool TryNormalizeSdramOffset(uint address, out int offset)
