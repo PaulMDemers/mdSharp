@@ -613,6 +613,29 @@ if (args[0].Equals("--32x-trace", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--32x-sweep-case", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 10)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --32x-sweep-case <rom-file> <rom-root> <screenshot-folder> <frames> <instructions-per-frame> <write-screenshot> <adaptive-seconds> <case-seconds> <stop-on-visible>");
+        Environment.Exit(2);
+    }
+
+    int frames = int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 600;
+    int instructionsPerFrame = int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 300_000;
+    bool writeScreenshot = bool.TryParse(args[6], out bool parsedScreenshot) && parsedScreenshot;
+    double adaptiveTimeLimitSeconds = double.TryParse(args[7], NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedAdaptiveSeconds)
+        ? parsedAdaptiveSeconds
+        : ThirtyTwoXSweepAdaptiveTimeLimitSeconds;
+    double caseTimeLimitSeconds = double.TryParse(args[8], NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedCaseSeconds)
+        ? parsedCaseSeconds
+        : 0.0;
+    bool stopOnVisible = bool.TryParse(args[9], out bool parsedStopOnVisible) && parsedStopOnVisible;
+    ThirtyTwoXSweepResult result = RunThirtyTwoXSweepCase(args[1], args[2], args[3], frames, instructionsPerFrame, writeScreenshot, adaptiveTimeLimitSeconds, caseTimeLimitSeconds, stopOnVisible);
+    Console.WriteLine(result.ToCsv());
+    return;
+}
+
 if (args[0].Equals("--32x-sweep", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 3)
@@ -5537,8 +5560,8 @@ void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int inst
             continue;
         }
 
-        ThirtyTwoXSweepResult result = RunThirtyTwoXSweepCase(file, fullRomFolder, screenshotFolder, frames, instructionsPerFrame, writeScreenshots, adaptiveTimeLimitSeconds, caseTimeLimitSeconds, stopOnVisible);
-        writer.WriteLine(result.ToCsv());
+        ThirtyTwoXSweepCaseRun result = RunThirtyTwoXSweepCaseWithWatchdog(file, fullRomFolder, screenshotFolder, frames, instructionsPerFrame, writeScreenshots, adaptiveTimeLimitSeconds, caseTimeLimitSeconds, stopOnVisible);
+        writer.WriteLine(result.CsvRow);
         Console.WriteLine($"{result.Status,-22} {result.RelativeRom}");
         processed++;
         if (limit is > 0 && processed >= limit.Value)
@@ -5548,6 +5571,207 @@ void SweepThirtyTwoX(string romFolder, string outputFolder, int frames, int inst
     }
 
     Console.WriteLine($"Wrote 32X sweep report to {Path.GetFullPath(csvPath)}");
+}
+
+ThirtyTwoXSweepCaseRun RunThirtyTwoXSweepCaseWithWatchdog(string romPath, string romRoot, string screenshotFolder, int frames, int instructionsPerFrame, bool writeScreenshot, double adaptiveTimeLimitSeconds, double caseTimeLimitSeconds, bool stopOnVisible)
+{
+    if (caseTimeLimitSeconds <= 0.0 ||
+        Environment.GetEnvironmentVariable("MDSHARP_32X_SWEEP_CHILD") == "1")
+    {
+        ThirtyTwoXSweepResult direct = RunThirtyTwoXSweepCase(romPath, romRoot, screenshotFolder, frames, instructionsPerFrame, writeScreenshot, adaptiveTimeLimitSeconds, caseTimeLimitSeconds, stopOnVisible);
+        return new ThirtyTwoXSweepCaseRun(direct.ToCsv(), direct.Status, direct.RelativeRom);
+    }
+
+    string relative = Path.GetRelativePath(romRoot, romPath);
+    string? processPath = Environment.ProcessPath;
+    if (string.IsNullOrWhiteSpace(processPath))
+    {
+        ThirtyTwoXSweepResult fallback = CreateThirtyTwoXWatchdogResult(relative, caseTimeLimitSeconds, "Unable to resolve current process path for child sweep.");
+        return new ThirtyTwoXSweepCaseRun(fallback.ToCsv(), fallback.Status, fallback.RelativeRom);
+    }
+
+    using System.Diagnostics.Process child = new();
+    child.StartInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = processPath,
+        WorkingDirectory = Environment.CurrentDirectory,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    };
+    child.StartInfo.Environment["MDSHARP_32X_SWEEP_CHILD"] = "1";
+    child.StartInfo.ArgumentList.Add("--32x-sweep-case");
+    child.StartInfo.ArgumentList.Add(romPath);
+    child.StartInfo.ArgumentList.Add(romRoot);
+    child.StartInfo.ArgumentList.Add(screenshotFolder);
+    child.StartInfo.ArgumentList.Add(frames.ToString(CultureInfo.InvariantCulture));
+    child.StartInfo.ArgumentList.Add(instructionsPerFrame.ToString(CultureInfo.InvariantCulture));
+    child.StartInfo.ArgumentList.Add(writeScreenshot ? "true" : "false");
+    child.StartInfo.ArgumentList.Add(adaptiveTimeLimitSeconds.ToString(CultureInfo.InvariantCulture));
+    child.StartInfo.ArgumentList.Add(caseTimeLimitSeconds.ToString(CultureInfo.InvariantCulture));
+    child.StartInfo.ArgumentList.Add(stopOnVisible ? "true" : "false");
+
+    try
+    {
+        child.Start();
+        int waitMilliseconds = (int)Math.Ceiling(Math.Min(Math.Max(caseTimeLimitSeconds + 15.0, caseTimeLimitSeconds * 3.0), 300.0) * 1000.0);
+        if (!child.WaitForExit(waitMilliseconds))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            ThirtyTwoXSweepResult timeout = CreateThirtyTwoXWatchdogResult(relative, caseTimeLimitSeconds, $"process watchdog killed child after {waitMilliseconds:N0}ms");
+            return new ThirtyTwoXSweepCaseRun(timeout.ToCsv(), timeout.Status, timeout.RelativeRom);
+        }
+
+        string output = child.StandardOutput.ReadToEnd();
+        string error = child.StandardError.ReadToEnd();
+        string? row = output
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(line => line.StartsWith('"'));
+        if (child.ExitCode == 0 && !string.IsNullOrWhiteSpace(row))
+        {
+            return new ThirtyTwoXSweepCaseRun(row, ReadCsvField(row, 1) ?? "ok", ReadFirstCsvField(row) ?? relative);
+        }
+
+        ThirtyTwoXSweepResult failed = CreateThirtyTwoXWatchdogResult(relative, caseTimeLimitSeconds, $"child sweep failed with exit code {child.ExitCode}: {error.Trim()}");
+        return new ThirtyTwoXSweepCaseRun(failed.ToCsv(), failed.Status, failed.RelativeRom);
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+    {
+        ThirtyTwoXSweepResult failed = CreateThirtyTwoXWatchdogResult(relative, caseTimeLimitSeconds, ex.Message);
+        return new ThirtyTwoXSweepCaseRun(failed.ToCsv(), failed.Status, failed.RelativeRom);
+    }
+}
+
+ThirtyTwoXSweepResult CreateThirtyTwoXWatchdogResult(string relativeRom, double caseTimeLimitSeconds, string detail)
+{
+    return new ThirtyTwoXSweepResult(
+        RelativeRom: relativeRom,
+        Status: "case-timeout-watchdog",
+        Frames: 0,
+        ElapsedMs: (long)Math.Ceiling(caseTimeLimitSeconds * 1000.0),
+        Fps: 0.0,
+        Pc: 0,
+        Exceptions: "none",
+        M68kFaultEvents: 0,
+        M68kTrapEvents: 0,
+        RenderMode: string.Empty,
+        NonBackgroundPixels: 0,
+        MaxNonBackgroundPixels: 0,
+        CompositeMode: 0,
+        CompositeFallback: false,
+        CompositePixels: 0,
+        BitmapMode: 0,
+        FrameBufferControl: 0,
+        ModeWrites: 0,
+        FrameBufferControlWrites: 0,
+        VdpWrites: 0,
+        FrameBufferByteWrites: 0,
+        PaletteByteWrites: 0,
+        DreqWrites: 0,
+        DreqDmaWords: 0,
+        DisplayFrameBufferNonzero: 0,
+        DrawFrameBufferNonzero: 0,
+        DisplayFrameBufferPayloadNonzero: 0,
+        DrawFrameBufferPayloadNonzero: 0,
+        PaletteNonzero: 0,
+        Comm0: 0,
+        Comm2: 0,
+        Comm4: 0,
+        Comm6: 0,
+        MasterPc: 0,
+        SlavePc: 0,
+        MasterSr: 0,
+        SlaveSr: 0,
+        MasterGbr: 0,
+        SlaveGbr: 0,
+        MasterPr: 0,
+        SlavePr: 0,
+        MasterR0: 0,
+        MasterR1: 0,
+        MasterR15: 0,
+        SlaveR0: 0,
+        SlaveR1: 0,
+        SlaveR15: 0,
+        MasterLastOpcode: 0,
+        SlaveLastOpcode: 0,
+        MasterUnhandledOpcodes: 0,
+        SlaveUnhandledOpcodes: 0,
+        MasterInterruptMask: 0,
+        SlaveInterruptMask: 0,
+        PwmAudioLeft: 0,
+        PwmAudioRight: 0,
+        PwmAudioMono: 0,
+        PwmHardwareLeft: 0,
+        PwmHardwareRight: 0,
+        PwmHardwareMono: 0,
+        PwmCycleCounter: 0,
+        PwmTimerCounter: 0,
+        MasterPwmPending: false,
+        SlavePwmPending: false,
+        BootPending: false,
+        BootRead: false,
+        BootLaunch: false,
+        LastLiveStatus: string.Empty,
+        WaitSignature: "process-watchdog",
+        Sha256: string.Empty,
+        BmpPath: string.Empty,
+        Detail: detail);
+}
+
+string? ReadCsvField(string line, int fieldIndex)
+{
+    int current = 0;
+    StringBuilder value = new();
+    bool quoted = false;
+    for (int i = 0; i < line.Length; i++)
+    {
+        char c = line[i];
+        if (quoted)
+        {
+            if (c == '"')
+            {
+                if (i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    value.Append('"');
+                    i++;
+                }
+                else
+                {
+                    quoted = false;
+                }
+            }
+            else
+            {
+                value.Append(c);
+            }
+
+            continue;
+        }
+
+        if (c == '"' && value.Length == 0)
+        {
+            quoted = true;
+            continue;
+        }
+
+        if (c == ',')
+        {
+            if (current == fieldIndex)
+            {
+                return value.ToString();
+            }
+
+            current++;
+            value.Clear();
+            continue;
+        }
+
+        value.Append(c);
+    }
+
+    return current == fieldIndex ? value.ToString() : null;
 }
 
 HashSet<string> ReadCompletedSweepRoms(string csvPath)
@@ -15081,6 +15305,8 @@ file sealed record CompatibilityResult(
         return value.Replace("\"", "\"\"", StringComparison.Ordinal);
     }
 }
+
+file sealed record ThirtyTwoXSweepCaseRun(string CsvRow, string Status, string RelativeRom);
 
 file sealed record ThirtyTwoXSweepResult(
     string RelativeRom,
