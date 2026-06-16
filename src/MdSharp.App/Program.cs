@@ -17,6 +17,7 @@ using System.Text.Json;
 const int DefaultInstructionBudget = 100_000;
 const int SonicTitleMusicStartFrame = 559;
 const double ThirtyTwoXSweepAdaptiveTimeLimitSeconds = 180.0;
+const int ThirtyTwoXSweepAdaptiveTargetFrames = 1_500;
 string[] romExtensions = [".bin", ".md", ".gen", ".smd", ".rom", ".32x"];
 
 if (args.Length == 1 && args[0] is "--version" or "-v")
@@ -5699,7 +5700,7 @@ ThirtyTwoXSweepResult RunThirtyTwoXSweepCase(string romPath, string romRoot, str
             {
                 string initialStatus = status;
                 int initialFrames = completedFrames;
-                int adaptiveTargetFrames = Math.Max(completedFrames, 900);
+                int adaptiveTargetFrames = Math.Max(completedFrames, ThirtyTwoXSweepAdaptiveTargetFrames);
                 int adaptiveInstructionBudget = Math.Max(instructionsPerFrame, 800_000);
 
                 if (adaptiveInstructionBudget > instructionsPerFrame)
@@ -6010,7 +6011,7 @@ static string WithThirtyTwoXExceptionSuffix(string status, string exceptionSuffi
 
 bool ShouldAdaptiveResampleThirtyTwoX(string status, int completedFrames)
 {
-    if (completedFrames >= 900)
+    if (completedFrames >= ThirtyTwoXSweepAdaptiveTargetFrames)
     {
         return false;
     }
