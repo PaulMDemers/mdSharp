@@ -723,6 +723,36 @@ void ThirtyTwoXDeviceShell()
     WriteSh2LongForTest(directGOkDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0);
     AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
     AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    ThirtyTwoXDevice wordReadyDevice = new();
+    wordReadyDevice.Reset();
+    wordReadyDevice.RestoreState(wordReadyDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = false,
+        BootRomSixtyEightUpReadyHiddenFromSh2 = true,
+    });
+    WriteSh2WordForTest(wordReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x475F);
+    WriteSh2WordForTest(wordReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x4F4B);
+    WriteSh2WordForTest(wordReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0001);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(wordReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(wordReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    AssertEqual((ushort)0x0000, wordReadyDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, wordReadyDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    byte[] bcHostReadyRom = new byte[0x1000];
+    WriteAscii(bcHostReadyRom, 0x3C0, "MARS CHECK MODE ");
+    WriteLong(bcHostReadyRom, 0x3D4, 0x0000_0400);
+    WriteLong(bcHostReadyRom, 0x3D8, 0x0000_0000);
+    WriteLong(bcHostReadyRom, 0x3DC, 0x0000_0010);
+    WriteLong(bcHostReadyRom, 0x3E0, 0x0600_17E4);
+    WriteLong(bcHostReadyRom, 0x3E4, 0x0603_2CC0);
+    WriteLong(bcHostReadyRom, 0x3E8, 0x0600_16C4);
+    WriteLong(bcHostReadyRom, 0x3EC, 0x0603_2BA0);
+    ThirtyTwoXDevice bcHostReadyDevice = new(bcHostReadyRom);
+    bcHostReadyDevice.Reset();
+    bcHostReadyDevice.MasterSh2.Reset(0x0600_1BB2);
+    WriteSh2WordForTest(bcHostReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0001);
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(bcHostReadyDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     ThirtyTwoXDevice dualWorkerSemaphoreDevice = new();
     dualWorkerSemaphoreDevice.Reset();
     const uint dualWorkerWrapperAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x100;

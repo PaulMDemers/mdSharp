@@ -5389,6 +5389,8 @@ public sealed class ThirtyTwoXDevice
         MarkM68kCommunicationStaleByte(aligned, previousHigh, high);
         MarkM68kCommunicationStaleByte((ushort)(aligned + 1), previousLow, low);
         TryAdvanceM68kVdpControlMailboxPhase(aligned, value);
+        TryAcknowledgeBootRomGOkWordStartupReady(aligned, previousWord, value, cpuIndex);
+        TryAcknowledgeBootRomHostReadyWord(aligned, value, cpuIndex);
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, aligned, high));
         SystemRegisterWriteObserver?.Invoke(new SystemRegisterWriteTrace(source, (ushort)(aligned + 1), low));
         TraceSystemRegisterAccess(source, "W16", aligned, value);
@@ -6358,6 +6360,61 @@ public sealed class ThirtyTwoXDevice
         TraceSystemRegisterAccess(source, "W32", (ushort)(comm + 12), 0);
         ApplySystemRegisterSideEffects((ushort)(comm + 12), allowAdapterControl: false);
         return true;
+    }
+
+    private void TryAcknowledgeBootRomGOkWordStartupReady(ushort offset, ushort previousValue, ushort value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (cpuIndex != 0 ||
+            offset != comm + 14 ||
+            previousValue != 0x4F4B ||
+            value != 0x0001 ||
+            !_bootRomSixtyEightUpReadyHiddenFromSh2 ||
+            ReadBigEndianWord(_systemRegisters, comm + 12) != 0x475F)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 12, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 14, 0);
+        ClearM68kCommunicationTrackingForWord(12);
+        ClearM68kCommunicationTrackingForWord(14);
+        _m68kCommunicationPendingHostBytes[12] = false;
+        _m68kCommunicationPendingHostBytes[13] = false;
+        _m68kCommunicationPendingHostBytes[14] = false;
+        _m68kCommunicationPendingHostBytes[15] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[12] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[13] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[14] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[15] = false;
+        _bootRomSixtyEightUpReadyHiddenFromSh2 = false;
+        TraceSystemRegisterAccess("MSH2", "W32", (ushort)(comm + 12), 0);
+    }
+
+    private void TryAcknowledgeBootRomHostReadyWord(ushort offset, ushort value, int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        // BC Racers keeps using the stock 68000 boot monitor while early master
+        // SH-2 startup code publishes ready words that real BIOS-side service
+        // code acknowledges. The synthetic boot path must retire those waits.
+        if (cpuIndex != 0 ||
+            offset != comm + 14 ||
+            value != 0x0001 ||
+            MasterSh2.PC is < 0x0600_1000 or > 0x0600_4000 ||
+            !_userHeader.IsValid ||
+            _userHeader.MasterStart != 0x0600_17E4u ||
+            _userHeader.SlaveStart != 0x0603_2CC0u)
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 14, 0);
+        ClearM68kCommunicationTrackingForWord(14);
+        _m68kCommunicationPendingHostBytes[14] = false;
+        _m68kCommunicationPendingHostBytes[15] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[14] = false;
+        _m68kCommunicationDeferredSh2ClearBytes[15] = false;
+        TraceSystemRegisterAccess("MSH2", "W16", (ushort)(comm + 14), 0);
     }
 
     private bool MatchesCommunicationRange(int relative, int bytes, ReadOnlySpan<byte> expected, int baseRelative)
