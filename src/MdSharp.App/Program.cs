@@ -5111,22 +5111,31 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
         machine.RunFrameCycles(instructionsPerFrame);
     }
 
+    byte[] rgb = machine.RenderFrameRgb();
+    bool[] mdOpaque = machine.Vdp.LastFrameOpaquePixels.ToArray();
+
     maxSpans = Math.Max(1, maxSpans);
     ReadOnlySpan<byte> source = device.DisplayFrameBuffer;
     if (line < 0)
     {
+        ushort summaryRawMode = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset);
+        int bitmapMode = summaryRawMode & 0x03;
+        bool summaryPriorityBit = (summaryRawMode & 0x0080) != 0;
         Console.WriteLine($"RLE summary: {Path.GetFileName(romPath)} frame={frames}");
         Console.WriteLine($"mode={device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} fbctl=${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} draw={device.DrawFrameBufferIndex} display={device.DisplayFrameBufferIndex}");
 
-        SummarizeRleBuffer("display", device.DisplayFrameBuffer);
-        SummarizeRleBuffer("draw", device.DrawFrameBuffer);
+        SummarizeBitmapBuffer("display", device.DisplayFrameBuffer, bitmapMode);
+        SummarizeBitmapBuffer("draw", device.DrawFrameBuffer, bitmapMode);
+        Console.WriteLine($"render nonbackground={CountNonBackgroundPixels(machine.Vdp, rgb)} compositePixels={device.LastCompositeWrittenPixels}");
         return;
 
-        void SummarizeRleBuffer(string label, ReadOnlySpan<byte> buffer)
+        void SummarizeBitmapBuffer(string label, ReadOnlySpan<byte> buffer, int mode)
         {
             int populatedLines = 0;
             int totalSpans = 0;
             int totalColored = 0;
+            int totalCurrentVisible = 0;
+            int totalInvertedVisible = 0;
             Console.WriteLine($"[{label}]");
             for (int y = 0; y < Vdp.ScreenHeight; y++)
             {
@@ -5142,23 +5151,79 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
                 int summarySourceIndex = pointer;
                 int firstColoredX = -1;
                 int lastColoredX = -1;
-                while (summaryX < Vdp.ScreenWidth && summarySourceIndex + 1 < buffer.Length && spans < 256)
+                int currentVisible = 0;
+                int invertedVisible = 0;
+                if (mode == 2)
                 {
-                    ushort span = ReadBigEndianWordSpan(buffer, summarySourceIndex);
-                    summarySourceIndex += 2;
-                    int runLength = (span >> 8) + 1;
-                    int paletteIndex = span & 0x00FF;
-                    ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
-                    if (paletteIndex != 0 && color != 0)
+                    for (int x = 0; x < Vdp.ScreenWidth; x++)
                     {
-                        int runEnd = Math.Min(Vdp.ScreenWidth - 1, summaryX + runLength - 1);
-                        firstColoredX = firstColoredX < 0 ? summaryX : firstColoredX;
-                        lastColoredX = Math.Max(lastColoredX, runEnd);
-                        colored += Math.Max(0, runEnd - summaryX + 1);
-                    }
+                        int sourcePixelIndex = pointer + (x * 2);
+                        if (sourcePixelIndex + 1 >= buffer.Length)
+                        {
+                            break;
+                        }
 
-                    summaryX += runLength;
-                    spans++;
+                        ushort color = ReadBigEndianWordSpan(buffer, sourcePixelIndex);
+                        if ((color & 0x7FFF) == 0)
+                        {
+                            continue;
+                        }
+
+                        bool through = (color & 0x8000) != 0;
+                        firstColoredX = firstColoredX < 0 ? x : firstColoredX;
+                        lastColoredX = x;
+                        colored++;
+                        CountThirtyTwoXVisibility(y, x, x, summaryPriorityBit, through, mdOpaque, ref currentVisible, ref invertedVisible);
+                    }
+                    spans = colored;
+                }
+                else if (mode == 3)
+                {
+                    while (summaryX < Vdp.ScreenWidth && summarySourceIndex + 1 < buffer.Length && spans < 256)
+                    {
+                        ushort span = ReadBigEndianWordSpan(buffer, summarySourceIndex);
+                        summarySourceIndex += 2;
+                        int runLength = (span >> 8) + 1;
+                        int paletteIndex = span & 0x00FF;
+                        ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
+                        bool through = (color & 0x8000) != 0;
+                        if (paletteIndex != 0 && color != 0)
+                        {
+                            int runEnd = Math.Min(Vdp.ScreenWidth - 1, summaryX + runLength - 1);
+                            firstColoredX = firstColoredX < 0 ? summaryX : firstColoredX;
+                            lastColoredX = Math.Max(lastColoredX, runEnd);
+                            colored += Math.Max(0, runEnd - summaryX + 1);
+                            CountThirtyTwoXVisibility(y, summaryX, runEnd, summaryPriorityBit, through, mdOpaque, ref currentVisible, ref invertedVisible);
+                        }
+
+                        summaryX += runLength;
+                        spans++;
+                    }
+                }
+                else
+                {
+                    for (int x = 0; x < Vdp.ScreenWidth; x++)
+                    {
+                        int sourcePixelIndex = pointer + x;
+                        if ((uint)sourcePixelIndex >= (uint)buffer.Length)
+                        {
+                            break;
+                        }
+
+                        int paletteIndex = buffer[sourcePixelIndex];
+                        ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
+                        if (paletteIndex == 0 || color == 0)
+                        {
+                            continue;
+                        }
+
+                        bool through = (color & 0x8000) != 0;
+                        firstColoredX = firstColoredX < 0 ? x : firstColoredX;
+                        lastColoredX = x;
+                        colored++;
+                        CountThirtyTwoXVisibility(y, x, x, summaryPriorityBit, through, mdOpaque, ref currentVisible, ref invertedVisible);
+                    }
+                    spans = colored;
                 }
 
                 if (colored > 0)
@@ -5166,11 +5231,13 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
                     populatedLines++;
                     totalSpans += spans;
                     totalColored += colored;
-                    Console.WriteLine($"line={y,3} ptr=${pointer:X5} spans={spans,3} colored={colored,3} x={firstColoredX,3}-{lastColoredX,3}");
+                    totalCurrentVisible += currentVisible;
+                    totalInvertedVisible += invertedVisible;
+                    Console.WriteLine($"line={y,3} ptr=${pointer:X5} spans={spans,3} colored={colored,3} visible={currentVisible,3}/{invertedVisible,3} x={firstColoredX,3}-{lastColoredX,3}");
                 }
             }
 
-            Console.WriteLine($"[{label}] populatedLines={populatedLines} totalSpans={totalSpans} totalColored={totalColored}");
+            Console.WriteLine($"[{label}] populatedLines={populatedLines} totalSpans={totalSpans} totalColored={totalColored} visible={totalCurrentVisible}/{totalInvertedVisible}");
         }
     }
 
@@ -5179,7 +5246,15 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
     int lineAddress = ReadBigEndianWordSpan(source, lineTableOffset) * 2;
 
     Console.WriteLine($"RLE dump: {Path.GetFileName(romPath)} frame={frames} line={line}");
-    Console.WriteLine($"mode={device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset) & 0x03} fbctl=${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} draw={device.DrawFrameBufferIndex} display={device.DisplayFrameBufferIndex} linePtr=${lineAddress:X5}");
+    ushort rawMode = device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset);
+    bool priorityBit = (rawMode & 0x0080) != 0;
+    Console.WriteLine($"mode={rawMode & 0x03} rawMode=${rawMode:X4} priority={(priorityBit ? 1 : 0)} fbctl=${device.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.FrameBufferControlOffset):X4} draw={device.DrawFrameBufferIndex} display={device.DisplayFrameBufferIndex} linePtr=${lineAddress:X5} compositePixels={device.LastCompositeWrittenPixels}");
+    if ((rawMode & 0x03) != 0x03)
+    {
+        Console.WriteLine("display is not currently in run-length mode; use --32x-fb-summary for packed/direct frame details");
+        return;
+    }
+
     if (lineAddress < 0 || lineAddress >= source.Length)
     {
         Console.WriteLine("line pointer is outside the display frame buffer");
@@ -5193,12 +5268,38 @@ void DumpThirtyTwoXRleLine(string romPath, int frames, int instructionsPerFrame,
         ushort span = ReadBigEndianWordSpan(source, sourceIndex);
         int runLength = (span >> 8) + 1;
         int paletteIndex = span & 0x00FF;
-        Console.WriteLine($"{i,3}: addr=${sourceIndex:X5} word=${span:X4} x={x,3}-{Math.Min(Vdp.ScreenWidth - 1, x + runLength - 1),3} len={runLength,3} pal=${paletteIndex:X2}");
+        ushort color = ReadBigEndianWordSpan(device.Palette, paletteIndex * 2);
+        bool through = (color & 0x8000) != 0;
+        int runEnd = Math.Min(Vdp.ScreenWidth - 1, x + runLength - 1);
+        int currentVisible = 0;
+        int invertedVisible = 0;
+        CountThirtyTwoXVisibility(line, x, runEnd, priorityBit, through, mdOpaque, ref currentVisible, ref invertedVisible);
+        Console.WriteLine($"{i,3}: addr=${sourceIndex:X5} word=${span:X4} x={x,3}-{runEnd,3} len={runLength,3} pal=${paletteIndex:X2} color=${color:X4} through={(through ? 1 : 0)} visible={currentVisible}/{invertedVisible}");
         sourceIndex += 2;
         x += runLength;
     }
 
     Console.WriteLine($"decodedX={x} next=${sourceIndex:X5}");
+
+    static void CountThirtyTwoXVisibility(int y, int xStart, int xEnd, bool priorityBit, bool through, ReadOnlySpan<bool> mdOpaque, ref int currentVisible, ref int invertedVisible)
+    {
+        bool currentInFront = priorityBit != through;
+        bool invertedInFront = priorityBit == through;
+        for (int x = Math.Max(0, xStart); x <= xEnd; x++)
+        {
+            int pixelIndex = (y * Vdp.ScreenWidth) + x;
+            bool opaque = mdOpaque.Length > pixelIndex && mdOpaque[pixelIndex];
+            if (currentInFront || !opaque)
+            {
+                currentVisible++;
+            }
+
+            if (invertedInFront || !opaque)
+            {
+                invertedVisible++;
+            }
+        }
+    }
 }
 
 void DumpThirtyTwoXNodeRecords(string romPath, int frames, int instructionsPerFrame, uint address, int count, string mode)

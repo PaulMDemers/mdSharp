@@ -946,7 +946,7 @@ public sealed class ThirtyTwoXDevice
 
         if (canProbeFastPath && IsSh2FastPathGroupEnabled("early"))
         {
-            if (DiagnosticAbort is null && IsSh2FastPathGroupEnabled("idle"))
+            if (IsSh2FastPathGroupEnabled("idle"))
             {
                 int braIdleBudget = IsPwmTimerActive()
                     ? Math.Min(fastPathCycleBudget, Sh2BraSelfIdleLoopTimerSensitiveBurstCycles)
