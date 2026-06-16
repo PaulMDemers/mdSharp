@@ -3684,6 +3684,7 @@ public sealed class ThirtyTwoXDevice
         PublishBootRomChecksumAfterHostClear(aligned);
         RetireBootRomSixtyEightUpReadyOnHostWrite(aligned, value);
         PublishBootRomSixtyEightUpReadyAfterHostClear(aligned, value);
+        RetireHiddenPostStartGOkAfterHostClear(aligned, value);
         CompleteHiddenPostStartBootAfterHostClear(aligned, 2, value);
         AckLateHiddenPostStartHostReady(aligned, value);
     }
@@ -5884,6 +5885,29 @@ public sealed class ThirtyTwoXDevice
         {
             RetirePostStartSignatureAfterReadyTokenHostClear();
         }
+    }
+
+    private void RetireHiddenPostStartGOkAfterHostClear(ushort offset, ushort value)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (value != 0 ||
+            !_bootRomPostStartSignaturePending ||
+            !_bootRomPostStartSignatureHiddenFromSh2 ||
+            (offset != comm + 12 && offset != comm + 14) ||
+            ReadBigEndianWord(_systemRegisters, comm + 12) != 0 ||
+            ReadBigEndianWord(_systemRegisters, comm + 14) != 0)
+        {
+            return;
+        }
+
+        _bootRomHandshakePending = false;
+        _bootRomSignatureRead = false;
+        _bootRomSignatureReadbackActive = false;
+        _bootRomPostStartSignaturePending = false;
+        _bootRomPostStartSignatureHiddenFromSh2 = false;
+        _bootRomPostStartSignatureReadMask = 0;
+        _bootRomPostStartHostClearProtectMask = 0;
+        ClearCommunicationStaleRange(12, 4);
     }
 
     private bool IsPostStartSignatureHiddenFromSh2(ushort offset, int bytes)

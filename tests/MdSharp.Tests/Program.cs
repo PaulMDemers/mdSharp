@@ -723,6 +723,24 @@ void ThirtyTwoXDeviceShell()
     WriteSh2LongForTest(directGOkDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0);
     AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
     AssertEqual((ushort)0x0000, directGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    ThirtyTwoXDevice hiddenPostStartGOkDevice = new();
+    hiddenPostStartGOkDevice.Reset();
+    hiddenPostStartGOkDevice.RestoreState(hiddenPostStartGOkDevice.CaptureState() with
+    {
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        BootRomPostStartSignaturePending = true,
+        BootRomPostStartSignatureHiddenFromSh2 = true,
+    });
+    hiddenPostStartGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x475F);
+    hiddenPostStartGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x4F4B);
+    AssertEqual((ushort)0x475F, hiddenPostStartGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x4F4B, hiddenPostStartGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
+    hiddenPostStartGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12), 0x0000);
+    hiddenPostStartGOkDevice.WriteSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14), 0x0000);
+    AssertTrue(!hiddenPostStartGOkDevice.BootRomPostStartSignaturePending, "host-cleared hidden post-start G_OK should retire the startup overlay");
+    AssertEqual((ushort)0x0000, hiddenPostStartGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 12)));
+    AssertEqual((ushort)0x0000, hiddenPostStartGOkDevice.ReadSystemRegisterWord((ushort)(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 14)));
     ThirtyTwoXDevice wordReadyDevice = new();
     wordReadyDevice.Reset();
     wordReadyDevice.RestoreState(wordReadyDevice.CaptureState() with
