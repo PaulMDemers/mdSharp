@@ -641,6 +641,13 @@ void ThirtyTwoXDeviceShell()
     AssertEqual((ushort)0x0011, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
     WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset), 0xFFFF, cpuIndex: 1);
     AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0000);
     ThirtyTwoXDevice.ThirtyTwoXState sdkIdleState = communicationCommandAliasDevice.CaptureState();
     communicationCommandAliasDevice.RestoreState(sdkIdleState with
     {

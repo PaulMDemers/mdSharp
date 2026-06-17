@@ -2710,9 +2710,7 @@ public sealed class ThirtyTwoXDevice
     private bool IsSdkCommandStreamBurstActive(uint source, uint count)
     {
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        bool largeTransfer = count >= 0x1000;
-        bool terminalHighSdramTransfer = source >= 0x0602_0000u && source < 0x0604_0000u;
-        return (largeTransfer || terminalHighSdramTransfer) &&
+        return count >= 0x1000 &&
             ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0x0015 &&
             IsSdkCommandDispatchTablePresent();
     }
@@ -6443,7 +6441,6 @@ public sealed class ThirtyTwoXDevice
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
         if (offset != comm ||
             value != 0xFFFF ||
-            ReadBigEndianWord(_systemRegisters, comm + 0x0C) == 0 ||
             ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0 ||
             !IsSdkCommandDispatchTablePresent())
         {
@@ -6451,9 +6448,12 @@ public sealed class ThirtyTwoXDevice
         }
 
         WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 0x0E, 0);
         ClearM68kCommunicationTrackingForWord(0x0C);
+        ClearM68kCommunicationTrackingForWord(0x0E);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0C), 0);
+        TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0E), 0);
     }
 
     private void PublishHiddenPostStartBootReady()
@@ -7603,7 +7603,8 @@ public sealed class ThirtyTwoXDevice
     private void TryRequestCommandInterruptFromHostCommunicationCommand(ushort alignedOffset, ushort value)
     {
         if (alignedOffset != ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C ||
-            value == 0)
+            value == 0 ||
+            ShouldSuppressCompletedSdkCommandRelatch(value, ResolveHostCommunicationCommandSelector(value)))
         {
             return;
         }
@@ -7646,8 +7647,37 @@ public sealed class ThirtyTwoXDevice
         }
 
         ushort selector = ResolveHostCommunicationCommandSelector(value);
+        if (ShouldSuppressCompletedSdkCommandRelatch(value, selector))
+        {
+            RetireCompletedSdkCommandRelatch();
+            return;
+        }
+
         WriteBigEndianWord(_systemRegisters, comm + 0x0E, selector);
         ClearM68kCommunicationTrackingForWord(0x0E);
+    }
+
+    private bool ShouldSuppressCompletedSdkCommandRelatch(ushort value, ushort selector)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        return value == 0x0011 &&
+            selector == 0x0015 &&
+            ReadBigEndianWord(_systemRegisters, comm) == 0xFFFF &&
+            IsSdkCommandDispatchTablePresent();
+    }
+
+    private void RetireCompletedSdkCommandRelatch()
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        WriteBigEndianWord(_systemRegisters, comm, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        ClearM68kCommunicationTrackingForWord(0);
+        ClearM68kCommunicationTrackingForWord(0x0A);
+        ClearM68kCommunicationTrackingForWord(0x0C);
+        TraceSystemRegisterAccess("M68K", "W16", comm, 0);
+        TraceSystemRegisterAccess("M68K", "W16", (ushort)(comm + 0x0A), 0);
+        TraceSystemRegisterAccess("M68K", "W16", (ushort)(comm + 0x0C), 0);
     }
 
     private ushort ResolveHostCommunicationCommandSelector(ushort value)
