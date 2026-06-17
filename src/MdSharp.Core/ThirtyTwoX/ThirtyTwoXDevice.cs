@@ -1022,6 +1022,15 @@ public sealed class ThirtyTwoXDevice
 
             if (IsSh2FastPathGroupEnabled("memory") &&
                 nextOpcode == 0xC515 &&
+                TryFastForwardSdkWordStreamBusyPollLoop(cpu, cpuIndex, fastPathCycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memory") &&
+                nextOpcode == 0xC515 &&
                 TryFastForwardSdkWordStreamHandshakeLoop(cpu, cpuIndex, fastPathCycleBudget, out fastCycles))
             {
                 RecordSh2FastPath(fastCycles);
@@ -2703,6 +2712,50 @@ public sealed class ThirtyTwoXDevice
             Cycles = state.Cycles + cycles,
             LastOpcode = LoopBranchOpcode,
             LastOpcodePc = LoopPc + 0x10,
+        });
+        return true;
+    }
+
+    private bool TryFastForwardSdkWordStreamBusyPollLoop(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        const uint LoopPc = 0x0600_1C5E;
+        const ushort LoadBusyOpcode = 0xC515;
+        const ushort CompareOpcode = 0x8800;
+        const ushort BusyBranchOpcode = 0x8BFC;
+        const int CyclesPerPoll = 4;
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        ushort busy = ReadBigEndianWord(_systemRegisters, comm + 0x0A);
+        if (cycleBudget < CyclesPerPoll ||
+            cpu.PC != LoopPc ||
+            cpu.GBR != ThirtyTwoXHardwareProfile.Sh2SystemRegister(0) ||
+            busy == 0 ||
+            ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0x0015 ||
+            !IsSdkCommandDispatchTablePresent() ||
+            !TryPeekSh2Word(LoopPc + 0x00, cpuIndex, out ushort op0) || op0 != LoadBusyOpcode ||
+            !TryPeekSh2Word(LoopPc + 0x02, cpuIndex, out ushort op1) || op1 != CompareOpcode ||
+            !TryPeekSh2Word(LoopPc + 0x04, cpuIndex, out ushort op2) || op2 != BusyBranchOpcode)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        cycles = cycleBudget - (cycleBudget % CyclesPerPoll);
+        if (cycles <= 0)
+        {
+            cycles = CyclesPerPoll;
+        }
+
+        Sh2Cpu.Sh2State state = cpu.CaptureState();
+        uint[] registers = (uint[])state.R.Clone();
+        registers[0] = busy;
+        cpu.RestoreState(state with
+        {
+            R = registers,
+            PC = LoopPc,
+            SR = state.SR & ~1u,
+            Cycles = state.Cycles + cycles,
+            LastOpcode = BusyBranchOpcode,
+            LastOpcodePc = LoopPc + 0x04,
         });
         return true;
     }
@@ -4889,9 +4942,8 @@ public sealed class ThirtyTwoXDevice
         }
 
         byte[] bios = _sh2Bios[cpuIndex & 1];
-        if (normalized < bios.Length)
+        if (TryReadMirroredSh2BiosByte(bios, normalized, out value))
         {
-            value = bios[normalized];
             return true;
         }
 
@@ -4918,9 +4970,10 @@ public sealed class ThirtyTwoXDevice
         }
 
         byte[] bios = _sh2Bios[cpuIndex & 1];
-        if (normalized + 1 < bios.Length)
+        if (TryReadMirroredSh2BiosByte(bios, normalized, out byte high) &&
+            TryReadMirroredSh2BiosByte(bios, normalized + 1, out byte low))
         {
-            value = (ushort)((bios[normalized] << 8) | bios[normalized + 1]);
+            value = (ushort)((high << 8) | low);
             return true;
         }
 
@@ -4931,6 +4984,18 @@ public sealed class ThirtyTwoXDevice
             _ => 0x0000,
         };
         return true;
+    }
+
+    private static bool TryReadMirroredSh2BiosByte(byte[] bios, uint normalized, out byte value)
+    {
+        if (bios.Length > 0 && normalized < Sh2BootRomMappedBytes)
+        {
+            value = bios[(int)(normalized % (uint)bios.Length)];
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private bool TryPeekSh2CacheByte(uint cacheAddress, int cpuIndex, out byte value)

@@ -7178,6 +7178,47 @@ void ThirtyTwoXSh2SdkWordStreamHandshakeLoopFastForward()
     AssertEqual((ushort)0x1234, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
     AssertEqual((ushort)0x0001, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
 
+    ThirtyTwoXDevice busyDevice = new();
+    busyDevice.Reset();
+    WriteSh2WordForTest(busyDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
+    WriteSh2WordForTest(busyDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0622, 0xC517, cpuIndex: 1);
+    WriteSh2WordForTest(busyDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0624, 0x6103, cpuIndex: 1);
+    WriteSh2WordForTest(busyDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0626, 0xC734, cpuIndex: 1);
+    for (int i = 0; i < loop.Length; i++)
+    {
+        WriteSh2WordForTest(busyDevice, LoopPc + (uint)(i * 2), loop[i], cpuIndex: 1);
+    }
+
+    ThirtyTwoXDevice.ThirtyTwoXState busyState = busyDevice.CaptureState();
+    uint[] busySlaveRegisters = (uint[])busyState.SlaveSh2.R.Clone();
+    busySlaveRegisters[1] = SourceAddress;
+    busySlaveRegisters[2] = 3;
+    busyDevice.RestoreState(busyState with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        SlaveSh2 = busyState.SlaveSh2 with
+        {
+            R = busySlaveRegisters,
+            PC = LoopPc,
+            GBR = systemBase,
+            SR = 1,
+        },
+    });
+    busyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A, 1);
+    busyDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E, 0x0015);
+
+    AssertEqual(128, InvokeStepSh2Cpu(busyDevice, cpuIndex: 1, cycleBudget: 128));
+    AssertEqual(3u, busyDevice.SlaveSh2.R[2]);
+    AssertEqual(SourceAddress, busyDevice.SlaveSh2.R[1]);
+    AssertEqual(1u, busyDevice.SlaveSh2.R[0]);
+    AssertEqual(0u, busyDevice.SlaveSh2.SR & 1u);
+    AssertEqual(LoopPc, busyDevice.SlaveSh2.PC);
+    AssertEqual((ushort)0x0001, busyDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+
     ThirtyTwoXDevice finalDevice = new();
     finalDevice.Reset();
     WriteSh2WordForTest(finalDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
@@ -9274,13 +9315,15 @@ void ThirtyTwoXSh2BootRomReadyMarker()
 void ThirtyTwoXSh2BootRomMapsOptionalBiosImages()
 {
     byte[] masterBios = new byte[0x1000];
-    byte[] slaveBios = new byte[0x1000];
+    byte[] slaveBios = new byte[0x400];
     masterBios[0] = 0x12;
     masterBios[1] = 0x34;
     masterBios[2] = 0x56;
     slaveBios[0] = 0xAB;
     slaveBios[1] = 0xCD;
     slaveBios[2] = 0xEF;
+    slaveBios[0x3FE] = 0x98;
+    slaveBios[0x3FF] = 0x76;
 
     ThirtyTwoXDevice device = new(masterSh2Bios: masterBios, slaveSh2Bios: slaveBios);
     device.RestoreState(device.CaptureState() with
@@ -9310,8 +9353,11 @@ void ThirtyTwoXSh2BootRomMapsOptionalBiosImages()
     AssertEqual((byte)0xAB, ReadSh2ByteForTest(device, 0x0000_0000, 1));
     AssertEqual((byte)0x56, ReadSh2ByteForTest(device, 0x2000_0002, 0));
     AssertEqual((byte)0xEF, ReadSh2ByteForTest(device, 0x2000_0002, 1));
+    AssertEqual((byte)0xAB, ReadSh2ByteForTest(device, 0x2000_0400, 1));
     AssertEqual((ushort)0x1234, ReadSh2WordForTest(device, 0x0000_0000, 0));
     AssertEqual((ushort)0xABCD, ReadSh2WordForTest(device, 0x0000_0000, 1));
+    AssertEqual((ushort)0x9876, ReadSh2WordForTest(device, 0x0000_03FE, 1));
+    AssertEqual((ushort)0x76AB, ReadSh2WordForTest(device, 0x0000_03FF, 1));
 }
 
 void ThirtyTwoXSh2RealBiosBootUsesResetVectors()
