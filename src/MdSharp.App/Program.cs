@@ -5521,13 +5521,13 @@ void TraceThirtyTwoX(string romPath, string outputCsv, int frames, int instructi
         int nonBackground = CountNonBackgroundPixels(machine.Vdp, rgb);
         Action<ThirtyTwoXDevice.SystemRegisterAccessTrace>? registerAccessObserver = device.SystemRegisterAccessObserver;
         device.SystemRegisterAccessObserver = null;
-        ushort sys00 = device.ReadSystemRegisterWord(0x00);
-        ushort sys02 = device.ReadSystemRegisterWord(0x02);
+        ushort sys00 = device.DebugPeekSystemRegisterWord(0x00);
+        ushort sys02 = device.DebugPeekSystemRegisterWord(0x02);
         ushort sys20 = device.DebugPeekSystemRegisterWord(0x20);
         ushort sys22 = device.DebugPeekSystemRegisterWord(0x22);
         ushort sys24 = device.DebugPeekSystemRegisterWord(0x24);
         ushort sys26 = device.DebugPeekSystemRegisterWord(0x26);
-        ushort dreq = device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset);
+        ushort dreq = device.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.DreqControlOffset);
         device.SystemRegisterAccessObserver = registerAccessObserver;
         writer.WriteLine(string.Join(
             ',',
@@ -12195,7 +12195,7 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
     int currentFrame = 0;
     int lines = 0;
     using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
-    writer.WriteLine("frame,sequence,pc,opcode,ext0,ext1,nextPc,sr,sp,d0,d1,d2,d3,d4,d5,d6,d7,a0,a1,a2,a3,a4,a5,a6,cycles,masterCycle,scanline,lineCycle,c400,c41d,sys20,sys22,masterPc,slavePc");
+    writer.WriteLine("frame,sequence,pc,opcode,ext0,ext1,nextPc,sr,sp,d0,d1,d2,d3,d4,d5,d6,d7,a0,a1,a2,a3,a4,a5,a6,cycles,masterCycle,scanline,lineCycle,c400,c41d,sys20,sys22,sys2a,sys2c,sys2e,intCtrl,masterMask,slaveMask,masterPending,masterPendingVector,slavePending,slavePendingVector,masterSr,slaveSr,masterPc,slavePc");
     Action<M68kCpu.M68kInstructionTrace> writeTrace = trace =>
     {
         if (lines >= maxLines || trace.Pc < pcStart || trace.Pc > pcEnd)
@@ -12204,8 +12204,20 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
-        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        ushort sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
+        ushort sys2A = thirtyTwoX?.DebugPeekSystemRegisterWord(0x2A) ?? 0;
+        ushort sys2C = thirtyTwoX?.DebugPeekSystemRegisterWord(0x2C) ?? 0;
+        ushort sys2E = thirtyTwoX?.DebugPeekSystemRegisterWord(0x2E) ?? 0;
+        ushort intCtrl = thirtyTwoX?.DebugPeekSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset) ?? 0;
+        ushort masterMask = thirtyTwoX?.MasterInterruptMask ?? 0;
+        ushort slaveMask = thirtyTwoX?.SlaveInterruptMask ?? 0;
+        int masterPending = thirtyTwoX?.MasterSh2.PendingInterruptLevel ?? 0;
+        int masterPendingVector = thirtyTwoX?.MasterSh2.PendingInterruptVectorNumber ?? 0;
+        int slavePending = thirtyTwoX?.SlaveSh2.PendingInterruptLevel ?? 0;
+        int slavePendingVector = thirtyTwoX?.SlaveSh2.PendingInterruptVectorNumber ?? 0;
+        uint masterSr = thirtyTwoX?.MasterSh2.SR ?? 0;
+        uint slaveSr = thirtyTwoX?.SlaveSh2.SR ?? 0;
         uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
         uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
         ushort ext0 = machine.Bus.ReadWord(trace.Pc + 2);
@@ -12244,6 +12256,18 @@ void TraceM68kLive(string romPath, string outputPath, int frames, int instructio
             $"${machine.Bus.ReadByte(0x00FF_C41D):X2}",
             $"${sys20:X4}",
             $"${sys22:X4}",
+            $"${sys2A:X4}",
+            $"${sys2C:X4}",
+            $"${sys2E:X4}",
+            $"${intCtrl:X4}",
+            $"${masterMask:X4}",
+            $"${slaveMask:X4}",
+            masterPending.ToString(CultureInfo.InvariantCulture),
+            masterPendingVector.ToString(CultureInfo.InvariantCulture),
+            slavePending.ToString(CultureInfo.InvariantCulture),
+            slavePendingVector.ToString(CultureInfo.InvariantCulture),
+            $"${masterSr:X8}",
+            $"${slaveSr:X8}",
             $"${masterPc:X8}",
             $"${slavePc:X8}"));
     };
@@ -12385,8 +12409,8 @@ void TraceM68kInterrupts(string romPath, string outputPath, int frames, int inst
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
-        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        ushort sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
         writer.WriteLine(string.Join(
             ',',
             currentFrame.ToString(CultureInfo.InvariantCulture),
@@ -12442,12 +12466,12 @@ void TraceThirtyTwoXM68kExceptions(string romPath, string outputPath, int frames
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys00 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x00);
-        ushort sys02 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x02);
-        ushort sys04 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x04);
-        ushort sys06 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x06);
-        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
-        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort sys00 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x00) ?? 0;
+        ushort sys02 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x02) ?? 0;
+        ushort sys04 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x04) ?? 0;
+        ushort sys06 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x06) ?? 0;
+        ushort sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        ushort sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
         ushort vdpMode = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadVdpRegisterWord(0x00);
         ushort fbctl = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadVdpRegisterWord(0x0A);
         uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
@@ -12546,8 +12570,8 @@ void TraceThirtyTwoXSdkMonitor(string romPath, string outputPath, int frames, in
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys00 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x00);
-        ushort sys02 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x02);
+        ushort sys00 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x00) ?? 0;
+        ushort sys02 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x02) ?? 0;
         uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
         uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
         uint masterSr = thirtyTwoX?.MasterSh2.SR ?? 0;
@@ -12697,8 +12721,8 @@ void TraceM68kMemoryWrites(string romPath, string outputPath, int frames, int in
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
-        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        ushort sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
         uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
         uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
         writer.WriteLine(string.Join(
@@ -12754,8 +12778,8 @@ void TraceM68kMemoryReads(string romPath, string outputPath, int frames, int ins
         }
 
         ThirtyTwoXDevice? thirtyTwoX = machine.Bus.ThirtyTwoX;
-        ushort sys20 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x20);
-        ushort sys22 = thirtyTwoX is null ? (ushort)0 : thirtyTwoX.ReadSystemRegisterWord(0x22);
+        ushort sys20 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x20) ?? 0;
+        ushort sys22 = thirtyTwoX?.DebugPeekSystemRegisterWord(0x22) ?? 0;
         uint masterPc = thirtyTwoX?.MasterSh2.PC ?? 0;
         uint slavePc = thirtyTwoX?.SlaveSh2.PC ?? 0;
         writer.WriteLine(string.Join(
@@ -14647,7 +14671,7 @@ string FormatThirtyTwoXWords(ThirtyTwoXDevice device, bool system, int start, in
     for (int offset = start; offset < start + length; offset += 2)
     {
         ushort value = system
-            ? device.ReadSystemRegisterWord((ushort)offset)
+            ? device.DebugPeekSystemRegisterWord((ushort)offset)
             : device.ReadVdpRegisterWord((ushort)offset);
         if (builder.Length > 0)
         {

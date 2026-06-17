@@ -324,6 +324,7 @@ public sealed class ThirtyTwoXDevice
     private byte _horizontalInterruptCounter;
     private bool _masterCommandInterruptPending;
     private bool _slaveCommandInterruptPending;
+    private bool _sdkWordStreamTerminatorPendingYieldRelease;
     private bool _masterPwmInterruptPending;
     private bool _slavePwmInterruptPending;
     private int _pwmCycleCounter;
@@ -2634,7 +2635,6 @@ public sealed class ThirtyTwoXDevice
         const ushort LoopBranchOpcode = 0x8BF6;
         const int CyclesPerIteration = 12;
         const int MaxZeroBurstIterations = 4096;
-        const int MaxCyberSdkBurstIterations = 4096;
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
         if (cycleBudget < CyclesPerIteration ||
             cpu.PC != LoopPc ||
@@ -2659,23 +2659,17 @@ public sealed class ThirtyTwoXDevice
         uint source = cpu.R[1];
         uint count = cpu.R[2];
         uint skippedWords = 0;
-        if (count > 1 &&
-            cpuIndex == 1 &&
-            IsSdkCommandStreamBurstActive(source, count))
-        {
-            uint burstIterations = Math.Min(count, MaxCyberSdkBurstIterations);
-            skippedWords = burstIterations - 1;
-            source += skippedWords * 2;
-            count -= skippedWords;
-        }
-        else if (count > 1 && TryPeekSh2Word(source, cpuIndex, out ushort firstWord) && firstWord == 0)
+        if (!IsSdkHostCommunicationCommandActive() &&
+            count > 1 &&
+            TryPeekSh2Word(source, cpuIndex, out ushort firstWord) &&
+            IsSkippableSdkWordStreamFiller(firstWord))
         {
             uint budgetIterations = (uint)Math.Max(1, cycleBudget / CyclesPerIteration);
             uint maxSkip = Math.Min(Math.Min(count - 1, budgetIterations - 1), (uint)(MaxZeroBurstIterations - 1));
             while (skippedWords < maxSkip)
             {
                 uint nextSource = source + ((skippedWords + 1) * 2);
-                if (!TryPeekSh2Word(nextSource, cpuIndex, out ushort nextWord) || nextWord != 0)
+                if (!TryPeekSh2Word(nextSource, cpuIndex, out ushort nextWord) || nextWord != firstWord)
                 {
                     break;
                 }
@@ -2691,11 +2685,20 @@ public sealed class ThirtyTwoXDevice
         }
 
         ushort word = ReadSh2Word(source, cpuIndex);
+        uint remaining = count - 1;
+        bool keepCompletedStreamDrainActive = remaining > 0 &&
+            (_sdkWordStreamTerminatorPendingYieldRelease ||
+                (word == 0xFFFF && ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0));
         WriteSh2SystemRegisterWord(comm, word, cpuIndex);
         WriteSh2SystemRegisterWord((ushort)(comm + 0x0A), 1, cpuIndex);
+        if (keepCompletedStreamDrainActive)
+        {
+            _sdkWordStreamTerminatorPendingYieldRelease = true;
+        }
+
+        TryReleaseFastForwardedSdkSh2YieldSignal(cpuIndex, keepCompletedStreamDrainActive);
         source += 2;
 
-        uint remaining = count - 1;
         Sh2Cpu.Sh2State state = cpu.CaptureState();
         uint[] registers = (uint[])state.R.Clone();
         registers[0] = 1;
@@ -2714,6 +2717,30 @@ public sealed class ThirtyTwoXDevice
             LastOpcodePc = LoopPc + 0x10,
         });
         return true;
+    }
+
+    private static bool IsSkippableSdkWordStreamFiller(ushort value)
+    {
+        return value is 0x0000 or 0xFFFF;
+    }
+
+    private void TryReleaseFastForwardedSdkSh2YieldSignal(int cpuIndex, bool keepCompletedStreamDrainActive = false)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        if (ReadBigEndianWord(_systemRegisters, comm + 0x0A) == 0 ||
+            !ShouldReleaseSdkHostYieldSignal())
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
+        if (!keepCompletedStreamDrainActive)
+        {
+            _sdkWordStreamTerminatorPendingYieldRelease = false;
+        }
+        ClearM68kCommunicationTrackingForWord(0x0A);
+        string source = cpuIndex == 0 ? "MSH2" : "SSH2";
+        TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0A), 0);
     }
 
     private bool TryFastForwardSdkWordStreamBusyPollLoop(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
@@ -2760,11 +2787,28 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
-    private bool IsSdkCommandStreamBurstActive(uint source, uint count)
+    private bool IsSdkWordStreamCommandActive()
     {
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        return count >= 0x1000 &&
-            ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0x0015 &&
+        return ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0x0015 &&
+            IsSdkCommandDispatchTablePresent();
+    }
+
+    private bool IsSdkHostCommunicationCommandActive()
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        return ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0 &&
+            IsSdkCommandDispatchTablePresent();
+    }
+
+    private bool ShouldReleaseSdkHostYieldSignal()
+    {
+        return IsSdkHostCommunicationCommandActive() || IsCompletedSdkWordStreamTerminatorPending();
+    }
+
+    private bool IsCompletedSdkWordStreamTerminatorPending()
+    {
+        return _sdkWordStreamTerminatorPendingYieldRelease &&
             IsSdkCommandDispatchTablePresent();
     }
 
@@ -4332,6 +4376,7 @@ public sealed class ThirtyTwoXDevice
             _horizontalInterruptCounter,
             _masterCommandInterruptPending,
             _slaveCommandInterruptPending,
+            _sdkWordStreamTerminatorPendingYieldRelease,
             _bootRomHandshakePending,
             _bootRomSignatureRead,
             _bootRomSignatureReadbackActive,
@@ -4456,6 +4501,7 @@ public sealed class ThirtyTwoXDevice
         _horizontalInterruptCounter = state.HorizontalInterruptCounter;
         _masterCommandInterruptPending = state.MasterCommandInterruptPending;
         _slaveCommandInterruptPending = state.SlaveCommandInterruptPending;
+        _sdkWordStreamTerminatorPendingYieldRelease = state.SdkWordStreamTerminatorPendingYieldRelease;
         _bootRomHandshakePending = state.BootRomHandshakePending;
         _bootRomSignatureRead = state.BootRomSignatureRead;
         _bootRomSignatureReadbackActive = state.BootRomSignatureReadbackActive;
@@ -6442,22 +6488,37 @@ public sealed class ThirtyTwoXDevice
     private void TryAcknowledgeSdkHostCommunicationCommandAfterSh2BusySignal(ushort offset, ushort value, int cpuIndex)
     {
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        bool releaseHostYield = ShouldReleaseSdkHostYieldSignal();
         if (offset != comm + 0x0A ||
             value == 0 ||
-            ReadBigEndianWord(_systemRegisters, comm + 0x0C) == 0 ||
-            ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0 ||
+            (!releaseHostYield &&
+                (ReadBigEndianWord(_systemRegisters, comm + 0x0C) == 0 ||
+                    ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0)) ||
             !IsSdkCommandDispatchTablePresent())
         {
             return;
         }
 
         WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
-        WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        _sdkWordStreamTerminatorPendingYieldRelease = false;
+        bool keepHostCommandPending = IsSdkHostCommunicationCommandActive();
+        if (!keepHostCommandPending)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        }
+
         ClearM68kCommunicationTrackingForWord(0x0A);
-        ClearM68kCommunicationTrackingForWord(0x0C);
+        if (!keepHostCommandPending)
+        {
+            ClearM68kCommunicationTrackingForWord(0x0C);
+        }
+
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0A), 0);
-        TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0C), 0);
+        if (!keepHostCommandPending)
+        {
+            TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0C), 0);
+        }
     }
 
     private void TryReleaseSdkSh2BusySignalAfterHostCommunicationCommand(ushort offset, ushort value)
@@ -6473,11 +6534,24 @@ public sealed class ThirtyTwoXDevice
         }
 
         WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
-        WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        _sdkWordStreamTerminatorPendingYieldRelease = false;
+        bool keepHostCommandPending = IsSdkHostCommunicationCommandActive();
+        if (!keepHostCommandPending)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        }
+
         ClearM68kCommunicationTrackingForWord(0x0A);
-        ClearM68kCommunicationTrackingForWord(0x0C);
+        if (!keepHostCommandPending)
+        {
+            ClearM68kCommunicationTrackingForWord(0x0C);
+        }
+
         TraceSystemRegisterAccess("M68K", "W16", (ushort)(comm + 0x0A), 0);
-        TraceSystemRegisterAccess("M68K", "W16", (ushort)(comm + 0x0C), 0);
+        if (!keepHostCommandPending)
+        {
+            TraceSystemRegisterAccess("M68K", "W16", (ushort)(comm + 0x0C), 0);
+        }
     }
 
     private void TryReleaseSdkSh2YieldSignalAfterWorkerStep(ushort offset, ushort value, int cpuIndex)
@@ -6487,8 +6561,7 @@ public sealed class ThirtyTwoXDevice
         Sh2Cpu cpu = cpuIndex == 0 ? MasterSh2 : SlaveSh2;
         if (offset != comm + 0x0A ||
             value == 0 ||
-            ReadBigEndianWord(_systemRegisters, comm + 0x0C) != 0 ||
-            ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0 ||
+            !IsSdkHostCommunicationCommandActive() ||
             cpu.PC != CyberBrawlSdkWorkerYieldPc ||
             !IsSdkCommandDispatchTablePresent())
         {
@@ -6496,6 +6569,7 @@ public sealed class ThirtyTwoXDevice
         }
 
         WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
+        _sdkWordStreamTerminatorPendingYieldRelease = false;
         ClearM68kCommunicationTrackingForWord(0x0A);
         string source = cpuIndex == 0 ? "MSH2" : "SSH2";
         TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0A), 0);
@@ -6510,6 +6584,11 @@ public sealed class ThirtyTwoXDevice
             !IsSdkCommandDispatchTablePresent())
         {
             return;
+        }
+
+        if (ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0)
+        {
+            _sdkWordStreamTerminatorPendingYieldRelease = true;
         }
 
         WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
@@ -7575,6 +7654,33 @@ public sealed class ThirtyTwoXDevice
         SetCommandInterruptPending(cpuIndex, false);
         ClearCommandInterruptStatusBit(cpuIndex);
         ClearPendingSh2Interrupt(cpuIndex, 8, Sh2CommandInterruptVector);
+        TryRetireDirectHostCommunicationCommandAfterInterruptClear(cpuIndex);
+    }
+
+    private void TryRetireDirectHostCommunicationCommandAfterInterruptClear(int cpuIndex)
+    {
+        ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
+        ushort command = ReadBigEndianWord(_systemRegisters, comm + 0x0C);
+        ushort selector = ReadBigEndianWord(_systemRegisters, comm + 0x0E);
+        if (!IsDirectHostCommunicationCommand(command, selector))
+        {
+            return;
+        }
+
+        WriteBigEndianWord(_systemRegisters, comm + 0x0C, 0);
+        WriteBigEndianWord(_systemRegisters, comm + 0x0E, 0);
+        ClearM68kCommunicationTrackingForWord(0x0C);
+        ClearM68kCommunicationTrackingForWord(0x0E);
+        string source = cpuIndex == 0 ? "MSH2" : "SSH2";
+        TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0C), 0);
+        TraceSystemRegisterAccess(source, "W16", (ushort)(comm + 0x0E), 0);
+    }
+
+    private static bool IsDirectHostCommunicationCommand(ushort command, ushort selector)
+    {
+        return command != 0 &&
+            command <= 0x000F &&
+            selector == command;
     }
 
     private void ClearPwmInterruptForCpu(int cpuIndex)
@@ -7674,30 +7780,43 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
-        byte active = _systemRegisters[ThirtyTwoXHardwareProfile.InterruptControlOffset + 1];
-        bool changed = false;
+        byte targets = 0;
         if ((_masterInterruptMask & Sh2InterruptMaskCommand) != 0)
         {
-            _masterCommandInterruptPending = true;
-            active |= 0x01;
-            changed = true;
+            targets |= 0x01;
         }
 
         if ((_slaveInterruptMask & Sh2InterruptMaskCommand) != 0)
         {
-            _slaveCommandInterruptPending = true;
-            active |= 0x02;
-            changed = true;
+            targets |= 0x02;
         }
 
-        if (!changed)
+        if (targets == 0)
         {
-            return;
+            targets = 0x03;
+        }
+
+        LatchCommandInterruptTargets(targets);
+        RequestPendingInterrupts();
+    }
+
+    private void LatchCommandInterruptTargets(byte targets)
+    {
+        byte active = _systemRegisters[ThirtyTwoXHardwareProfile.InterruptControlOffset + 1];
+        if ((targets & 0x01) != 0)
+        {
+            _masterCommandInterruptPending = true;
+            active |= 0x01;
+        }
+
+        if ((targets & 0x02) != 0)
+        {
+            _slaveCommandInterruptPending = true;
+            active |= 0x02;
         }
 
         _systemRegisters[ThirtyTwoXHardwareProfile.InterruptControlOffset] = 0;
         _systemRegisters[ThirtyTwoXHardwareProfile.InterruptControlOffset + 1] = active;
-        RequestPendingInterrupts();
     }
 
     private void TryMirrorHostCommunicationCommandSelector(ushort alignedOffset, ushort value)
@@ -7718,6 +7837,7 @@ public sealed class ThirtyTwoXDevice
             return;
         }
 
+        _sdkWordStreamTerminatorPendingYieldRelease = false;
         WriteBigEndianWord(_systemRegisters, comm + 0x0E, selector);
         ClearM68kCommunicationTrackingForWord(0x0E);
     }
@@ -10500,6 +10620,7 @@ public sealed class ThirtyTwoXDevice
         byte HorizontalInterruptCounter,
         bool MasterCommandInterruptPending,
         bool SlaveCommandInterruptPending,
+        bool SdkWordStreamTerminatorPendingYieldRelease,
         bool BootRomHandshakePending,
         bool BootRomSignatureRead,
         bool BootRomSignatureReadbackActive,

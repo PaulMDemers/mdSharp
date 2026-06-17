@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 67;
+    private const int Version = 68;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -383,6 +383,7 @@ public static class SaveStateSerializer
         writer.Write(state.HorizontalInterruptCounter);
         writer.Write(state.MasterCommandInterruptPending);
         writer.Write(state.SlaveCommandInterruptPending);
+        writer.Write(state.SdkWordStreamTerminatorPendingYieldRelease);
         writer.Write(state.BootRomHandshakePending);
         writer.Write(state.BootRomSignatureRead);
         writer.Write(state.BootRomSignatureReadbackActive);
@@ -540,6 +541,11 @@ public static class SaveStateSerializer
             masterCommandInterruptPending = reader.ReadBoolean();
             slaveCommandInterruptPending = reader.ReadBoolean();
         }
+        bool sdkWordStreamTerminatorPendingYieldRelease = false;
+        if (version >= 68)
+        {
+            sdkWordStreamTerminatorPendingYieldRelease = reader.ReadBoolean();
+        }
         if (version >= 36)
         {
             bootRomHandshakePending = reader.ReadBoolean();
@@ -679,6 +685,7 @@ public static class SaveStateSerializer
             horizontalInterruptCounter,
             masterCommandInterruptPending,
             slaveCommandInterruptPending,
+            sdkWordStreamTerminatorPendingYieldRelease,
             bootRomHandshakePending,
             bootRomSignatureRead,
             bootRomSignatureReadbackActive,
