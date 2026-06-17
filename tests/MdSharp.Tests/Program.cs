@@ -108,6 +108,7 @@ Run("32X SH-2 MOV.W DT BF/S ADD immediate fill loop fast-forward", ThirtyTwoXSh2
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
 Run("32X SH-2 long difference poll fast-forward", ThirtyTwoXSh2LongDifferencePollFastForward);
 Run("32X SH-2 framebuffer word fill loop fast-forward", ThirtyTwoXSh2FrameBufferWordFillLoopFastForward);
+Run("32X SH-2 SDK word stream handshake loop fast-forward", ThirtyTwoXSh2SdkWordStreamHandshakeLoopFastForward);
 Run("32X SH-2 SDRAM mirrors", ThirtyTwoXSh2SdramMirrors);
 Run("32X SH-2 GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2GbrCmpEqBfPollLoopFastForward);
 Run("32X SH-2 padded GBR CMP/EQ BF poll loop fast-forward", ThirtyTwoXSh2PaddedGbrCmpEqBfPollLoopFastForward);
@@ -249,6 +250,7 @@ Run("68000 shift-register bit reader loop fast-forward", M68kShiftRegisterBitRea
 Run("MegaDrive records 68000 bit-reader fast-path counters", MegaDriveRecordsM68kBitReaderFastPathCounters);
 Run("68000 word-pair compare subroutine DBF loop fast-forward", M68kWordPairCompareSubroutineDbfLoopFastForward);
 Run("MegaDrive records 68000 word-pair compare fast-path counters", MegaDriveRecordsM68kWordPairCompareFastPathCounters);
+Run("68000 BTST DBcc delay loop fast-forward", M68kBtstDbccDelayLoopFastForward);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 CMP.L BEQ wait loop fast-forward", M68kCmpLongBeqWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
@@ -594,6 +596,76 @@ void ThirtyTwoXDeviceShell()
     WriteSh2WordForTest(maskedCommandDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0002);
     AssertEqual(8, maskedCommandDevice.MasterSh2.PendingInterruptLevel);
     AssertEqual(68, maskedCommandDevice.MasterSh2.PendingInterruptVectorNumber);
+    ThirtyTwoXDevice communicationCommandDevice = new();
+    communicationCommandDevice.Reset();
+    WriteSh2WordForTest(communicationCommandDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0002, cpuIndex: 1);
+    communicationCommandDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A, 0x0011);
+    AssertEqual(0, communicationCommandDevice.SlaveSh2.PendingInterruptLevel);
+    communicationCommandDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertEqual(0, communicationCommandDevice.MasterSh2.PendingInterruptLevel);
+    AssertEqual(8, communicationCommandDevice.SlaveSh2.PendingInterruptLevel);
+    AssertEqual(68, communicationCommandDevice.SlaveSh2.PendingInterruptVectorNumber);
+    AssertEqual((ushort)0x0002, communicationCommandDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.InterruptControlOffset));
+    AssertEqual((ushort)0x0011, communicationCommandDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    ThirtyTwoXDevice communicationCommandAliasDevice = new();
+    communicationCommandAliasDevice.Reset();
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0622, 0xC517, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0624, 0x6103, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0626, 0xC734, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x06F8 + (0x15 * 4), 0x0600, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x06FA + (0x15 * 4), 0x2044, cpuIndex: 1);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0002, cpuIndex: 1);
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertEqual((ushort)0x0015, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0000);
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E, 0x0000);
+    communicationCommandAliasDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0D, 0x11);
+    AssertEqual((ushort)0x0015, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A), 0x0001, cpuIndex: 1);
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    AssertEqual((ushort)0x0015, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0E));
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A), 0x0001, cpuIndex: 1);
+    AssertEqual((ushort)0x0001, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    communicationCommandAliasDevice.WriteSystemRegisterByte(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0D, 0x11);
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    communicationCommandAliasDevice.ResetSh2(slavePc: 0x0600_1C6C);
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A), 0x0001, cpuIndex: 1);
+    AssertEqual((ushort)0x0001, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertEqual((ushort)0x0011, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    WriteSh2WordForTest(communicationCommandAliasDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset), 0xFFFF, cpuIndex: 1);
+    AssertEqual((ushort)0x0000, communicationCommandAliasDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    ThirtyTwoXDevice.ThirtyTwoXState sdkIdleState = communicationCommandAliasDevice.CaptureState();
+    communicationCommandAliasDevice.RestoreState(sdkIdleState with
+    {
+        SlaveSh2 = sdkIdleState.SlaveSh2 with { PC = 0x0600_05A0, SR = 0x0000_00F0 },
+    });
+    communicationCommandAliasDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertTrue(communicationCommandAliasDevice.SlaveSh2.HasAcceptablePendingInterrupt, "SDK idle command loop should unmask a latched host command interrupt");
+    AssertEqual(7u, (communicationCommandAliasDevice.SlaveSh2.SR >> 4) & 0x0F);
+    ThirtyTwoXDevice communicationCommandUnmatchedDevice = new();
+    communicationCommandUnmatchedDevice.Reset();
+    communicationCommandUnmatchedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    WriteSh2WordForTest(communicationCommandUnmatchedDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A), 0x0001, cpuIndex: 1);
+    AssertEqual((ushort)0x0001, communicationCommandUnmatchedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+    AssertEqual((ushort)0x0011, communicationCommandUnmatchedDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C));
+    ThirtyTwoXDevice communicationCommandIdleUnmatchedDevice = new();
+    communicationCommandIdleUnmatchedDevice.Reset();
+    WriteSh2WordForTest(communicationCommandIdleUnmatchedDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x0002, cpuIndex: 1);
+    ThirtyTwoXDevice.ThirtyTwoXState unmatchedIdleState = communicationCommandIdleUnmatchedDevice.CaptureState();
+    communicationCommandIdleUnmatchedDevice.RestoreState(unmatchedIdleState with
+    {
+        SlaveSh2 = unmatchedIdleState.SlaveSh2 with { PC = 0x0600_05A0, SR = 0x0000_00F0 },
+    });
+    communicationCommandIdleUnmatchedDevice.WriteSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0C, 0x0011);
+    AssertTrue(!communicationCommandIdleUnmatchedDevice.SlaveSh2.HasAcceptablePendingInterrupt, "non-SDK idle command loop should not lower SR.I");
+    AssertEqual(15u, (communicationCommandIdleUnmatchedDevice.SlaveSh2.SR >> 4) & 0x0F);
     ThirtyTwoXDevice byteMaskAccessDevice = new();
     byteMaskAccessDevice.Reset();
     WriteSh2ByteForTest(byteMaskAccessDevice, ThirtyTwoXHardwareProfile.Sh2SystemRegister(ThirtyTwoXHardwareProfile.AdapterControlOffset), 0x80);
@@ -1771,6 +1843,12 @@ void ThirtyTwoXDeviceShell()
     AssertTrue(fastCopyAccepted, "local SDRAM writes should still be handled by the fast-copy helper");
     AssertEqual((byte)0x56, fastOverflowMirrorDevice.Sdram[0x1280]);
     AssertEqual((byte)0x78, fastOverflowMirrorDevice.Sdram[0x1281]);
+    ThirtyTwoXDevice fastCopyCacheDevice = new();
+    fastCopyCacheDevice.Reset();
+    AssertEqual((ushort)0x0000, ReadSh2WordForTest(fastCopyCacheDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x40, cpuIndex: 1));
+    fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastCopyCacheDevice, [ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x40, (ushort)0x2468, 0])!;
+    AssertTrue(fastCopyAccepted, "fast-copy SDRAM writes should update stale cached SDRAM lines");
+    AssertEqual((ushort)0x2468, ReadSh2WordForTest(fastCopyCacheDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x40, cpuIndex: 1));
     fastCopyAccepted = (bool)fastCopyWrite.Invoke(fastOverflowMirrorDevice, [ThirtyTwoXHardwareProfile.Sh2VdpRegisterStart + ThirtyTwoXHardwareProfile.BitmapModeOffset, (ushort)0x7B79, 0])!;
     AssertTrue(fastCopyAccepted, "MMIO writes should be consumed by the fast-copy helper without mutating VDP registers");
     AssertEqual((ushort)0x8000, fastOverflowMirrorDevice.ReadVdpRegisterWord(ThirtyTwoXHardwareProfile.BitmapModeOffset));
@@ -7025,6 +7103,153 @@ void ThirtyTwoXSh2FrameBufferWordFillLoopFastForward()
     AssertEqual((byte)0x02, device.DrawFrameBuffer[0x101]);
     AssertEqual((byte)0x02, device.DrawFrameBuffer[0x104]);
     AssertEqual((byte)0x02, device.DrawFrameBuffer[0x105]);
+}
+
+void ThirtyTwoXSh2SdkWordStreamHandshakeLoopFastForward()
+{
+    const uint LoopPc = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x1C5E;
+    const uint SourceAddress = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x2200;
+    uint systemBase = ThirtyTwoXHardwareProfile.Sh2SystemRegisterStart;
+
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+
+    WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
+    WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0622, 0xC517, cpuIndex: 1);
+    WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0624, 0x6103, cpuIndex: 1);
+    WriteSh2WordForTest(device, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0626, 0xC734, cpuIndex: 1);
+
+    ushort[] loop =
+    [
+        0xC515, // MOV.W @(42,GBR),R0
+        0x8800, // CMP/EQ #0,R0
+        0x8BFC, // BF $06001C5E
+        0x6015, // MOV.W @R1+,R0
+        0xC110, // MOV.W R0,@(32,GBR)
+        0xE001, // MOV #1,R0
+        0xC115, // MOV.W R0,@(42,GBR)
+        0x4210, // DT R2
+        0x8BF6, // BF $06001C5E
+        0x001B, // SLEEP
+    ];
+
+    for (int i = 0; i < loop.Length; i++)
+    {
+        WriteSh2WordForTest(device, LoopPc + (uint)(i * 2), loop[i], cpuIndex: 1);
+    }
+
+    WriteSh2WordForTest(device, SourceAddress + 0, 0x1234, cpuIndex: 1);
+    WriteSh2WordForTest(device, SourceAddress + 2, 0x5678, cpuIndex: 1);
+    WriteSh2WordForTest(device, SourceAddress + 4, 0x9ABC, cpuIndex: 1);
+
+    ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
+    uint[] slaveRegisters = (uint[])state.SlaveSh2.R.Clone();
+    slaveRegisters[1] = SourceAddress;
+    slaveRegisters[2] = 3;
+    device.RestoreState(state with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        SlaveSh2 = state.SlaveSh2 with
+        {
+            R = slaveRegisters,
+            PC = LoopPc,
+            GBR = systemBase,
+            SR = 0,
+        },
+    });
+
+    int cycles = InvokeStepSh2Cpu(device, cpuIndex: 1, cycleBudget: 128);
+
+    AssertEqual(12, cycles);
+    AssertEqual(2u, device.SlaveSh2.R[2]);
+    AssertEqual(SourceAddress + 2, device.SlaveSh2.R[1]);
+    AssertEqual(LoopPc, device.SlaveSh2.PC);
+    AssertEqual((ushort)0x1234, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0001, device.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+
+    ThirtyTwoXDevice finalDevice = new();
+    finalDevice.Reset();
+    WriteSh2WordForTest(finalDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
+    WriteSh2WordForTest(finalDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0622, 0xC517, cpuIndex: 1);
+    WriteSh2WordForTest(finalDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0624, 0x6103, cpuIndex: 1);
+    WriteSh2WordForTest(finalDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0626, 0xC734, cpuIndex: 1);
+    for (int i = 0; i < loop.Length; i++)
+    {
+        WriteSh2WordForTest(finalDevice, LoopPc + (uint)(i * 2), loop[i], cpuIndex: 1);
+    }
+
+    WriteSh2WordForTest(finalDevice, SourceAddress, 0xBEEF, cpuIndex: 1);
+    ThirtyTwoXDevice.ThirtyTwoXState finalState = finalDevice.CaptureState();
+    uint[] finalSlaveRegisters = (uint[])finalState.SlaveSh2.R.Clone();
+    finalSlaveRegisters[1] = SourceAddress;
+    finalSlaveRegisters[2] = 1;
+    finalDevice.RestoreState(finalState with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        SlaveSh2 = finalState.SlaveSh2 with
+        {
+            R = finalSlaveRegisters,
+            PC = LoopPc,
+            GBR = systemBase,
+            SR = 0,
+        },
+    });
+
+    AssertEqual(12, InvokeStepSh2Cpu(finalDevice, cpuIndex: 1, cycleBudget: 128));
+    AssertEqual(0u, finalDevice.SlaveSh2.R[2]);
+    AssertEqual(LoopPc + 0x12, finalDevice.SlaveSh2.PC);
+    AssertEqual((ushort)0xBEEF, finalDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0001, finalDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
+
+    ThirtyTwoXDevice zeroBurstDevice = new();
+    zeroBurstDevice.Reset();
+    WriteSh2WordForTest(zeroBurstDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0620, 0x4F22, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0622, 0xC517, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0624, 0x6103, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x0626, 0xC734, cpuIndex: 1);
+    for (int i = 0; i < loop.Length; i++)
+    {
+        WriteSh2WordForTest(zeroBurstDevice, LoopPc + (uint)(i * 2), loop[i], cpuIndex: 1);
+    }
+
+    WriteSh2WordForTest(zeroBurstDevice, SourceAddress + 0, 0x0000, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, SourceAddress + 2, 0x0000, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, SourceAddress + 4, 0x0000, cpuIndex: 1);
+    WriteSh2WordForTest(zeroBurstDevice, SourceAddress + 6, 0xCAFE, cpuIndex: 1);
+    ThirtyTwoXDevice.ThirtyTwoXState zeroBurstState = zeroBurstDevice.CaptureState();
+    uint[] zeroBurstSlaveRegisters = (uint[])zeroBurstState.SlaveSh2.R.Clone();
+    zeroBurstSlaveRegisters[1] = SourceAddress;
+    zeroBurstSlaveRegisters[2] = 4;
+    zeroBurstDevice.RestoreState(zeroBurstState with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        SlaveSh2 = zeroBurstState.SlaveSh2 with
+        {
+            R = zeroBurstSlaveRegisters,
+            PC = LoopPc,
+            GBR = systemBase,
+            SR = 0,
+        },
+    });
+
+    AssertEqual(36, InvokeStepSh2Cpu(zeroBurstDevice, cpuIndex: 1, cycleBudget: 128));
+    AssertEqual(1u, zeroBurstDevice.SlaveSh2.R[2]);
+    AssertEqual(SourceAddress + 6, zeroBurstDevice.SlaveSh2.R[1]);
+    AssertEqual(LoopPc, zeroBurstDevice.SlaveSh2.PC);
+    AssertEqual((ushort)0x0000, zeroBurstDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset));
+    AssertEqual((ushort)0x0001, zeroBurstDevice.ReadSystemRegisterWord(ThirtyTwoXHardwareProfile.CommunicationPortOffset + 0x0A));
 }
 
 void ThirtyTwoXSh2SdramMirrors()
@@ -12391,6 +12616,38 @@ void MegaDriveRecordsM68kWordPairCompareFastPathCounters()
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the word-pair compare loop");
 }
 
+void M68kBtstDbccDelayLoopFastForward()
+{
+    byte[] rom = CreateBtstDbccDelayLoopRom();
+    MegaDrive exhausted = new(CartridgeImage.FromBytes(rom));
+    exhausted.Reset();
+    exhausted.MainCpu.D[1] = 0;
+    exhausted.MainCpu.D[2] = 3;
+
+    AssertTrue(
+        exhausted.MainCpu.TryFastForwardBtstRegisterDbccLoop(128, out int exhaustedCycles, out int exhaustedInstructions),
+        "fast-forward should recognize the BTST/DBcc countdown loop");
+    AssertEqual(68, exhaustedCycles);
+    AssertEqual(8, exhaustedInstructions);
+    AssertEqual(0x0000_0206u, exhausted.MainCpu.PC);
+    AssertEqual(0xFFFFu, exhausted.MainCpu.D[2] & 0xFFFF);
+    AssertTrue((exhausted.MainCpu.SR & 0x0004) != 0, "BTST should leave Z set when the tested bit is clear");
+
+    MegaDrive conditionExit = new(CartridgeImage.FromBytes(rom));
+    conditionExit.Reset();
+    conditionExit.MainCpu.D[1] = 0x0000_0004;
+    conditionExit.MainCpu.D[2] = 3;
+
+    AssertTrue(
+        conditionExit.MainCpu.TryFastForwardBtstRegisterDbccLoop(128, out int conditionCycles, out int conditionInstructions),
+        "fast-forward should honor the changed bit index when DBcc mutates the bit register");
+    AssertEqual(34, conditionCycles);
+    AssertEqual(4, conditionInstructions);
+    AssertEqual(0x0000_0206u, conditionExit.MainCpu.PC);
+    AssertEqual(2u, conditionExit.MainCpu.D[2] & 0xFFFF);
+    AssertTrue((conditionExit.MainCpu.SR & 0x0004) == 0, "BTST should leave Z clear when the tested bit is set");
+}
+
 byte[] CreateBitReaderLoopRom(bool stopAfterLoop = false)
 {
     byte[] rom = CreateRom();
@@ -12425,6 +12682,21 @@ void SeedBitReaderState(MegaDrive machine)
     machine.MainCpu.D[5] = 0xABCD_EF00;
     machine.MainCpu.A[0] = 0x00FF_1003;
     machine.Bus.WriteByte(0x00FF_1003, 0xB0);
+}
+
+byte[] CreateBtstDbccDelayLoopRom()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x0501); // BTST D2,D1
+    EmitWord(rom, ref pc, 0x56CA); // DBNE D2,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+    return rom;
 }
 
 byte[] CreateWordPairCompareLoopRom(bool stopAfterLoop = false)
@@ -14616,6 +14888,25 @@ static void WriteSh2LongForTest(ThirtyTwoXDevice target, uint address, uint valu
     System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod("WriteSh2Long", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("WriteSh2Long helper was not found");
     method.Invoke(target, [address, value, cpuIndex]);
+}
+
+static int InvokeStepSh2Cpu(ThirtyTwoXDevice target, int cpuIndex, int cycleBudget)
+{
+    System.Reflection.MethodInfo method = typeof(ThirtyTwoXDevice).GetMethod(
+        "StepSh2Cpu",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+        binder: null,
+        types: [typeof(int), typeof(int)],
+        modifiers: null)
+        ?? throw new InvalidOperationException("StepSh2Cpu helper was not found");
+    try
+    {
+        return (int)method.Invoke(target, [cpuIndex, cycleBudget])!;
+    }
+    catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is not null)
+    {
+        throw ex.InnerException;
+    }
 }
 
 readonly record struct EepromPins(uint SdaInAddress, int SdaInBit, uint SdaOutAddress, int SdaOutBit, uint SclAddress, int SclBit, bool WordAccess = false);

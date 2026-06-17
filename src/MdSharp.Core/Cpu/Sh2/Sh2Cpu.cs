@@ -80,6 +80,20 @@ public sealed class Sh2Cpu
         GBR = value;
     }
 
+    public void LowerInterruptMaskLevel(int maximumLevel)
+    {
+        if (maximumLevel is < 0 or > 15)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumLevel));
+        }
+
+        uint currentLevel = (SR >> 4) & 0x0F;
+        if (currentLevel > maximumLevel)
+        {
+            SR = (SR & ~0x0000_00F0u) | ((uint)maximumLevel << 4);
+        }
+    }
+
     public void FastForwardSyntheticLoop(uint pc, ushort lastOpcode, uint lastOpcodePc, int cycles)
     {
         if (cycles <= 0)

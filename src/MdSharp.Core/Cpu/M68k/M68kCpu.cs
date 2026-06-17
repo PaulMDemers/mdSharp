@@ -674,6 +674,98 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardBtstRegisterDbccLoop(int cycleBudget, out int cycles, out int instructionCount)
+    {
+        const int TakenIterationCycles = 16;
+        const int ConditionExitCycles = 18;
+        const int CounterExitCycles = 20;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < TakenIterationCycles)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        ushort btst = _bus.ReadWord(pc);
+        if ((btst & 0xF1F8) != 0x0100)
+        {
+            return false;
+        }
+
+        ushort dbcc = _bus.ReadWord(pc + 2);
+        if ((dbcc & 0xF0F8) != 0x50C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(pc + 4);
+        if (NormalizePc(unchecked(pc + 4u + (uint)displacement)) != pc)
+        {
+            return false;
+        }
+
+        int bitRegister = (btst >> 9) & 0x07;
+        int dataRegister = btst & 0x07;
+        int condition = (dbcc >> 8) & 0x0F;
+        int counterRegister = dbcc & 0x07;
+
+        bool completed = false;
+        while (cycles + TakenIterationCycles <= cycleBudget)
+        {
+            int bit = (int)(D[bitRegister] & 0x1F);
+            uint mask = 1u << bit;
+            SetZ((D[dataRegister] & mask) == 0);
+
+            if (ConditionTrue(condition))
+            {
+                if (cycles == 0 || cycles + ConditionExitCycles > cycleBudget)
+                {
+                    break;
+                }
+
+                cycles += ConditionExitCycles;
+                instructionCount += 2;
+                PC = NormalizePc(pc + 6);
+                completed = true;
+                break;
+            }
+
+            ushort counter = unchecked((ushort)((D[counterRegister] & 0xFFFF) - 1));
+            D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | counter;
+            if (counter == 0xFFFF)
+            {
+                if (cycles + CounterExitCycles > cycleBudget)
+                {
+                    D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u);
+                    break;
+                }
+
+                cycles += CounterExitCycles;
+                instructionCount += 2;
+                PC = NormalizePc(pc + 6);
+                completed = true;
+                break;
+            }
+
+            cycles += TakenIterationCycles;
+            instructionCount += 2;
+        }
+
+        if (cycles == 0)
+        {
+            return false;
+        }
+
+        if (!completed)
+        {
+            PC = pc;
+        }
+
+        Cycles += cycles;
+        return true;
+    }
+
     public void ClearAllocationProfile()
     {
         EnsureAllocationProfile();

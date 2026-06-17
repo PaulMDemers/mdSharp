@@ -451,6 +451,20 @@ public sealed class MegaDrive
             }
 
             if (_pendingM68kInterruptLevels == 0 &&
+                MainCpu.TryFastForwardBtstRegisterDbccLoop(cycleBudget - consumed, out int btstDbccCycles, out int btstDbccInstructions))
+            {
+                RecordM68kFastPath(btstDbccCycles);
+                if (!RunThirtyTwoXForMasterCycles((long)btstDbccCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += btstDbccCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - btstDbccInstructions);
+                continue;
+            }
+
+            if (_pendingM68kInterruptLevels == 0 &&
                 MainCpu.TryFastForwardMoveBytePostIncrementCopyDbfLoop(
                     cycleBudget - consumed,
                     IsM68kFastByteCopyAddress,
@@ -550,6 +564,12 @@ public sealed class MegaDrive
     {
         hits++;
         accumulatedCycles += cycles;
+        _m68kFastPathHits++;
+        _m68kFastPathCycles += cycles;
+    }
+
+    private void RecordM68kFastPath(int cycles)
+    {
         _m68kFastPathHits++;
         _m68kFastPathCycles += cycles;
     }
