@@ -77,7 +77,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         Vdp = vdp;
         Psg = psg;
         Ym2612 = ym2612;
-        _versionRegister = BuildVersionRegister(cartridge, pal);
+        _versionRegister = BuildVersionRegister(cartridge, pal, segaCdAttached: segaCd is not null);
         _controllers = new[]
         {
             controller1 ?? new ThreeButtonController(),
@@ -119,7 +119,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     public bool LightGunVisible => _lightGunVisible;
     public bool LightGunLatchedThisFrame => _lightGunHvLatch.HasValue;
     public bool Z80BusRequested => _z80BusRequested;
-    public bool Z80BusGranted => _z80BusRequested && !_z80ResetAsserted && CurrentMasterCycle >= _z80BusGrantReadyCycle;
+    public bool Z80BusGranted => _z80BusRequested && (!_z80ResetAsserted || _segaCd is not null) && CurrentMasterCycle >= _z80BusGrantReadyCycle;
     public bool Z80ResetAsserted => _z80ResetAsserted;
     public uint CurrentM68kPc { get; set; }
     public ushort CurrentZ80Pc { get; set; }
@@ -875,7 +875,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private byte ReadZ80BusRequestStatus()
     {
         const byte unusedBitsHigh = 0xFE;
-        if (!_z80BusRequested || _z80ResetAsserted)
+        if (!_z80BusRequested || (_z80ResetAsserted && _segaCd is null))
         {
             return 0x01 | unusedBitsHigh;
         }
@@ -1588,7 +1588,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         Controller4.WriteData(th, CurrentMasterCycle);
     }
 
-    private static byte BuildVersionRegister(CartridgeImage cartridge, bool pal)
+    private static byte BuildVersionRegister(CartridgeImage cartridge, bool pal, bool segaCdAttached = false)
     {
         string region = cartridge.Header.Region.ToUpperInvariant();
         bool domesticOnly = (region.Contains('J') || region.Contains('1'))
@@ -1598,7 +1598,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             && !region.Contains('4')
             && !region.Contains('8')
             && !region.Contains('F');
-        byte version = 0x21; // no expansion unit, TMSS-era version bit set
+        byte version = segaCdAttached ? (byte)0x01 : (byte)0x21; // bit 5 clear means expansion unit present.
         if (!domesticOnly)
         {
             version |= 0x80;

@@ -595,6 +595,11 @@ void SegaCdMainBusMapping()
 
     AssertEqual(0x00FF_1000u, machine.MainCpu.A[7]);
     AssertEqual(0x0000_0200u, machine.MainCpu.PC);
+    AssertEqual((byte)0x00, (byte)(machine.Bus.ReadByte(0x00A1_0001) & 0x20));
+    machine.Bus.WriteWord(0x00A1_1100, 0x0100);
+    AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(0x00A1_1100) & 0x01));
+    machine.Bus.CurrentMasterCycle += 128;
+    AssertEqual((byte)0x00, (byte)(machine.Bus.ReadByte(0x00A1_1100) & 0x01));
     AssertEqual((uint)0x5345_4741, machine.Bus.ReadLong(0x000100));
 
     machine.Bus.WriteWord(SegaCdHardwareProfile.MainProgramRamWindowStart, 0x1234);

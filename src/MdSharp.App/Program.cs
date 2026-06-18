@@ -37,6 +37,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --cart-info <rom-file>");
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
     Console.WriteLine("  mdsharp --segacd-info <cue-or-iso> [us|eu|jp]");
+    Console.WriteLine("  mdsharp --segacd-bios-smoke <us|eu|jp> [instructions]");
     Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
@@ -180,6 +181,19 @@ if (args[0].Equals("--segacd-info", StringComparison.OrdinalIgnoreCase))
 
     SegaCdRegion? region = args.Length > 2 ? ParseSegaCdRegion(args[2]) : null;
     PrintSegaCdInfo(args[1], region);
+    return;
+}
+
+if (args[0].Equals("--segacd-bios-smoke", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-bios-smoke <us|eu|jp> [instructions]");
+        return;
+    }
+
+    int instructions = args.Length > 2 && int.TryParse(args[2], out int parsedInstructions) ? parsedInstructions : 10_000;
+    SmokeSegaCdBios(ParseSegaCdRegion(args[1]), instructions);
     return;
 }
 
@@ -2902,6 +2916,87 @@ string FormatDiscMsf(int lba)
     int seconds = (lba / 75) % 60;
     int frames = lba % 75;
     return $"{minutes:D2}:{seconds:D2}:{frames:D2}";
+}
+
+string FormatSegaCdState(SegaCdDevice device)
+{
+    static string NonZeroRange(ReadOnlySpan<byte> data)
+    {
+        int first = -1;
+        int last = -1;
+        int count = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] == 0)
+            {
+                continue;
+            }
+
+            first = first < 0 ? i : first;
+            last = i;
+            count++;
+        }
+
+        return count == 0 ? "0" : $"{count:N0} range=${first:X5}-${last:X5}";
+    }
+
+    List<string> registers = [];
+    ReadOnlySpan<byte> registerBytes = device.MainRegisters;
+    for (int i = 0; i < registerBytes.Length; i++)
+    {
+        if (registerBytes[i] != 0)
+        {
+            registers.Add($"${i:X3}=${registerBytes[i]:X2}");
+        }
+    }
+
+    string registerText = registers.Count == 0 ? "none" : string.Join(' ', registers.Take(32));
+    if (registers.Count > 32)
+    {
+        registerText += $" ... +{registers.Count - 32:N0}";
+    }
+
+    return $"SegaCD PRG={NonZeroRange(device.ProgramRam)} WORD={NonZeroRange(device.WordRam)} PCM={NonZeroRange(device.PcmRam)} regs={registerText}";
+}
+
+void SmokeSegaCdBios(SegaCdRegion region, int instructionLimit)
+{
+    SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
+        throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
+    SegaCdDevice segaCd = new(File.ReadAllBytes(bios.Path), region);
+    MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+    machine.Reset();
+
+    Console.WriteLine($"Sega CD BIOS smoke: {region}");
+    Console.WriteLine($"BIOS: {bios.FileName} ({bios.Size:N0} bytes, sha1 {bios.Sha1})");
+    Console.WriteLine($"Initial SSP=${machine.MainCpu.A[7]:X8} PC=${machine.MainCpu.PC:X8}");
+    int executed = 0;
+    string status = "ok";
+    string detail = string.Empty;
+    try
+    {
+        for (; executed < instructionLimit && !machine.MainCpu.Stopped; executed++)
+        {
+            machine.StepInstruction();
+            machine.Bus.CurrentMasterCycle = Math.Max(machine.Bus.CurrentMasterCycle, machine.MainCpu.Cycles * 7L);
+        }
+    }
+    catch (M68kException ex)
+    {
+        status = "m68k-exception";
+        detail = ex.Message;
+    }
+
+    Console.WriteLine($"Status: {status}");
+    if (detail.Length > 0)
+    {
+        Console.WriteLine($"Detail: {detail}");
+    }
+
+    Console.WriteLine($"Executed: {executed:N0}");
+    Console.WriteLine(FormatState(machine));
+    Console.WriteLine(FormatVdpState(machine.Vdp));
+    Console.WriteLine(FormatSegaCdState(segaCd));
 }
 
 void TraceThirtyTwoXSh2(string romPath, int instructionLimit, string cpuName, uint? startPc)
