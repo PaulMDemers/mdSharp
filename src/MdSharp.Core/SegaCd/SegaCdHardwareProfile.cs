@@ -17,4 +17,14 @@ public static class SegaCdHardwareProfile
     public const uint MainWordRamEndInclusive = MainWordRamStart + WordRamBytes - 1;
     public const uint MainRegisterStart = 0xA12000;
     public const uint MainRegisterEndInclusive = MainRegisterStart + RegisterBytes - 1;
+    public const uint SubProgramRamStart = 0x000000;
+    public const uint SubProgramRamEndInclusive = SubProgramRamStart + ProgramRamBytes - 1;
+    public const uint SubWordRamStart = 0x080000;
+    public const uint SubWordRamEndInclusive = SubWordRamStart + WordRamBytes - 1;
+    public const uint SubBackupRamStart = 0xFE0000;
+    public const uint SubBackupRamEndInclusive = SubBackupRamStart + BackupRamBytes - 1;
+    public const uint SubPcmRamStart = 0xFF0000;
+    public const uint SubPcmRamEndInclusive = SubPcmRamStart + PcmRamBytes - 1;
+    public const uint SubRegisterStart = 0xFF8000;
+    public const uint SubRegisterEndInclusive = SubRegisterStart + RegisterBytes - 1;
 }

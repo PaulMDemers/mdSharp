@@ -19,6 +19,7 @@ Run("Sega CD ISO disc image parsing", SegaCdIsoDiscImageParsing);
 Run("Sega CD CUE disc image parsing", SegaCdCueDiscImageParsing);
 Run("Sega CD BIOS discovery", SegaCdBiosDiscovery);
 Run("Sega CD device shell", SegaCdDeviceShell);
+Run("Sega CD sub CPU reset and state", SegaCdSubCpuResetAndState);
 Run("Sega CD main bus mapping", SegaCdMainBusMapping);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
@@ -577,6 +578,27 @@ void SegaCdDeviceShell()
     AssertEqual((byte)0xBC, device.ReadBackupRamByte(0));
     AssertEqual((byte)0x00, device.ReadPcmRamByte(2));
     AssertEqual((ushort)0x0000, device.ReadMainRegisterWord(0x10));
+}
+
+void SegaCdSubCpuResetAndState()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    AssertTrue(device.SubBiosMapped, "Sub CPU BIOS should start mapped");
+    AssertEqual(0x00FE_0000u, device.SubCpu.A[7]);
+    AssertEqual(0x0000_0200u, device.SubCpu.PC);
+
+    device.UnmapSubBios();
+    SegaCdDevice.SegaCdState state = device.CaptureState();
+    device.Reset();
+    AssertTrue(device.SubBiosMapped, "Reset should remap sub CPU BIOS");
+    device.RestoreState(state);
+    AssertTrue(!device.SubBiosMapped, "Restore should preserve sub CPU BIOS mapping state");
+    AssertEqual(0x0000_0200u, device.SubCpu.PC);
 }
 
 void SegaCdMainBusMapping()

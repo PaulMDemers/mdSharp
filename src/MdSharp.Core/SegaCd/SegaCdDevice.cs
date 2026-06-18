@@ -1,3 +1,5 @@
+using MdSharp.Core.Cpu.M68k;
+
 namespace MdSharp.Core.SegaCd;
 
 public sealed class SegaCdDevice
@@ -8,6 +10,7 @@ public sealed class SegaCdDevice
     private readonly byte[] _backupRam = new byte[SegaCdHardwareProfile.BackupRamBytes];
     private readonly byte[] _pcmRam = new byte[SegaCdHardwareProfile.PcmRamBytes];
     private readonly byte[] _mainRegisters = new byte[SegaCdHardwareProfile.RegisterBytes];
+    private readonly SegaCdSubBus _subBus;
 
     public SegaCdDevice(ReadOnlyMemory<byte> bios, SegaCdRegion region, DiscImage? disc = null)
     {
@@ -19,11 +22,15 @@ public sealed class SegaCdDevice
         _bios = bios.ToArray();
         Region = region;
         Disc = disc;
+        _subBus = new SegaCdSubBus(this);
+        SubCpu = new M68kCpu(_subBus);
         Array.Fill<byte>(_backupRam, 0xFF);
     }
 
     public SegaCdRegion Region { get; }
     public DiscImage? Disc { get; }
+    public M68kCpu SubCpu { get; }
+    public bool SubBiosMapped { get; private set; } = true;
     public ReadOnlySpan<byte> Bios => _bios;
     public ReadOnlySpan<byte> ProgramRam => _programRam;
     public ReadOnlySpan<byte> WordRam => _wordRam;
@@ -37,6 +44,13 @@ public sealed class SegaCdDevice
         Array.Clear(_wordRam);
         Array.Clear(_pcmRam);
         Array.Clear(_mainRegisters);
+        SubBiosMapped = true;
+        SubCpu.Reset();
+    }
+
+    public void UnmapSubBios()
+    {
+        SubBiosMapped = false;
     }
 
     public byte ReadBiosByte(uint address)
@@ -117,7 +131,9 @@ public sealed class SegaCdDevice
             (byte[])_wordRam.Clone(),
             (byte[])_backupRam.Clone(),
             (byte[])_pcmRam.Clone(),
-            (byte[])_mainRegisters.Clone());
+            (byte[])_mainRegisters.Clone(),
+            SubBiosMapped,
+            SubCpu.CaptureState());
     }
 
     public void RestoreState(SegaCdState state)
@@ -127,6 +143,8 @@ public sealed class SegaCdDevice
         CopyInto(state.BackupRam, _backupRam);
         CopyInto(state.PcmRam, _pcmRam);
         CopyInto(state.MainRegisters, _mainRegisters);
+        SubBiosMapped = state.SubBiosMapped;
+        SubCpu.RestoreState(state.SubCpu);
     }
 
     private static void CopyInto(byte[] source, byte[] destination)
@@ -140,5 +158,7 @@ public sealed class SegaCdDevice
         byte[] WordRam,
         byte[] BackupRam,
         byte[] PcmRam,
-        byte[] MainRegisters);
+        byte[] MainRegisters,
+        bool SubBiosMapped,
+        M68kCpu.M68kState SubCpu);
 }
