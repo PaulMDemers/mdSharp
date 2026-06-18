@@ -27,14 +27,14 @@ internal sealed class SegaCdSubBus(SegaCdDevice device) : IMemoryBus
             return device.ReadBackupRamByte(address - SegaCdHardwareProfile.SubBackupRamStart);
         }
 
+        if (address is >= SegaCdHardwareProfile.SubRegisterStart and <= SegaCdHardwareProfile.SubRegisterEndInclusive)
+        {
+            return device.ReadSubRegisterByte(address - SegaCdHardwareProfile.SubRegisterStart);
+        }
+
         if (address is >= SegaCdHardwareProfile.SubPcmRamStart and <= SegaCdHardwareProfile.SubPcmRamEndInclusive)
         {
             return device.ReadPcmRamByte(address - SegaCdHardwareProfile.SubPcmRamStart);
-        }
-
-        if (address is >= SegaCdHardwareProfile.SubRegisterStart and <= SegaCdHardwareProfile.SubRegisterEndInclusive)
-        {
-            return device.ReadMainRegisterByte(address - SegaCdHardwareProfile.SubRegisterStart);
         }
 
         return 0xFF;
@@ -61,15 +61,15 @@ internal sealed class SegaCdSubBus(SegaCdDevice device) : IMemoryBus
             return;
         }
 
-        if (address is >= SegaCdHardwareProfile.SubPcmRamStart and <= SegaCdHardwareProfile.SubPcmRamEndInclusive)
+        if (address is >= SegaCdHardwareProfile.SubRegisterStart and <= SegaCdHardwareProfile.SubRegisterEndInclusive)
         {
-            device.WritePcmRamByte(address - SegaCdHardwareProfile.SubPcmRamStart, value);
+            device.WriteSubRegisterByte(address - SegaCdHardwareProfile.SubRegisterStart, value);
             return;
         }
 
-        if (address is >= SegaCdHardwareProfile.SubRegisterStart and <= SegaCdHardwareProfile.SubRegisterEndInclusive)
+        if (address is >= SegaCdHardwareProfile.SubPcmRamStart and <= SegaCdHardwareProfile.SubPcmRamEndInclusive)
         {
-            device.WriteMainRegisterByte(address - SegaCdHardwareProfile.SubRegisterStart, value);
+            device.WritePcmRamByte(address - SegaCdHardwareProfile.SubPcmRamStart, value);
         }
     }
 }

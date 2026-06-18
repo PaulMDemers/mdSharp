@@ -13,6 +13,7 @@ namespace MdSharp.Core;
 public sealed class MegaDrive
 {
     private const int ThirtyTwoXMinimumCycleBatch = 2048;
+    private const int SegaCdMinimumCycleBatch = 256;
     private const int ThirtyTwoXSystemWordPollLoopCycles = 26;
     private const int ResetAudioFadeInSamples = 512;
     private const int MaxStoppedM68kIdleBatchCycles = 64;
@@ -58,6 +59,8 @@ public sealed class MegaDrive
     public FramePerformanceCounters LastFramePerformance { get; private set; }
     public long ThirtyTwoXScheduledInstructionRequests => _thirtyTwoXScheduledInstructionRequests;
     public long ThirtyTwoXExecutedInstructionSteps => _thirtyTwoXExecutedInstructionSteps;
+    public long SegaCdSubCpuScheduledCycles => _segaCdSubCpuScheduledCycles;
+    public long SegaCdSubCpuExecutedCycles => _segaCdSubCpuExecutedCycles;
     public long M68kFastPathHits => _m68kFastPathHits;
     public long M68kFastPathCycles => _m68kFastPathCycles;
     public long M68kThirtyTwoXSystemWordPollFastPathHits => _m68kThirtyTwoXSystemWordPollFastPathHits;
@@ -90,8 +93,11 @@ public sealed class MegaDrive
     private FramePerformanceAccumulator _framePerformance;
     private long _z80MasterCycleCursor;
     private double _thirtyTwoXInstructionCarry;
+    private double _segaCdSubCpuCycleCarry;
     private long _thirtyTwoXScheduledInstructionRequests;
     private long _thirtyTwoXExecutedInstructionSteps;
+    private long _segaCdSubCpuScheduledCycles;
+    private long _segaCdSubCpuExecutedCycles;
     private long _m68kFastPathHits;
     private long _m68kFastPathCycles;
     private long _m68kThirtyTwoXSystemWordPollFastPathHits;
@@ -131,8 +137,11 @@ public sealed class MegaDrive
         _audioFadeInSamplesRemaining = ResetAudioFadeInSamples;
         _z80MasterCycleCursor = 0;
         _thirtyTwoXInstructionCarry = 0.0;
+        _segaCdSubCpuCycleCarry = 0.0;
         _thirtyTwoXScheduledInstructionRequests = 0;
         _thirtyTwoXExecutedInstructionSteps = 0;
+        _segaCdSubCpuScheduledCycles = 0;
+        _segaCdSubCpuExecutedCycles = 0;
         _m68kFastPathHits = 0;
         _m68kFastPathCycles = 0;
         _m68kThirtyTwoXSystemWordPollFastPathHits = 0;
@@ -243,7 +252,7 @@ public sealed class MegaDrive
                 int activeLineCycles = Scheduler.ActiveDisplayM68kCycles;
                 int hblankLineCycles = Math.Max(1, Scheduler.M68kCyclesPerScanline - activeLineCycles);
                 int activeDmaDebt = Vdp.ConsumeDmaCycleDebt(activeLineCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)activeDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)activeDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return false;
                 }
@@ -259,7 +268,7 @@ public sealed class MegaDrive
                 Vdp.SetHBlank(true);
                 Bus.ThirtyTwoX?.SetHBlank(true);
                 int hblankDmaDebt = Vdp.ConsumeDmaCycleDebt(hblankLineCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)hblankDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)hblankDmaDebt * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return false;
                 }
@@ -326,7 +335,7 @@ public sealed class MegaDrive
         {
             Bus.CurrentMasterCycle = lineStartMasterCycle + (lineCycleOffset * GenesisScheduler.M68kDivider);
             Bus.CurrentScanlineMasterCycleOffset = lineCycleOffset * GenesisScheduler.M68kDivider;
-            if (!RunThirtyTwoXForMasterCycles((long)cycleBudget * GenesisScheduler.M68kDivider, shouldAbort))
+            if (!RunAddOnHardwareForMasterCycles((long)cycleBudget * GenesisScheduler.M68kDivider, shouldAbort))
             {
                 return -1;
             }
@@ -354,7 +363,7 @@ public sealed class MegaDrive
                 RecordM68kFastPath(pollCycles, ref _m68kThirtyTwoXSystemWordPollFastPathHits, ref _m68kThirtyTwoXSystemWordPollFastPathCycles);
                 ThirtyTwoXDevice thirtyTwoX = Bus.ThirtyTwoX!;
                 MainCpu.AddWaitCycles(pollCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)pollCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -382,7 +391,7 @@ public sealed class MegaDrive
                     out int waitLoopInstructions))
             {
                 RecordM68kFastPath(waitLoopCycles, ref _m68kLongTstBneWaitFastPathHits, ref _m68kLongTstBneWaitFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)waitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -396,7 +405,7 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
                 RecordM68kFastPath(fastCycles, ref _m68kMoveByteFillDbfFastPathHits, ref _m68kMoveByteFillDbfFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)fastCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -414,7 +423,7 @@ public sealed class MegaDrive
                     out int cmpWaitLoopInstructions))
             {
                 RecordM68kFastPath(cmpWaitLoopCycles, ref _m68kLongCmpBeqWaitFastPathHits, ref _m68kLongCmpBeqWaitFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)cmpWaitLoopCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -428,7 +437,7 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardShiftRegisterBitReaderLoop(cycleBudget - consumed, out int bitReaderCycles, out int bitReaderInstructions))
             {
                 RecordM68kFastPath(bitReaderCycles, ref _m68kBitReaderFastPathHits, ref _m68kBitReaderFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)bitReaderCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -442,7 +451,7 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(cycleBudget - consumed, out int wordPairCycles, out int wordPairInstructions))
             {
                 RecordM68kFastPath(wordPairCycles, ref _m68kWordPairCompareFastPathHits, ref _m68kWordPairCompareFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)wordPairCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)wordPairCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -456,7 +465,7 @@ public sealed class MegaDrive
                 MainCpu.TryFastForwardBtstRegisterDbccLoop(cycleBudget - consumed, out int btstDbccCycles, out int btstDbccInstructions))
             {
                 RecordM68kFastPath(btstDbccCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)btstDbccCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)btstDbccCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -477,7 +486,7 @@ public sealed class MegaDrive
                 MainCpu.AddWaitCycles(byteCopyWaitCycles);
                 int elapsedCycles = byteCopyCycles + byteCopyWaitCycles;
                 RecordM68kFastPath(elapsedCycles, ref _m68kMoveByteCopyDbfFastPathHits, ref _m68kMoveByteCopyDbfFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -498,7 +507,7 @@ public sealed class MegaDrive
                 MainCpu.AddWaitCycles(wordFillWaitCycles);
                 int elapsedCycles = wordFillCycles + wordFillWaitCycles;
                 RecordM68kFastPath(elapsedCycles, ref _m68kMoveWordVdpFillDbfFastPathHits, ref _m68kMoveWordVdpFillDbfFastPathCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -512,7 +521,7 @@ public sealed class MegaDrive
             {
                 int idleCycles = Math.Min(cycleBudget - consumed, MaxStoppedM68kIdleBatchCycles);
                 MainCpu.AddWaitCycles(idleCycles);
-                if (!RunThirtyTwoXForMasterCycles((long)idleCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                if (!RunAddOnHardwareForMasterCycles((long)idleCycles * GenesisScheduler.M68kDivider, shouldAbort))
                 {
                     return -1;
                 }
@@ -542,7 +551,7 @@ public sealed class MegaDrive
             int waitCycles = Bus.ConsumeM68kWaitCycles();
             MainCpu.AddWaitCycles(waitCycles);
             int elapsedM68kCycles = m68kCycles + waitCycles;
-            if (!RunThirtyTwoXForMasterCycles((long)elapsedM68kCycles * GenesisScheduler.M68kDivider, shouldAbort))
+            if (!RunAddOnHardwareForMasterCycles((long)elapsedM68kCycles * GenesisScheduler.M68kDivider, shouldAbort))
             {
                 return -1;
             }
@@ -680,6 +689,12 @@ public sealed class MegaDrive
         }
     }
 
+    private bool RunAddOnHardwareForMasterCycles(long masterCycles, Func<bool>? shouldAbort = null)
+    {
+        return RunThirtyTwoXForMasterCycles(masterCycles, shouldAbort) &&
+            RunSegaCdSubCpuForMasterCycles(masterCycles, shouldAbort);
+    }
+
     private bool RunThirtyTwoXForMasterCycles(long masterCycles, Func<bool>? shouldAbort = null)
     {
         if (Bus.ThirtyTwoX is null || masterCycles <= 0)
@@ -736,6 +751,33 @@ public sealed class MegaDrive
             }
         }
 
+        return true;
+    }
+
+    private bool RunSegaCdSubCpuForMasterCycles(long masterCycles, Func<bool>? shouldAbort = null)
+    {
+        SegaCdDevice? segaCd = Bus.SegaCd;
+        if (segaCd is null || masterCycles <= 0 || !segaCd.SubCpuRunnable)
+        {
+            return true;
+        }
+
+        _segaCdSubCpuCycleCarry += masterCycles * (SegaCdHardwareProfile.SubCpuClockHz / (double)Scheduler.MasterClock);
+        int cycles = (int)_segaCdSubCpuCycleCarry;
+        if (cycles < SegaCdMinimumCycleBatch)
+        {
+            return true;
+        }
+
+        _segaCdSubCpuCycleCarry -= cycles;
+        _segaCdSubCpuScheduledCycles += cycles;
+        int executed = segaCd.RunSubCpuCycles(cycles, shouldAbort);
+        if (executed < 0)
+        {
+            return false;
+        }
+
+        _segaCdSubCpuExecutedCycles += executed;
         return true;
     }
 
@@ -955,7 +997,8 @@ public sealed class MegaDrive
             _audioFilterLeft,
             _audioFilterRight,
             _audioFadeInSamplesRemaining,
-            _thirtyTwoXInstructionCarry);
+            _thirtyTwoXInstructionCarry,
+            _segaCdSubCpuCycleCarry);
     }
 
     public void RestoreState(MegaDriveState state)
@@ -979,6 +1022,7 @@ public sealed class MegaDrive
         _audioFilterRight = state.AudioFilterRight;
         _audioFadeInSamplesRemaining = state.AudioFadeInSamplesRemaining;
         _thirtyTwoXInstructionCarry = state.ThirtyTwoXInstructionCarry;
+        _segaCdSubCpuCycleCarry = state.SegaCdSubCpuCycleCarry;
     }
 
     private static double LowPassAlpha(double cutoffHz, int sampleRate)
@@ -1030,7 +1074,8 @@ public sealed class MegaDrive
         double AudioFilterLeft,
         double AudioFilterRight,
         int AudioFadeInSamplesRemaining,
-        double ThirtyTwoXInstructionCarry);
+        double ThirtyTwoXInstructionCarry,
+        double SegaCdSubCpuCycleCarry);
 
     public readonly record struct Z80InstructionTrace(long MasterCycle, ushort Pc, byte Opcode, int Cycles, ushort NextPc, byte A, byte B, byte C, byte D, byte E, byte H, byte L, ushort IX, ushort IY, bool BusRequested, bool ResetAsserted);
     public readonly record struct FramePerformanceCounters(long VdpTicks, long M68kTicks, long Z80Ticks, long YmTimerTicks, long VdpAllocatedBytes, long M68kAllocatedBytes, long Z80AllocatedBytes, long YmTimerAllocatedBytes);

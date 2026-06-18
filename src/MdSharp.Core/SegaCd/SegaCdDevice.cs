@@ -4,6 +4,18 @@ namespace MdSharp.Core.SegaCd;
 
 public sealed class SegaCdDevice
 {
+    private const byte MainControlSubResetRelease = 0x01;
+    private const byte MainControlSubBusRequest = 0x02;
+    private const byte CddHockBit = 0x04;
+    private const uint WordRamModeLowOffset = 0x03;
+    private const uint CddControlOffset = 0x37;
+    private const uint CddStatusStart = 0x38;
+    private const uint CddCommandStart = 0x42;
+    private const uint SubToMainFlagOffset = 0x0F;
+    private const int CddPacketBytes = 10;
+    private const int CddInterruptLevel = 4;
+    private const double CddInterruptHz = 75.0;
+
     private readonly byte[] _bios;
     private readonly byte[] _programRam = new byte[SegaCdHardwareProfile.ProgramRamBytes];
     private readonly byte[] _wordRam = new byte[SegaCdHardwareProfile.WordRamBytes];
@@ -11,6 +23,9 @@ public sealed class SegaCdDevice
     private readonly byte[] _pcmRam = new byte[SegaCdHardwareProfile.PcmRamBytes];
     private readonly byte[] _mainRegisters = new byte[SegaCdHardwareProfile.RegisterBytes];
     private readonly SegaCdSubBus _subBus;
+    private double _cddInterruptCycleCarry;
+    private byte _cddStatusCode;
+    private byte _pendingSubInterruptLevels;
 
     public SegaCdDevice(ReadOnlyMemory<byte> bios, SegaCdRegion region, DiscImage? disc = null)
     {
@@ -31,6 +46,9 @@ public sealed class SegaCdDevice
     public DiscImage? Disc { get; }
     public M68kCpu SubCpu { get; }
     public bool SubBiosMapped { get; private set; } = true;
+    public bool SubCpuResetReleased { get; private set; }
+    public bool SubCpuBusRequested { get; private set; }
+    public bool SubCpuRunnable => SubCpuResetReleased && !SubCpuBusRequested;
     public ReadOnlySpan<byte> Bios => _bios;
     public ReadOnlySpan<byte> ProgramRam => _programRam;
     public ReadOnlySpan<byte> WordRam => _wordRam;
@@ -45,6 +63,11 @@ public sealed class SegaCdDevice
         Array.Clear(_pcmRam);
         Array.Clear(_mainRegisters);
         SubBiosMapped = true;
+        SubCpuResetReleased = false;
+        SubCpuBusRequested = false;
+        _cddInterruptCycleCarry = 0.0;
+        _cddStatusCode = Disc is null ? (byte)0x05 : (byte)0x04;
+        _pendingSubInterruptLevels = 0;
         SubCpu.Reset();
     }
 
@@ -105,7 +128,14 @@ public sealed class SegaCdDevice
 
     public byte ReadMainRegisterByte(uint offset)
     {
-        return _mainRegisters[offset & (SegaCdHardwareProfile.RegisterBytes - 1)];
+        uint maskedOffset = offset & (SegaCdHardwareProfile.RegisterBytes - 1);
+        byte value = _mainRegisters[maskedOffset];
+        if (maskedOffset == WordRamModeLowOffset)
+        {
+            value |= 0x01;
+        }
+
+        return value;
     }
 
     public ushort ReadMainRegisterWord(uint offset)
@@ -113,15 +143,56 @@ public sealed class SegaCdDevice
         return (ushort)((ReadMainRegisterByte(offset) << 8) | ReadMainRegisterByte(offset + 1));
     }
 
+    public byte ReadSubRegisterByte(uint offset)
+    {
+        uint maskedOffset = offset & (SegaCdHardwareProfile.RegisterBytes - 1);
+        byte value = _mainRegisters[maskedOffset];
+        if (maskedOffset == 1 && SubCpuResetReleased)
+        {
+            value |= MainControlSubResetRelease;
+        }
+
+        return value;
+    }
+
     public void WriteMainRegisterByte(uint offset, byte value)
     {
-        _mainRegisters[offset & (SegaCdHardwareProfile.RegisterBytes - 1)] = value;
+        uint maskedOffset = offset & (SegaCdHardwareProfile.RegisterBytes - 1);
+        _mainRegisters[maskedOffset] = value;
+        if (maskedOffset == 1)
+        {
+            ApplyMainControlLowByte(value);
+        }
     }
 
     public void WriteMainRegisterWord(uint offset, ushort value)
     {
         WriteMainRegisterByte(offset, (byte)(value >> 8));
         WriteMainRegisterByte(offset + 1, (byte)value);
+    }
+
+    public void WriteSubRegisterByte(uint offset, byte value)
+    {
+        uint maskedOffset = offset & (SegaCdHardwareProfile.RegisterBytes - 1);
+        _mainRegisters[maskedOffset] = value;
+        if (maskedOffset == CddControlOffset && (value & CddHockBit) != 0)
+        {
+            RefreshCddStatusRegisters();
+            RaiseSubToMainFlag(0x01);
+            QueueSubInterrupt(CddInterruptLevel);
+            return;
+        }
+
+        if (maskedOffset == CddCommandStart + CddPacketBytes - 1)
+        {
+            ProcessCddCommand();
+        }
+    }
+
+    public void WriteSubRegisterWord(uint offset, ushort value)
+    {
+        WriteSubRegisterByte(offset, (byte)(value >> 8));
+        WriteSubRegisterByte(offset + 1, (byte)value);
     }
 
     public SegaCdState CaptureState()
@@ -133,6 +204,11 @@ public sealed class SegaCdDevice
             (byte[])_pcmRam.Clone(),
             (byte[])_mainRegisters.Clone(),
             SubBiosMapped,
+            SubCpuResetReleased,
+            SubCpuBusRequested,
+            _cddInterruptCycleCarry,
+            _cddStatusCode,
+            _pendingSubInterruptLevels,
             SubCpu.CaptureState());
     }
 
@@ -144,13 +220,192 @@ public sealed class SegaCdDevice
         CopyInto(state.PcmRam, _pcmRam);
         CopyInto(state.MainRegisters, _mainRegisters);
         SubBiosMapped = state.SubBiosMapped;
+        SubCpuResetReleased = state.SubCpuResetReleased;
+        SubCpuBusRequested = state.SubCpuBusRequested;
+        _cddInterruptCycleCarry = state.CddInterruptCycleCarry;
+        _cddStatusCode = state.CddStatusCode;
+        _pendingSubInterruptLevels = state.PendingSubInterruptLevels;
         SubCpu.RestoreState(state.SubCpu);
+    }
+
+    public int RunSubCpuCycles(int cycleBudget, Func<bool>? shouldAbort = null)
+    {
+        if (cycleBudget <= 0 || !SubCpuRunnable)
+        {
+            return 0;
+        }
+
+        int executed = 0;
+        while (executed < cycleBudget)
+        {
+            if (shouldAbort?.Invoke() == true)
+            {
+                return -1;
+            }
+
+            ServicePendingSubInterrupts();
+            int cycles = SubCpu.Step();
+            if (cycles <= 0)
+            {
+                break;
+            }
+
+            executed += cycles;
+        }
+
+        AdvanceCddInterrupts(executed);
+        return executed;
     }
 
     private static void CopyInto(byte[] source, byte[] destination)
     {
         Array.Clear(destination);
         Array.Copy(source, destination, Math.Min(source.Length, destination.Length));
+    }
+
+    private void ApplyMainControlLowByte(byte value)
+    {
+        bool nextResetReleased = (value & MainControlSubResetRelease) != 0;
+        bool resetRisingEdge = !SubCpuResetReleased && nextResetReleased;
+        SubCpuResetReleased = nextResetReleased;
+        SubCpuBusRequested = (value & MainControlSubBusRequest) != 0;
+        if (resetRisingEdge)
+        {
+            SubBiosMapped = false;
+            SubCpu.Reset();
+        }
+        else if (!SubCpuResetReleased)
+        {
+            SubBiosMapped = true;
+        }
+    }
+
+    private void ProcessCddCommand()
+    {
+        int command = ((_mainRegisters[CddCommandStart] & 0x0F) << 4) | (_mainRegisters[CddCommandStart + 1] & 0x0F);
+        int parameter = (_mainRegisters[CddCommandStart + 3] & 0x0F);
+        switch (command)
+        {
+            case 0x00:
+                break;
+            case 0x01:
+                _cddStatusCode = Disc is null ? (byte)0x05 : (byte)0x09;
+                break;
+            case 0x02:
+                RefreshCddStatusRegisters(Disc is null ? (byte)0x05 : (byte)0x04, (byte)parameter);
+                QueueCddInterruptIfEnabled();
+                return;
+            case 0x03:
+                _cddStatusCode = Disc is null ? (byte)0x05 : (byte)0x01;
+                break;
+            case 0x04:
+                _cddStatusCode = Disc is null ? (byte)0x05 : (byte)0x02;
+                break;
+            case 0x06:
+                _cddStatusCode = Disc is null ? (byte)0x05 : (byte)0x04;
+                break;
+            case 0x0C:
+                _cddStatusCode = Disc is null ? (byte)0x0B : (byte)0x04;
+                break;
+            case 0x0D:
+                _cddStatusCode = 0x05;
+                break;
+        }
+
+        RefreshCddStatusRegisters();
+        RaiseSubToMainFlag(0x01);
+        QueueCddInterruptIfEnabled();
+    }
+
+    private void RefreshCddStatusRegisters(byte? statusOverride = null, byte parameter = 0)
+    {
+        byte status = statusOverride ?? _cddStatusCode;
+        ClearCddStatusBytes();
+        _mainRegisters[CddStatusStart] = (byte)((status >> 4) & 0x0F);
+        _mainRegisters[CddStatusStart + 1] = (byte)(status & 0x0F);
+        _mainRegisters[CddStatusStart + 2] = 0;
+        _mainRegisters[CddStatusStart + 3] = parameter;
+        WriteCddChecksum(CddStatusStart);
+    }
+
+    private void ClearCddStatusBytes()
+    {
+        for (int i = 0; i < CddPacketBytes; i++)
+        {
+            _mainRegisters[CddStatusStart + i] = 0;
+        }
+    }
+
+    private void WriteCddChecksum(uint packetStart)
+    {
+        int sum = 0;
+        for (int i = 0; i < CddPacketBytes - 1; i++)
+        {
+            sum += _mainRegisters[packetStart + i] & 0x0F;
+        }
+
+        _mainRegisters[packetStart + CddPacketBytes - 2] = 0;
+        _mainRegisters[packetStart + CddPacketBytes - 1] = (byte)((~sum) & 0x0F);
+    }
+
+    private void AdvanceCddInterrupts(int executedCycles)
+    {
+        if (executedCycles <= 0 || (_mainRegisters[CddControlOffset] & CddHockBit) == 0)
+        {
+            return;
+        }
+
+        _cddInterruptCycleCarry += executedCycles;
+        double cyclesPerInterrupt = SegaCdHardwareProfile.SubCpuClockHz / CddInterruptHz;
+        while (_cddInterruptCycleCarry >= cyclesPerInterrupt)
+        {
+            _cddInterruptCycleCarry -= cyclesPerInterrupt;
+            RefreshCddStatusRegisters();
+            QueueSubInterrupt(CddInterruptLevel);
+        }
+    }
+
+    private void QueueCddInterruptIfEnabled()
+    {
+        if ((_mainRegisters[CddControlOffset] & CddHockBit) != 0)
+        {
+            QueueSubInterrupt(CddInterruptLevel);
+        }
+    }
+
+    private void RaiseSubToMainFlag(byte mask)
+    {
+        _mainRegisters[SubToMainFlagOffset] |= mask;
+    }
+
+    private void QueueSubInterrupt(int level)
+    {
+        if (level is <= 0 or > 7)
+        {
+            return;
+        }
+
+        _pendingSubInterruptLevels |= (byte)(1 << level);
+    }
+
+    private void ServicePendingSubInterrupts()
+    {
+        int mask = (SubCpu.SR >> 8) & 0x07;
+        for (int level = 7; level > mask; level--)
+        {
+            byte bit = (byte)(1 << level);
+            if ((_pendingSubInterruptLevels & bit) == 0)
+            {
+                continue;
+            }
+
+            if (SubCpu.RequestInterrupt(level))
+            {
+                _pendingSubInterruptLevels &= (byte)~bit;
+            }
+
+            return;
+        }
     }
 
     public sealed record SegaCdState(
@@ -160,5 +415,10 @@ public sealed class SegaCdDevice
         byte[] PcmRam,
         byte[] MainRegisters,
         bool SubBiosMapped,
+        bool SubCpuResetReleased,
+        bool SubCpuBusRequested,
+        double CddInterruptCycleCarry,
+        byte CddStatusCode,
+        byte PendingSubInterruptLevels,
         M68kCpu.M68kState SubCpu);
 }

@@ -13,7 +13,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 68;
+    private const int Version = 69;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -41,6 +41,7 @@ public static class SaveStateSerializer
         writer.Write(state.AudioFilterRight);
         writer.Write(state.AudioFadeInSamplesRemaining);
         writer.Write(state.ThirtyTwoXInstructionCarry);
+        writer.Write(state.SegaCdSubCpuCycleCarry);
     }
 
     public static void Load(MegaDrive machine, string path)
@@ -71,7 +72,8 @@ public static class SaveStateSerializer
             version >= 17 ? reader.ReadDouble() : 0.0,
             version >= 17 ? reader.ReadDouble() : 0.0,
             version >= 27 ? reader.ReadInt32() : 0,
-            version >= 40 ? reader.ReadDouble() : 0.0);
+            version >= 40 ? reader.ReadDouble() : 0.0,
+            version >= 69 ? reader.ReadDouble() : 0.0);
         machine.RestoreState(state);
     }
 

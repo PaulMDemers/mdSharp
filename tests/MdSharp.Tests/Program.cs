@@ -20,6 +20,8 @@ Run("Sega CD CUE disc image parsing", SegaCdCueDiscImageParsing);
 Run("Sega CD BIOS discovery", SegaCdBiosDiscovery);
 Run("Sega CD device shell", SegaCdDeviceShell);
 Run("Sega CD sub CPU reset and state", SegaCdSubCpuResetAndState);
+Run("Sega CD main control register", SegaCdMainControlRegister);
+Run("Sega CD CDD status handshake", SegaCdCddStatusHandshake);
 Run("Sega CD main bus mapping", SegaCdMainBusMapping);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
@@ -601,6 +603,69 @@ void SegaCdSubCpuResetAndState()
     AssertEqual(0x0000_0200u, device.SubCpu.PC);
 }
 
+void SegaCdMainControlRegister()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    AssertTrue(!device.SubCpuResetReleased, "Sub CPU should start held in reset");
+    AssertTrue(!device.SubCpuRunnable, "Held reset should keep sub CPU unrunnable");
+    WriteLongToSegaCdPrg(device, 0, 0x00FE_1000);
+    WriteLongToSegaCdPrg(device, 4, 0x0000_0400);
+
+    device.WriteMainRegisterByte(1, 0x01);
+    AssertTrue(device.SubCpuResetReleased, "Control bit 0 should release sub CPU reset");
+    AssertTrue(device.SubCpuRunnable, "Released reset without bus request should run sub CPU");
+    AssertTrue(!device.SubBiosMapped, "Release should boot the sub CPU from PRG RAM");
+    AssertEqual((byte)0x01, device.ReadSubRegisterByte(1));
+    AssertEqual(0x00FE_1000u, device.SubCpu.A[7]);
+    AssertEqual(0x0000_0400u, device.SubCpu.PC);
+    device.WriteSubRegisterByte(1, 0x00);
+    AssertEqual((byte)0x01, (byte)(device.ReadSubRegisterByte(1) & 0x01));
+
+    device.WriteMainRegisterByte(1, 0x03);
+    AssertTrue(device.SubCpuBusRequested, "Control bit 1 should request the sub CPU bus");
+    AssertTrue(!device.SubCpuRunnable, "Bus request should pause the sub CPU");
+
+    SegaCdDevice.SegaCdState state = device.CaptureState();
+    device.WriteMainRegisterByte(1, 0x00);
+    device.RestoreState(state);
+    AssertTrue(device.SubCpuResetReleased, "Restore should preserve reset release state");
+    AssertTrue(device.SubCpuBusRequested, "Restore should preserve bus request state");
+}
+
+void SegaCdCddStatusHandshake()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    device.WriteSubRegisterByte(0x37, 0x04);
+    AssertEqual((byte)0x04, (byte)(device.ReadSubRegisterByte(0x37) & 0x04));
+    AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x38));
+    AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x39));
+    AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+    AssertEqual((byte)0x01, (byte)(device.ReadMainRegisterByte(0x0F) & 0x01));
+
+    device.WriteSubRegisterByte(0x42, 0x00);
+    device.WriteSubRegisterByte(0x43, 0x0D);
+    for (uint offset = 0x44; offset <= 0x4A; offset++)
+    {
+        device.WriteSubRegisterByte(offset, 0x00);
+    }
+
+    device.WriteSubRegisterByte(0x4B, 0x02);
+    AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x39));
+    AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+    AssertTrue(!device.SubCpuResetReleased, "Sub-side register writes must not release reset");
+}
+
 void SegaCdMainBusMapping()
 {
     byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
@@ -637,6 +702,7 @@ void SegaCdMainBusMapping()
     machine.Bus.WriteWord(SegaCdHardwareProfile.MainRegisterStart + 0x10, 0x9ABC);
     AssertEqual((ushort)0x9ABC, machine.Bus.ReadWord(SegaCdHardwareProfile.MainRegisterStart + 0x10));
     AssertEqual((ushort)0x9ABC, segaCd.ReadMainRegisterWord(0x10));
+    AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(SegaCdHardwareProfile.MainRegisterStart + 0x03) & 0x01));
 }
 
 void ThirtyTwoXDeviceShell()
@@ -15429,6 +15495,25 @@ void WriteLong(byte[] data, int offset, uint value)
 {
     WriteWord(data, offset, (ushort)(value >> 16));
     WriteWord(data, offset + 2, (ushort)value);
+}
+
+void WriteLongToSegaCdPrg(SegaCdDevice device, uint offset, uint value)
+{
+    device.WriteProgramRamByte(offset, (byte)(value >> 24));
+    device.WriteProgramRamByte(offset + 1, (byte)(value >> 16));
+    device.WriteProgramRamByte(offset + 2, (byte)(value >> 8));
+    device.WriteProgramRamByte(offset + 3, (byte)value);
+}
+
+byte ExpectedCddChecksum(SegaCdDevice device, uint packetStart)
+{
+    int sum = 0;
+    for (uint offset = packetStart; offset < packetStart + 9; offset++)
+    {
+        sum += device.ReadSubRegisterByte(offset) & 0x0F;
+    }
+
+    return (byte)((~sum) & 0x0F);
 }
 
 void EmitWord(byte[] data, ref int offset, ushort value)

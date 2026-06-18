@@ -9,6 +9,7 @@ public static class SegaCdHardwareProfile
     public const int BackupRamBytes = 8 * 1024;
     public const int PcmRamBytes = 64 * 1024;
     public const int RegisterBytes = 0x200;
+    public const int SubCpuClockHz = 12_500_000;
     public const uint MainBiosStart = 0x000000;
     public const uint MainBiosEndInclusive = MainBiosStart + BiosSize - 1;
     public const uint MainProgramRamWindowStart = 0x020000;

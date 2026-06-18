@@ -46,6 +46,7 @@ segacd_roms/*
 !segacd_roms/.gitkeep
 Sega CD roms/
 Sega Mega CD roms/
+sega_cd_games/
 TestRoms/
 !TestRoms/
 TestRoms/*
