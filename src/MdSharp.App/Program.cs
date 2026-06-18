@@ -50,6 +50,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --32x-comm-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [max-lines] [offset-start] [offset-end] [all|writes]");
     Console.WriteLine("  mdsharp --32x-diagnostic-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-events]");
     Console.WriteLine("  mdsharp --32x-vdp-mode-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [start-frame] [max-lines]");
+    Console.WriteLine("  mdsharp --vdp-dma-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-sdram-watch <rom-file> <output.csv> [frames] [instructions-per-frame] [offset-start] [offset-end] [start-frame] [max-lines]");
     Console.WriteLine("  mdsharp --32x-inspect <rom-file> [frames] [instructions-per-frame] [address] [words]");
     Console.WriteLine("  mdsharp --32x-inspect-state <rom-file> <state.mdss> [frames] [instructions-per-frame] [address] [words]");
@@ -438,6 +439,20 @@ if (args[0].Equals("--32x-vdp-mode-trace", StringComparison.OrdinalIgnoreCase))
     int startFrame = args.Length > 5 && int.TryParse(args[5], out int parsedStartFrame) ? parsedStartFrame : 0;
     int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? parsedMaxLines : 10_000;
     TraceThirtyTwoXVdpMode(args[1], args[2], frames, instructionsPerFrame, startFrame, maxLines);
+    return;
+}
+
+if (args[0].Equals("--vdp-dma-trace", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --vdp-dma-trace <rom-file> <output.csv> [frames] [instructions-per-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    TraceVdpDma(args[1], args[2], frames, instructionsPerFrame);
     return;
 }
 
@@ -4394,6 +4409,50 @@ ushort SnapshotVdpRegister(ThirtyTwoXDevice device, ushort offset)
     finally
     {
         device.VdpRegisterAccessObserver = observer;
+    }
+}
+
+void TraceVdpDma(string romPath, string outputCsv, int frames, int instructionsPerFrame)
+{
+    MegaDrive machine = CreateMachine(romPath);
+    machine.Reset();
+
+    int completedFrames = 0;
+    try
+    {
+        for (; completedFrames < frames; completedFrames++)
+        {
+            machine.RunFrame(instructionsPerFrame);
+        }
+    }
+    catch (M68kException ex)
+    {
+        Console.WriteLine($"Execution stopped while tracing VDP DMA: {ex.Message}");
+    }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputCsv)) ?? ".");
+    using StreamWriter writer = new(outputCsv, false, Encoding.UTF8);
+    writer.WriteLine("index,mode,operation,code,source,destination,words");
+    int index = 0;
+    foreach (Vdp.DmaEvent dma in machine.Vdp.DmaEvents)
+    {
+        writer.WriteLine(string.Join(
+            ',',
+            index.ToString(CultureInfo.InvariantCulture),
+            dma.Mode.ToString(CultureInfo.InvariantCulture),
+            Csv(dma.Operation),
+            $"${dma.Code:X2}",
+            $"${dma.SourceAddress:X6}",
+            $"${dma.DestinationAddress:X4}",
+            dma.LengthWords.ToString(CultureInfo.InvariantCulture)));
+        index++;
+    }
+
+    Console.WriteLine($"Wrote {index:N0} VDP DMA event(s) after {completedFrames:N0} frame(s) to {Path.GetFullPath(outputCsv)}");
+    Console.WriteLine(FormatVdpState(machine.Vdp));
+    if (machine.Bus.ThirtyTwoX is ThirtyTwoXDevice thirtyTwoX)
+    {
+        Console.WriteLine($"32X sys={FormatThirtyTwoXWords(thirtyTwoX, system: true, 0x00, 0x20)}");
     }
 }
 

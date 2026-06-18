@@ -1068,7 +1068,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < 0xA0_0000)
         {
-            AddM68kWaitCycles(_thirtyTwoX.ClaimM68kCartridgeBus(1, CurrentMasterCycle));
+            AddM68kWaitCycles(4 + _thirtyTwoX.ClaimM68kCartridgeBus(1, CurrentMasterCycle));
             value = Cartridge.ReadByte(_thirtyTwoX.MapM68kCartridgeAddress(address));
             return true;
         }
@@ -1226,7 +1226,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address is >= ThirtyTwoXHardwareProfile.M68kCartridgeFixedStart and < 0xA0_0000)
         {
-            AddM68kWaitCycles(_thirtyTwoX.ClaimM68kCartridgeBus(2, CurrentMasterCycle));
+            AddM68kWaitCycles(8 + _thirtyTwoX.ClaimM68kCartridgeBus(2, CurrentMasterCycle));
             value = Cartridge.ReadWord(_thirtyTwoX.MapM68kCartridgeAddress(address));
             return true;
         }

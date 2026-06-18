@@ -2,7 +2,7 @@
 
 All notable project changes are tracked here. mdSharp uses semantic version tags for public releases.
 
-## Unreleased
+## 0.3.0 - 2026-06-17
 
 - Started the `0.3.0` development cycle.
 - Retuned the default PSG mix level against the local Sonic/Streets MAME audio guardrail suite.
@@ -15,6 +15,14 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Returned high unused bits from the Z80 bus request status byte so byte-sized whole-register polls work; `Shadow of the Beast` now reaches its intro splash.
 - Refreshed the 571-ROM local compatibility dashboard and near-blank follow-up; all runs completed `ok`, 41 of 42 near-blank samples became visible later, and the remaining `Zany Golf` case is input-gated.
 - Added a manifest-driven `--post-menu-compat` CLI pass for scripted title/menu/gameplay checkpoints, plus a seeded high-value sample manifest.
+- Added experimental 32X support behind developer options, including `.32x` loading, 32X bus/register mapping, MARS user-header boot, dual SH-2 execution, SDRAM/framebuffer/palette paths, packed/direct/RLE VDP compositing, PWM scaffolding, and focused 32X diagnostics.
+- Added local 32X BIOS discovery paths for diagnostic testing without redistributing BIOS files.
+- Improved 32X SDK command handshakes, SH-2 fast paths, FIFO/DREQ handling, framebuffer priority/compositing behavior, and compatibility in selected 32X titles.
+- Added Pico playback tooling and prototype firmware for converting mdSharp `.mdmovie` recordings into Raspberry Pi Pico controller-playback data.
+
+## Unreleased
+
+- Pivot to Sega CD research and staged implementation planning.
 
 ## 0.2.0 - 2026-05-18
 

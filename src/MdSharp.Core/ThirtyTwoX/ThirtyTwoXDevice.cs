@@ -1173,6 +1173,15 @@ public sealed class ThirtyTwoXDevice
 
             if (IsSh2FastPathGroupEnabled("memstore") &&
                 (nextOpcode & 0xF00F) == 0x6005 &&
+                TryFastForwardMovWordPairCopyLoop(cpu, cpuIndex, cycleBudget, out fastCycles))
+            {
+                RecordSh2FastPath(fastCycles);
+                AdvanceSh2InternalTimers(cpuIndex, fastCycles);
+                return fastCycles;
+            }
+
+            if (IsSh2FastPathGroupEnabled("memstore") &&
+                (nextOpcode & 0xF00F) == 0x6005 &&
                 cpu.TryFastForwardMovWPostIncStoreAddImmediateDtBfLoop(
                     Math.Min(cycleBudget, 7 * Sh2FrameBufferWordFillLoopMaxBurstIterations),
                     _sh2WordReaders[cpuIndex],
@@ -2621,6 +2630,100 @@ public sealed class ThirtyTwoXDevice
         return true;
     }
 
+    private bool TryFastForwardMovWordPairCopyLoop(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
+    {
+        const int CyclesPerIteration = 13;
+        if (cycleBudget < CyclesPerIteration ||
+            !TryPeekSh2Word(cpu.PC + 0x00, cpuIndex, out ushort op0) ||
+            !TryPeekSh2Word(cpu.PC + 0x02, cpuIndex, out ushort op1) ||
+            !TryPeekSh2Word(cpu.PC + 0x04, cpuIndex, out ushort op2) ||
+            !TryPeekSh2Word(cpu.PC + 0x06, cpuIndex, out ushort op3) ||
+            !TryPeekSh2Word(cpu.PC + 0x08, cpuIndex, out ushort op4) ||
+            !TryPeekSh2Word(cpu.PC + 0x0A, cpuIndex, out ushort op5) ||
+            !TryPeekSh2Word(cpu.PC + 0x0C, cpuIndex, out ushort op6) ||
+            !TryPeekSh2Word(cpu.PC + 0x0E, cpuIndex, out ushort op7) ||
+            !TryPeekSh2Word(cpu.PC + 0x10, cpuIndex, out ushort op8) ||
+            (op0 & 0xF00F) != 0x6005 ||
+            (op1 & 0xF00F) != 0x6005 ||
+            (op2 & 0xF00F) != 0x2001 ||
+            (op4 & 0xF00F) != 0x2001 ||
+            (op3 & 0xF0FF) != 0x7002 ||
+            (op5 & 0xF0FF) != 0x7002 ||
+            (op6 & 0xF0FF) != 0x7002 ||
+            (op7 & 0xF0FF) != 0x4010 ||
+            (op8 & 0xFF00) != 0x8B00)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        int sourceRegister = (op0 >> 4) & 0x0F;
+        int firstLoadRegister = (op0 >> 8) & 0x0F;
+        int secondLoadRegister = (op1 >> 8) & 0x0F;
+        int firstStoreSource = (op2 >> 4) & 0x0F;
+        int firstStoreRegister = (op2 >> 8) & 0x0F;
+        int secondStoreSource = (op4 >> 4) & 0x0F;
+        int secondStoreRegister = (op4 >> 8) & 0x0F;
+        int destinationRegister = (op3 >> 8) & 0x0F;
+        int secondAddRegister = (op5 >> 8) & 0x0F;
+        int sideAddRegister = (op6 >> 8) & 0x0F;
+        int countRegister = (op7 >> 8) & 0x0F;
+        if (((op1 >> 4) & 0x0F) != sourceRegister ||
+            firstStoreSource != firstLoadRegister ||
+            secondStoreSource != secondLoadRegister ||
+            firstStoreRegister != destinationRegister ||
+            secondStoreRegister != destinationRegister ||
+            secondAddRegister != destinationRegister ||
+            sideAddRegister == destinationRegister ||
+            countRegister == sourceRegister ||
+            countRegister == destinationRegister ||
+            cpu.R[countRegister] == 0)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        uint iterations = Math.Min(cpu.R[countRegister], (uint)(cycleBudget / CyclesPerIteration));
+        if (iterations == 0)
+        {
+            cycles = 0;
+            return false;
+        }
+
+        Sh2Cpu.Sh2State state = cpu.CaptureState();
+        uint[] registers = (uint[])state.R.Clone();
+        ushort lastFirst = 0;
+        ushort lastSecond = 0;
+        for (uint i = 0; i < iterations; i++)
+        {
+            lastFirst = ReadSh2Word(registers[sourceRegister], cpuIndex);
+            registers[sourceRegister] += 2;
+            lastSecond = ReadSh2Word(registers[sourceRegister], cpuIndex);
+            registers[sourceRegister] += 2;
+            WriteSh2Word(registers[destinationRegister], lastFirst, cpuIndex);
+            registers[destinationRegister] += 2;
+            WriteSh2Word(registers[destinationRegister], lastSecond, cpuIndex);
+            registers[destinationRegister] += 2;
+            registers[sideAddRegister] += 2;
+            registers[countRegister]--;
+        }
+
+        registers[firstLoadRegister] = lastFirst;
+        registers[secondLoadRegister] = lastSecond;
+        bool complete = registers[countRegister] == 0;
+        cycles = checked((int)(iterations * CyclesPerIteration));
+        cpu.RestoreState(state with
+        {
+            R = registers,
+            PC = complete ? cpu.PC + 0x12 : cpu.PC,
+            SR = complete ? state.SR | 1u : state.SR & ~1u,
+            Cycles = state.Cycles + cycles,
+            LastOpcode = op8,
+            LastOpcodePc = cpu.PC + 0x10,
+        });
+        return true;
+    }
+
     private bool TryFastForwardSdkWordStreamHandshakeLoop(Sh2Cpu cpu, int cpuIndex, int cycleBudget, out int cycles)
     {
         const uint LoopPc = 0x0600_1C5E;
@@ -2659,10 +2762,11 @@ public sealed class ThirtyTwoXDevice
         uint source = cpu.R[1];
         uint count = cpu.R[2];
         uint skippedWords = 0;
-        if (!IsSdkHostCommunicationCommandActive() &&
-            count > 1 &&
+        bool activeHostCommandStream = IsSdkHostCommunicationCommandActive();
+        if (count > 1 &&
             TryPeekSh2Word(source, cpuIndex, out ushort firstWord) &&
-            IsSkippableSdkWordStreamFiller(firstWord))
+            IsSkippableSdkWordStreamFiller(firstWord) &&
+            (!activeHostCommandStream || firstWord == 0xFFFF))
         {
             uint budgetIterations = (uint)Math.Max(1, cycleBudget / CyclesPerIteration);
             uint maxSkip = Math.Min(Math.Min(count - 1, budgetIterations - 1), (uint)(MaxZeroBurstIterations - 1));
@@ -2686,17 +2790,31 @@ public sealed class ThirtyTwoXDevice
 
         ushort word = ReadSh2Word(source, cpuIndex);
         uint remaining = count - 1;
-        bool keepCompletedStreamDrainActive = remaining > 0 &&
+        bool completesActiveHostCommandStream = activeHostCommandStream && word == 0xFFFF;
+        bool keepCompletedStreamDrainActive = !activeHostCommandStream &&
+            remaining > 0 &&
             (_sdkWordStreamTerminatorPendingYieldRelease ||
                 (word == 0xFFFF && ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0));
         WriteSh2SystemRegisterWord(comm, word, cpuIndex);
-        WriteSh2SystemRegisterWord((ushort)(comm + 0x0A), 1, cpuIndex);
-        if (keepCompletedStreamDrainActive)
+        if (completesActiveHostCommandStream && ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0)
         {
             _sdkWordStreamTerminatorPendingYieldRelease = true;
         }
 
-        TryReleaseFastForwardedSdkSh2YieldSignal(cpuIndex, keepCompletedStreamDrainActive);
+        WriteSh2SystemRegisterWord((ushort)(comm + 0x0A), 1, cpuIndex);
+        if (completesActiveHostCommandStream && ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0)
+        {
+            TryReleaseFastForwardedSdkSh2YieldSignal(cpuIndex);
+        }
+        else if (keepCompletedStreamDrainActive)
+        {
+            _sdkWordStreamTerminatorPendingYieldRelease = true;
+        }
+
+        if (!activeHostCommandStream)
+        {
+            TryReleaseFastForwardedSdkSh2YieldSignal(cpuIndex, keepCompletedStreamDrainActive);
+        }
         source += 2;
 
         Sh2Cpu.Sh2State state = cpu.CaptureState();
@@ -2752,6 +2870,39 @@ public sealed class ThirtyTwoXDevice
         const int CyclesPerPoll = 4;
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
         ushort busy = ReadBigEndianWord(_systemRegisters, comm + 0x0A);
+        if (cycleBudget >= CyclesPerPoll &&
+            cpu.PC == LoopPc &&
+            cpu.GBR == ThirtyTwoXHardwareProfile.Sh2SystemRegister(0) &&
+            busy != 0 &&
+            ReadBigEndianWord(_systemRegisters, comm) == 0xFFFF &&
+            ReadBigEndianWord(_systemRegisters, comm + 0x0C) == 0 &&
+            ReadBigEndianWord(_systemRegisters, comm + 0x0E) == 0 &&
+            IsSdkCommandDispatchTablePresent() &&
+            TryPeekSh2Word(LoopPc + 0x00, cpuIndex, out ushort staleOp0) && staleOp0 == LoadBusyOpcode &&
+            TryPeekSh2Word(LoopPc + 0x02, cpuIndex, out ushort staleOp1) && staleOp1 == CompareOpcode &&
+            TryPeekSh2Word(LoopPc + 0x04, cpuIndex, out ushort staleOp2) && staleOp2 == BusyBranchOpcode)
+        {
+            WriteBigEndianWord(_systemRegisters, comm + 0x0A, 0);
+            _sdkWordStreamTerminatorPendingYieldRelease = false;
+            ClearM68kCommunicationTrackingForWord(0x0A);
+            TraceSystemRegisterAccess(cpuIndex == 0 ? "MSH2" : "SSH2", "W16", (ushort)(comm + 0x0A), 0);
+
+            Sh2Cpu.Sh2State staleState = cpu.CaptureState();
+            uint[] staleRegisters = (uint[])staleState.R.Clone();
+            staleRegisters[0] = busy;
+            cycles = CyclesPerPoll;
+            cpu.RestoreState(staleState with
+            {
+                R = staleRegisters,
+                PC = LoopPc,
+                SR = staleState.SR & ~1u,
+                Cycles = staleState.Cycles + cycles,
+                LastOpcode = BusyBranchOpcode,
+                LastOpcodePc = LoopPc + 0x04,
+            });
+            return true;
+        }
+
         if (cycleBudget < CyclesPerPoll ||
             cpu.PC != LoopPc ||
             cpu.GBR != ThirtyTwoXHardwareProfile.Sh2SystemRegister(0) ||
@@ -2797,7 +2948,8 @@ public sealed class ThirtyTwoXDevice
     private bool IsSdkHostCommunicationCommandActive()
     {
         ushort comm = ThirtyTwoXHardwareProfile.CommunicationPortOffset;
-        return ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0 &&
+        return (ReadBigEndianWord(_systemRegisters, comm + 0x0C) != 0 ||
+                ReadBigEndianWord(_systemRegisters, comm + 0x0E) != 0) &&
             IsSdkCommandDispatchTablePresent();
     }
 

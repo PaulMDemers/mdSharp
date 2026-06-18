@@ -103,6 +103,7 @@ Run("32X SH-2 GBR byte zero BT poll loop fast-forward", ThirtyTwoXSh2GbrByteZero
 Run("32X SH-2 literal byte displacement TST register BT poll loop fast-forward", ThirtyTwoXSh2LiteralByteDisplacementTstRegisterBtPollLoopFastForward);
 Run("32X SH-2 MOV.W swap copy loop fast-forward", ThirtyTwoXSh2MovWordSwapCopyLoopFastForward);
 Run("32X SH-2 MOV.W strided copy loop fast-forward", ThirtyTwoXSh2MovWordStridedCopyLoopFastForward);
+Run("32X SH-2 MOV.W pair copy loop fast-forward", ThirtyTwoXSh2MovWordPairCopyLoopFastForward);
 Run("32X SH-2 MOV.W postincrement ADD immediate copy loop fast-forward", ThirtyTwoXSh2MovWordPostIncAddImmediateCopyLoopFastForward);
 Run("32X SH-2 MOV.W DT BF/S ADD immediate fill loop fast-forward", ThirtyTwoXSh2MovWordStoreDtBfsAddImmediateLoopFastForward);
 Run("32X SH-2 empty descriptor span fill fast-forward", ThirtyTwoXSh2EmptyDescriptorSpanFillFastForward);
@@ -277,6 +278,7 @@ Run("68000 BRA.W displacement word origin", BraWordUsesDisplacementWordOrigin);
 Run("68000 program counter uses 24-bit address bus", ProgramCounterUses24BitAddressBus);
 Run("68000 PC-relative EA uses extension word origin", PcRelativeEffectiveAddressUsesExtensionWordOrigin);
 Run("68000 absolute short TST branches on work RAM sign", AbsoluteShortTstBranchesOnWorkRamSign);
+Run("68000 MOVE.L immediate absolute short writes sign-extended work RAM", MoveLongImmediateAbsoluteShortWritesWorkRam);
 Run("68000 immediate RMW absolute long evaluates EA once", ImmediateRmwAbsoluteLongEvaluatesEaOnce);
 Run("68000 ASR sign extends byte and word register operands", AsrSignExtendsRegisterOperands);
 Run("68000 register shift count zero is no-op", RegisterShiftCountZeroIsNoOp);
@@ -6844,6 +6846,72 @@ void ThirtyTwoXSh2MovWordStridedCopyLoopFastForward()
         SetSh2Property(cpu, nameof(Sh2Cpu.PR), LoopPc + 0x10);
         return cpu;
     }
+}
+
+void ThirtyTwoXSh2MovWordPairCopyLoopFastForward()
+{
+    const uint LoopPc = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x20DA;
+    const uint Source = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x3000;
+    const uint Destination = ThirtyTwoXHardwareProfile.Sh2SdramStart + 0x5000;
+    ThirtyTwoXDevice device = new();
+    device.Reset();
+
+    ushort[] loop =
+    [
+        0x6415, // MOV.W @R1+,R4
+        0x6515, // MOV.W @R1+,R5
+        0x2D41, // MOV.W R4,@R13
+        0x7D02, // ADD #2,R13
+        0x2D51, // MOV.W R5,@R13
+        0x7D02, // ADD #2,R13
+        0x7B02, // ADD #2,R11
+        0x4710, // DT R7
+        0x8BF6, // BF loop
+        0x001B, // SLEEP
+    ];
+
+    for (int i = 0; i < loop.Length; i++)
+    {
+        WriteSh2WordForTest(device, LoopPc + (uint)(i * 2), loop[i], cpuIndex: 1);
+    }
+
+    WriteSh2WordForTest(device, Source + 0, 0x1111, cpuIndex: 1);
+    WriteSh2WordForTest(device, Source + 2, 0x2222, cpuIndex: 1);
+    WriteSh2WordForTest(device, Source + 4, 0x3333, cpuIndex: 1);
+    WriteSh2WordForTest(device, Source + 6, 0x4444, cpuIndex: 1);
+
+    ThirtyTwoXDevice.ThirtyTwoXState state = device.CaptureState();
+    uint[] registers = (uint[])state.SlaveSh2.R.Clone();
+    registers[1] = Source;
+    registers[7] = 2;
+    registers[11] = 0x80;
+    registers[13] = Destination;
+    device.RestoreState(state with
+    {
+        AdapterEnabled = true,
+        Sh2ResetEnabled = true,
+        Sh2ResetReleased = true,
+        BootRomHandshakePending = false,
+        BootRomLaunchPending = false,
+        SlaveSh2 = state.SlaveSh2 with
+        {
+            R = registers,
+            PC = LoopPc,
+            SR = 0,
+        },
+    });
+
+    AssertEqual(26, InvokeStepSh2Cpu(device, cpuIndex: 1, cycleBudget: 64));
+    AssertEqual(LoopPc + 0x12, device.SlaveSh2.PC);
+    AssertEqual(Source + 8, device.SlaveSh2.R[1]);
+    AssertEqual(0u, device.SlaveSh2.R[7]);
+    AssertEqual(0x84u, device.SlaveSh2.R[11]);
+    AssertEqual(Destination + 8, device.SlaveSh2.R[13]);
+    AssertEqual(1u, device.SlaveSh2.SR & 1);
+    AssertEqual((ushort)0x1111, ReadSh2WordForTest(device, Destination + 0, cpuIndex: 1));
+    AssertEqual((ushort)0x2222, ReadSh2WordForTest(device, Destination + 2, cpuIndex: 1));
+    AssertEqual((ushort)0x3333, ReadSh2WordForTest(device, Destination + 4, cpuIndex: 1));
+    AssertEqual((ushort)0x4444, ReadSh2WordForTest(device, Destination + 6, cpuIndex: 1));
 }
 
 void ThirtyTwoXSh2MovWordPostIncAddImmediateCopyLoopFastForward()
@@ -13902,6 +13970,30 @@ void AbsoluteShortTstBranchesOnWorkRamSign()
 
     AssertEqual(1u, machine.MainCpu.D[0]);
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the absolute-short TST/BPL check");
+}
+
+void MoveLongImmediateAbsoluteShortWritesWorkRam()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x21FC); // MOVE.L #$12345678,($DFBE).W
+    EmitLong(rom, ref pc, 0x1234_5678);
+    EmitWord(rom, ref pc, 0xDFBE);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 2; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0x1234_5678u, machine.Bus.ReadLong(0x00FF_DFBE));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after MOVE.L absolute-short write");
 }
 
 void ImmediateRmwAbsoluteLongEvaluatesEaOnce()

@@ -1,12 +1,12 @@
-# mdSharp 0.2.0 Release Notes Draft
+# mdSharp 0.3.0 Release Notes Draft
 
 ## Highlights
 
 - Experimental Sega Genesis/Mega Drive emulator written in C#, with reusable core, WinForms desktop frontend, and CLI diagnostics.
-- Desktop quality-of-life improvements: About dialog, copyable Diagnostics dialog, open/reopen shortcuts, richer Preferences, named input profiles, configurable display scaling, and hidden developer-only frame budget controls.
-- Release packaging improvements: stamped assembly versions, package manifests, portable storage detection, content verification, repository hygiene checks, release-gate hardening, and tag-triggered GitHub artifact upload.
-- Deterministic `.mdmovie` input recording and replay with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression support.
-- Local screenshot showcase, compatibility matrix export, and release-gate tooling for repeatable visual checks.
+- Experimental 32X bring-up: developer-gated `.32x` loading, MARS user-header boot, dual SH-2 execution, 68000/SH-2 communication registers, SDRAM/framebuffer/palette paths, packed/direct/RLE 32X VDP compositing, PWM scaffolding, and focused 32X diagnostics.
+- Continued Genesis compatibility work across VDP DMA, interrupt status, Z80 bus timing, input hardware, and post-menu regression tooling.
+- Audio timing improvements for Z80-driven sound programs, including smoother Sonic 1 Sega voice playback and updated PSG/FM balance guardrails.
+- Pico playback tooling for converting mdSharp `.mdmovie` recordings into Raspberry Pi Pico controller-playback data for real hardware experiments.
 - MIT licensed source code.
 
 ## Compatibility
@@ -20,8 +20,9 @@ Recent development has focused on:
 - Disney's Aladdin and Toy Story sprite/DMA edge cases
 - Virtua Racing SVP/SSP1601 path
 - Zero Wing sprite visibility
+- Early 32X bring-up targets including Knuckles' Chaotix, Doom, After Burner Complete, Space Harrier, and Cyber Brawl/Cosmic Carnage
 
-The latest local release gate completed a 571-ROM, 600-frame compatibility sweep with all runs completing `ok`. This is a sampled local sweep, not a guarantee that every game is complete from start to finish. Compatibility is still game-dependent, and the project should be described as experimental rather than cycle-perfect.
+The latest local Genesis release-gate work completed a 571-ROM, 600-frame compatibility sweep with all runs completing `ok`. 32X compatibility is newer and remains preliminary: selected titles reach visible or playable states, while many still depend on exact SH-2 interrupt/status, framebuffer, DMA, PWM, and bus-timing work. These sweeps are sampled local checks, not a guarantee that every game is complete from start to finish.
 
 ## Audio
 
@@ -37,6 +38,7 @@ The latest local release gate completed a 571-ROM, 600-frame compatibility sweep
 - movie checkpoint sidecars
 - audio comparison and stem tools
 - performance profiling
+- 32X SH-2, communication, VDP, DMA, SDRAM, and SDK-handshake traces
 - release gate helper
 - desktop packaging script
 - GitHub Actions build/test/package workflow
@@ -47,6 +49,7 @@ The latest local release gate completed a 571-ROM, 600-frame compatibility sweep
 - Not cycle-perfect.
 - PAL-specific behavior needs more coverage.
 - Some uncommon cartridge mappers and special hardware remain partial or unsupported.
+- 32X support is experimental and not yet broad compatibility-grade.
 - Exact light-gun timing/calibration remains approximate.
 - YM2612 accuracy is not yet bit-perfect.
 - Commercial ROMs, BIOS files, coprocessor blobs, save data, and copyrighted reference audio are not included.
@@ -58,9 +61,9 @@ The latest local release gate completed a 571-ROM, 600-frame compatibility sweep
 - `dotnet test mdSharp.sln -c Release --no-build`
 - `powershell -ExecutionPolicy Bypass -File tools\check-repo-hygiene.ps1`
 - `powershell -ExecutionPolicy Bypass -File tools\run-release-gate.ps1`
-- `powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.2.0`
+- `powershell -ExecutionPolicy Bypass -File tools\package-release.ps1 -Version 0.3.0`
 
 Generated package artifacts:
 
-- `mdSharp-desktop-0.2.0-framework-dependent.zip`
-- `mdSharp-desktop-0.2.0-win-x64.zip`
+- `mdSharp-desktop-0.3.0-framework-dependent.zip`
+- `mdSharp-desktop-0.3.0-win-x64.zip`

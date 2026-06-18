@@ -25,7 +25,7 @@ flowchart LR
     Core --> Bus["Genesis bus"]
     Core --> Vdp["VDP"]
     Core --> Audio["PSG + YM2612"]
-    Core --> Cart["Cartridge hardware\nSRAM, EEPROM, SVP,\nJ-Cart, adapters,\n32X detection"]
+    Core --> Cart["Cartridge hardware\nSRAM, EEPROM, SVP,\nJ-Cart, adapters,\n32X device"]
 
     Bus --> Cpu68k
     Bus --> Z80
@@ -91,7 +91,7 @@ The 68000 and Z80 execute through the Genesis bus. The bus is responsible for ma
 - YM2612 address/data/status ports
 - SRAM/EEPROM access
 - SVP DRAM, host registers, cell-arranged reads, and SSP1601 execution for Virtua Racing
-- 32X cartridge detection; full 32X SH-2/VDP/PWM runtime is planned separately
+- 32X cartridge detection, 68000-side register/window mapping, SH-2 memory paths, and the 32X add-on shell
 
 The bus also records observer events for diagnostic traces. Bus timing state is part of save states so restored sessions resume with the same pending Z80 grant and VDP wait-cycle behavior.
 
@@ -152,7 +152,7 @@ Save states use `SaveStateSerializer` and capture CPU, bus, cartridge, VDP, audi
 
 ## 32X Add-On Plan
 
-32X support is tracked as a separate add-on subsystem because it adds dual SH-2 CPUs, SDRAM, framebuffers, a second VDP layer, PWM audio, and a 68000/SH-2 communication register block. The first committed slice only detects 32X cartridges and documents the required runtime pieces. The implementation plan and address anchors live in [32X.md](32X.md).
+32X support is tracked as a separate add-on subsystem because it adds dual SH-2 CPUs, SDRAM, framebuffers, a second VDP layer, PWM audio, and a 68000/SH-2 communication register block. The current implementation recognizes `.32x` cartridges, attaches the 32X device, boots MARS user-header programs, runs both SH-2s with coarse scheduling, renders packed/direct/RLE framebuffers over the Mega Drive frame, and exposes diagnostics for ongoing compatibility work. It is still experimental; exact interrupt/status timing, framebuffer switching, PWM accuracy, and bus arbitration remain active areas. The implementation plan and address anchors live in [32X.md](32X.md).
 
 ## CLI Diagnostics
 

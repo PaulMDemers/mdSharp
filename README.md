@@ -49,7 +49,8 @@ The project is in active development. It can boot and play a growing set of reta
 - Preferences, display scaling options, default ROM folder, reopen last ROM, recent ROMs, fullscreen, mute, pause, reset, save/load state, and state slots
 - Input movie recording/playback with ROM-hash matching, optional save-RAM snapshots, sidecar checkpoints, and CLI regression
 - CLI tooling for screenshots, compatibility dashboards, movie regression, audio regression, CPU/VDP/Z80/audio traces, and performance checks
-- 32X cartridge detection and implementation planning; 32X execution is not supported yet
+- Experimental 32X cartridge execution with dual SH-2 bring-up, packed/direct/RLE framebuffer compositing, PWM scaffolding, and developer-gated desktop loading
+- Pico playback tooling for converting `.mdmovie` recordings into Raspberry Pi Pico controller-playback data
 
 ## Project Layout
 
@@ -76,6 +77,9 @@ docs/
   RELEASE_NOTES_DRAFT.md  Draft first-release notes
   CONTRIBUTING.md    Contribution workflow
   ROADMAP.md         Current status and next priorities
+pico-playback/
+  mdmovie_to_pico.py Conversion tooling for Pico controller playback
+  firmware/          Prototype Pico SDK firmware
 ```
 
 Project history is tracked in [CHANGELOG.md](CHANGELOG.md).
