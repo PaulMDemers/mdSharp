@@ -2,6 +2,12 @@
 
 All notable project changes are tracked here. mdSharp uses semantic version tags for public releases.
 
+## Unreleased
+
+- Started the `0.4.0` development cycle.
+- Pivot to Sega CD research and staged implementation planning.
+- Added the Sega CD implementation plan and local hygiene rules for CD images and BIOS files.
+
 ## 0.3.0 - 2026-06-17
 
 - Started the `0.3.0` development cycle.
@@ -19,10 +25,6 @@ All notable project changes are tracked here. mdSharp uses semantic version tags
 - Added local 32X BIOS discovery paths for diagnostic testing without redistributing BIOS files.
 - Improved 32X SDK command handshakes, SH-2 fast paths, FIFO/DREQ handling, framebuffer priority/compositing behavior, and compatibility in selected 32X titles.
 - Added Pico playback tooling and prototype firmware for converting mdSharp `.mdmovie` recordings into Raspberry Pi Pico controller-playback data.
-
-## Unreleased
-
-- Pivot to Sega CD research and staged implementation planning.
 
 ## 0.2.0 - 2026-05-18
 

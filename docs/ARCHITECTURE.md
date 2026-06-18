@@ -154,6 +154,10 @@ Save states use `SaveStateSerializer` and capture CPU, bus, cartridge, VDP, audi
 
 32X support is tracked as a separate add-on subsystem because it adds dual SH-2 CPUs, SDRAM, framebuffers, a second VDP layer, PWM audio, and a 68000/SH-2 communication register block. The current implementation recognizes `.32x` cartridges, attaches the 32X device, boots MARS user-header programs, runs both SH-2s with coarse scheduling, renders packed/direct/RLE framebuffers over the Mega Drive frame, and exposes diagnostics for ongoing compatibility work. It is still experimental; exact interrupt/status timing, framebuffer switching, PWM accuracy, and bus arbitration remain active areas. The implementation plan and address anchors live in [32X.md](32X.md).
 
+## Sega CD Add-On Plan
+
+Sega CD support is planned as another add-on subsystem rather than as a cartridge mapper. It adds a second 68000, regional BIOS ROM, PRG RAM, shared Word RAM, backup RAM, CDD/CDC disc handling, CD-DA playback, RF5C164 PCM audio, and a graphics ASIC that renders transformed stamp output into Word RAM for the Genesis VDP to display. The staged plan lives in [SEGACD.md](SEGACD.md).
+
 ## CLI Diagnostics
 
 `MdSharp.App` is intentionally broad. It contains tools for:
@@ -177,6 +181,7 @@ The CLI is not a stable public API yet. Important workflows should be documented
 - Use [COMPATIBILITY.md](COMPATIBILITY.md) for game-focused status and triage.
 - Use [INPUT_MOVIES.md](INPUT_MOVIES.md) for deterministic input recording, playback, and checkpoint workflows.
 - Use [AUDIO.md](AUDIO.md) and [AUDIO_REFERENCES.md](AUDIO_REFERENCES.md) for YM2612/PSG tuning and reference capture.
+- Use [SEGACD.md](SEGACD.md) for Sega CD research, subsystem boundaries, and bring-up milestones.
 - Use [SHOWCASE.md](SHOWCASE.md) for the local screenshot gallery.
 - Use [PACKAGING.md](PACKAGING.md) for desktop release package creation.
 - Use [RELEASE.md](RELEASE.md) before publishing the repository or cutting a binary build.

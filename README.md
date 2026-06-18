@@ -71,6 +71,7 @@ docs/
   emulator-building/ Transferable emulator engineering process and tooling guide
   AUDIO.md           Audio implementation and tuning workflow
   32X.md             32X research notes and implementation plan
+  SEGACD.md          Sega CD research notes and implementation plan
   SHOWCASE.md        Local screenshot gallery workflow
   PACKAGING.md       Desktop package creation
   RELEASE.md         Release checklist
@@ -243,6 +244,7 @@ Recommended local-only folders/files:
 - `32X_S_BIOS.BIN`, `32X_SLAVE_BIOS.BIN`, or `32X_SSH2_BIOS.BIN` for local-only 32X slave SH-2 BIOS testing, or set `MDSHARP_32X_SLAVE_SH2_BIOS`
 - `Sega 32X BIOS/32X/32X - Genesis BIOS.bin`, `32X - Master BIOS.bin`, and `32X - Slave BIOS.bin` are also detected for local 32X BIOS testing
 - `MDSHARP_32X_REAL_SH2_BIOS_BOOT=1` enables the experimental real SH-2 BIOS reset-vector path for diagnostics; the default path still uses mdSharp's synthetic user-header handoff
+- `segacd_roms/` and `Sega CD BIOS/` for local-only Sega CD planning and future bring-up work
 - local `.wav`, `.flac`, `.mp3`, or `.ogg` reference audio used for diagnostics
 
 These paths are ignored by the release-oriented `.gitignore`, with only `.gitkeep` placeholders tracked for empty local folders.
@@ -258,6 +260,7 @@ See [docs/TEST_ROMS.md](docs/TEST_ROMS.md) for public diagnostic/test ROM source
 - [Compatibility workflow](docs/COMPATIBILITY.md)
 - [Input movies](docs/INPUT_MOVIES.md)
 - [Audio workflow](docs/AUDIO.md)
+- [Sega CD plan](docs/SEGACD.md)
 - [Visual showcase](docs/SHOWCASE.md)
 - [Packaging](docs/PACKAGING.md)
 - [Release checklist](docs/RELEASE.md)

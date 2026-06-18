@@ -40,6 +40,10 @@ roms/*
 !32x_roms/
 32x_roms/*
 !32x_roms/.gitkeep
+segacd_roms/
+!segacd_roms/
+segacd_roms/*
+!segacd_roms/.gitkeep
 TestRoms/
 !TestRoms/
 TestRoms/*
@@ -63,6 +67,11 @@ snap/
 # explicitly redistributable and intentionally unignored.
 Sega 32X BIOS/
 svp.bin
+*BIOS*.BIN
+*bios*.bin
+*.cue
+*.iso
+*.chd
 *.smd
 *.gen
 *.rom
