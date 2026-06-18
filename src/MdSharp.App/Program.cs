@@ -38,6 +38,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
     Console.WriteLine("  mdsharp --segacd-info <cue-or-iso> [us|eu|jp]");
     Console.WriteLine("  mdsharp --segacd-bios-smoke <us|eu|jp> [instructions]");
+    Console.WriteLine("  mdsharp --segacd-bios-render <us|eu|jp> <output.ppm> [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
@@ -194,6 +195,20 @@ if (args[0].Equals("--segacd-bios-smoke", StringComparison.OrdinalIgnoreCase))
 
     int instructions = args.Length > 2 && int.TryParse(args[2], out int parsedInstructions) ? parsedInstructions : 10_000;
     SmokeSegaCdBios(ParseSegaCdRegion(args[1]), instructions);
+    return;
+}
+
+if (args[0].Equals("--segacd-bios-render", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-bios-render <us|eu|jp> <output.ppm> [frames] [instructions-per-frame]");
+        return;
+    }
+
+    int frames = args.Length > 3 && int.TryParse(args[3], out int parsedFrames) ? parsedFrames : 300;
+    int instructionsPerFrame = args.Length > 4 && int.TryParse(args[4], out int parsedInstructions) ? parsedInstructions : 300_000;
+    RenderSegaCdBios(ParseSegaCdRegion(args[1]), args[2], frames, instructionsPerFrame);
     return;
 }
 
@@ -2994,6 +3009,45 @@ void SmokeSegaCdBios(SegaCdRegion region, int instructionLimit)
     }
 
     Console.WriteLine($"Executed: {executed:N0}");
+    Console.WriteLine(FormatState(machine));
+    Console.WriteLine(FormatVdpState(machine.Vdp));
+    Console.WriteLine(FormatSegaCdState(segaCd));
+}
+
+void RenderSegaCdBios(SegaCdRegion region, string outputPath, int frames, int instructionsPerFrame)
+{
+    SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
+        throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
+    SegaCdDevice segaCd = new(File.ReadAllBytes(bios.Path), region);
+    MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+    machine.Reset();
+
+    int completedFrames = 0;
+    string status = "ok";
+    string detail = string.Empty;
+    try
+    {
+        for (; completedFrames < frames; completedFrames++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    catch (M68kException ex)
+    {
+        status = "m68k-exception";
+        detail = ex.Message;
+    }
+
+    byte[] framebuffer = machine.RenderFrameRgb();
+    WritePpm(outputPath, Vdp.ScreenWidth, Vdp.ScreenHeight, framebuffer);
+    Console.WriteLine($"Sega CD BIOS render: {region}");
+    Console.WriteLine($"BIOS: {bios.FileName} ({bios.Size:N0} bytes, sha1 {bios.Sha1})");
+    Console.WriteLine($"Status: {status}; frames={completedFrames:N0}; output={Path.GetFullPath(outputPath)}");
+    if (detail.Length > 0)
+    {
+        Console.WriteLine($"Detail: {detail}");
+    }
+
     Console.WriteLine(FormatState(machine));
     Console.WriteLine(FormatVdpState(machine.Vdp));
     Console.WriteLine(FormatSegaCdState(segaCd));
