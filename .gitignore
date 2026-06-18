@@ -44,6 +44,8 @@ segacd_roms/
 !segacd_roms/
 segacd_roms/*
 !segacd_roms/.gitkeep
+Sega CD roms/
+Sega Mega CD roms/
 TestRoms/
 !TestRoms/
 TestRoms/*
@@ -66,6 +68,8 @@ snap/
 # Local BIOS/coproc blobs and cartridge images. Keep these out unless a file is
 # explicitly redistributable and intentionally unignored.
 Sega 32X BIOS/
+Sega CD BIOS/
+Sega Mega CD BIOS Set v1/
 svp.bin
 *BIOS*.BIN
 *bios*.bin

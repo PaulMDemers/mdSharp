@@ -5,6 +5,7 @@ using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Input;
+using MdSharp.Core.SegaCd;
 using MdSharp.Core.State;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
@@ -35,6 +36,7 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --sweep <rom-folder> [instructions]");
     Console.WriteLine("  mdsharp --cart-info <rom-file>");
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
+    Console.WriteLine("  mdsharp --segacd-info <cue-or-iso> [us|eu|jp]");
     Console.WriteLine("  mdsharp --32x-sh2-trace <rom-file> [instructions] [master|slave] [start-pc]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace <rom-file> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --32x-live-sh2-trace-state <rom-file> <state.mdss> <output.csv> [frames] [instructions-per-frame] [master|slave|both] [pc-start] [pc-end] [max-lines]");
@@ -165,6 +167,19 @@ if (args[0].Equals("--cart-scan", StringComparison.OrdinalIgnoreCase))
     }
 
     ScanCartridges(args[1], args[2]);
+    return;
+}
+
+if (args[0].Equals("--segacd-info", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-info <cue-or-iso> [us|eu|jp]");
+        return;
+    }
+
+    SegaCdRegion? region = args.Length > 2 ? ParseSegaCdRegion(args[2]) : null;
+    PrintSegaCdInfo(args[1], region);
     return;
 }
 
@@ -2804,6 +2819,89 @@ void ScanCartridges(string romFolder, string outputCsv)
 
     Console.WriteLine($"Scanned {files.Length:N0} ROM(s) to {Path.GetFullPath(outputCsv)}");
     Console.WriteLine($"Save hardware: {saveHardware:N0}; bank switching expected: {bankSwitching:N0}; unsupported hardware: {unsupported:N0}; warnings: {warnings:N0}");
+}
+
+void PrintSegaCdInfo(string imagePath, SegaCdRegion? requestedRegion)
+{
+    DiscImage disc = DiscImage.FromFile(imagePath);
+    Console.WriteLine(Path.GetFullPath(imagePath));
+    Console.WriteLine($"Tracks: {disc.Tracks.Count:N0}");
+    Console.WriteLine($"Lead-out: LBA {disc.LeadOutLba:N0} ({FormatDiscMsf(disc.LeadOutLba)})");
+    Console.WriteLine($"Audio tracks: {(disc.HasAudioTracks ? "yes" : "no")}");
+    Console.WriteLine();
+    Console.WriteLine("Track  Type   Mode        Start LBA  Length    Pregap  File");
+    foreach (DiscTrack track in disc.Tracks)
+    {
+        Console.WriteLine(
+            $"{track.Number,5}  {track.Kind,-5}  {FormatTrackMode(track.Mode),-10}  {track.StartLba,9:N0}  {track.LengthFrames,8:N0}  {track.PregapFrames,6:N0}  {Path.GetFileName(track.FilePath)}");
+        Console.WriteLine($"       file offset: {track.FileOffsetBytes:N0} byte(s), sector size: {track.SectorSize:N0} byte(s)");
+    }
+
+    Console.WriteLine();
+    IReadOnlyList<SegaCdBiosImage> candidates = SegaCdBiosFinder.FindAll(Environment.CurrentDirectory);
+    if (requestedRegion is SegaCdRegion selectedRegion)
+    {
+        SegaCdBiosImage? selected = SegaCdBiosFinder.FindBest(selectedRegion, Environment.CurrentDirectory);
+        Console.WriteLine($"Requested BIOS region: {selectedRegion}");
+        if (selected is null)
+        {
+            Console.WriteLine("Selected BIOS: not found");
+        }
+        else
+        {
+            Console.WriteLine($"Selected BIOS: {selected.FileName} ({selected.Size:N0} bytes, sha1 {selected.Sha1})");
+        }
+    }
+    else
+    {
+        Console.WriteLine("Requested BIOS region: auto");
+        foreach (SegaCdRegion candidateRegion in Enum.GetValues<SegaCdRegion>())
+        {
+            SegaCdBiosImage? selected = SegaCdBiosFinder.FindBest(candidateRegion, Environment.CurrentDirectory);
+            Console.WriteLine(selected is null
+                ? $"Best {candidateRegion} BIOS: not found"
+                : $"Best {candidateRegion} BIOS: {selected.FileName} ({selected.Size:N0} bytes, sha1 {selected.Sha1})");
+        }
+    }
+
+    Console.WriteLine($"BIOS candidates found: {candidates.Count:N0}");
+    foreach (SegaCdBiosImage candidate in candidates)
+    {
+        string source = candidate.FromEnvironment ? "env" : "local";
+        Console.WriteLine($"- {candidate.Region,-6} {source,-5} {candidate.FileName} ({candidate.Size:N0} bytes)");
+    }
+}
+
+SegaCdRegion ParseSegaCdRegion(string value)
+{
+    return value.Trim().ToLowerInvariant() switch
+    {
+        "u" or "us" or "usa" or "na" => SegaCdRegion.Usa,
+        "e" or "eu" or "eur" or "europe" => SegaCdRegion.Europe,
+        "j" or "jp" or "jpn" or "japan" => SegaCdRegion.Japan,
+        _ => throw new ArgumentException($"Unknown Sega CD BIOS region '{value}'. Use us, eu, or jp."),
+    };
+}
+
+string FormatTrackMode(DiscTrackMode mode)
+{
+    return mode switch
+    {
+        DiscTrackMode.Mode1_2048 => "MODE1/2048",
+        DiscTrackMode.Mode1_2352 => "MODE1/2352",
+        DiscTrackMode.Mode2_2336 => "MODE2/2336",
+        DiscTrackMode.Mode2_2352 => "MODE2/2352",
+        DiscTrackMode.Audio => "AUDIO",
+        _ => "UNKNOWN",
+    };
+}
+
+string FormatDiscMsf(int lba)
+{
+    int minutes = lba / (60 * 75);
+    int seconds = (lba / 75) % 60;
+    int frames = lba % 75;
+    return $"{minutes:D2}:{seconds:D2}:{frames:D2}";
 }
 
 void TraceThirtyTwoXSh2(string romPath, int instructionLimit, string cpuName, uint? startPc)

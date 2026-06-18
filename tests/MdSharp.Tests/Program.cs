@@ -5,6 +5,7 @@ using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Cpu.Z80;
 using MdSharp.Core.Input;
+using MdSharp.Core.SegaCd;
 using MdSharp.Core.State;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
@@ -14,6 +15,10 @@ int failures = 0;
 
 Run("cartridge header parsing", CartridgeHeaderParsing);
 Run("cartridge diagnostics", CartridgeDiagnosticsReport);
+Run("Sega CD ISO disc image parsing", SegaCdIsoDiscImageParsing);
+Run("Sega CD CUE disc image parsing", SegaCdCueDiscImageParsing);
+Run("Sega CD BIOS discovery", SegaCdBiosDiscovery);
+Run("Sega CD device shell", SegaCdDeviceShell);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
 Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
@@ -422,6 +427,155 @@ void ThirtyTwoXHardwareProfileReport()
     AssertEqual(0x0200_0000u, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedCachedStart);
     AssertEqual(0x2200_0000u, ThirtyTwoXHardwareProfile.Sh2CartridgeFixedStart);
     AssertTrue(ThirtyTwoXHardwareProfile.RequiredSubsystems.Length >= 6, "32X plan should name the major subsystems");
+}
+
+void SegaCdIsoDiscImageParsing()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string isoPath = Path.Combine(folder, "single.iso");
+        File.WriteAllBytes(isoPath, new byte[(2048 * 3) + 12]);
+
+        DiscImage image = DiscImage.FromFile(isoPath);
+        AssertEqual(1, image.Tracks.Count);
+        AssertEqual(false, image.HasAudioTracks);
+        AssertEqual(4, image.LeadOutLba);
+        DiscTrack track = image.Tracks[0];
+        AssertEqual(1, track.Number);
+        AssertEqual((int)DiscTrackKind.Data, (int)track.Kind);
+        AssertEqual((int)DiscTrackMode.Mode1_2048, (int)track.Mode);
+        AssertEqual(2048, track.SectorSize);
+        AssertEqual(0L, track.FileOffsetBytes);
+        AssertEqual(4, track.LengthFrames);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCueDiscImageParsing()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string binPath = Path.Combine(folder, "disc.bin");
+        File.WriteAllBytes(binPath, new byte[2352 * 500]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "disc.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+              TRACK 02 AUDIO
+                INDEX 00 00:03:00
+                INDEX 01 00:04:00
+            """);
+
+        DiscImage image = DiscImage.FromFile(cuePath);
+        AssertEqual(2, image.Tracks.Count);
+        AssertEqual(true, image.HasAudioTracks);
+        AssertEqual(500, image.LeadOutLba);
+        AssertEqual((int)DiscTrackKind.Data, (int)image.Tracks[0].Kind);
+        AssertEqual((int)DiscTrackMode.Mode1_2352, (int)image.Tracks[0].Mode);
+        AssertEqual(0, image.Tracks[0].StartLba);
+        AssertEqual(300, image.Tracks[0].LengthFrames);
+        AssertEqual(0L, image.Tracks[0].FileOffsetBytes);
+        AssertEqual((int)DiscTrackKind.Audio, (int)image.Tracks[1].Kind);
+        AssertEqual((int)DiscTrackMode.Audio, (int)image.Tracks[1].Mode);
+        AssertEqual(300, image.Tracks[1].StartLba);
+        AssertEqual(200, image.Tracks[1].LengthFrames);
+        AssertEqual(2352L * 300, image.Tracks[1].FileOffsetBytes);
+        AssertEqual(DiscImage.MsfToFrames("00:04:00"), 300);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdBiosDiscovery()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string biosFolder = Path.Combine(folder, "Sega Mega CD BIOS Set v1");
+        Directory.CreateDirectory(biosFolder);
+        File.WriteAllBytes(Path.Combine(biosFolder, "Sega CD (U) - M2 V2.00 (Non-Working).bin"), new byte[128 * 1024]);
+        File.WriteAllBytes(Path.Combine(biosFolder, "Sega CD (U) - M2 V2.00w.bin"), Enumerable.Repeat((byte)0x11, 128 * 1024).ToArray());
+        File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (E) - M2 V2.00.bin"), Enumerable.Repeat((byte)0x22, 128 * 1024).ToArray());
+        File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (J) - M1 V1.00p.bin"), Enumerable.Repeat((byte)0x33, 128 * 1024).ToArray());
+
+        IReadOnlyList<SegaCdBiosImage> candidates = SegaCdBiosFinder.FindAll(folder);
+        AssertEqual(4, candidates.Count);
+        SegaCdBiosImage? us = SegaCdBiosFinder.FindBest(SegaCdRegion.Usa, folder);
+        SegaCdBiosImage? eu = SegaCdBiosFinder.FindBest(SegaCdRegion.Europe, folder);
+        SegaCdBiosImage? jp = SegaCdBiosFinder.FindBest(SegaCdRegion.Japan, folder);
+        AssertTrue(us is not null, "Expected a US Sega CD BIOS candidate");
+        AssertTrue(eu is not null, "Expected a European Mega-CD BIOS candidate");
+        AssertTrue(jp is not null, "Expected a Japanese Mega-CD BIOS candidate");
+        AssertEqual("Sega CD (U) - M2 V2.00w.bin", us!.FileName);
+        AssertEqual("Mega CD (E) - M2 V2.00.bin", eu!.FileName);
+        AssertEqual("Mega CD (J) - M1 V1.00p.bin", jp!.FileName);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdDeviceShell()
+{
+    byte[] bios = Enumerable.Range(0, SegaCdHardwareProfile.BiosSize).Select(i => (byte)i).ToArray();
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    AssertEqual(SegaCdHardwareProfile.BiosSize, device.Bios.Length);
+    AssertEqual(SegaCdHardwareProfile.ProgramRamBytes, device.ProgramRam.Length);
+    AssertEqual(SegaCdHardwareProfile.WordRamBytes, device.WordRam.Length);
+    AssertEqual(SegaCdHardwareProfile.BackupRamBytes, device.BackupRam.Length);
+    AssertEqual(SegaCdHardwareProfile.PcmRamBytes, device.PcmRam.Length);
+    AssertEqual((byte)0x00, device.ReadBiosByte(0));
+    AssertEqual((byte)0x01, device.ReadBiosByte(1));
+    AssertEqual((byte)0x00, device.ReadBiosByte((uint)SegaCdHardwareProfile.BiosSize));
+    AssertEqual((ushort)0x0001, device.ReadBiosWord(0));
+
+    device.WriteProgramRamByte(0, 0x12);
+    device.WriteProgramRamByte((uint)SegaCdHardwareProfile.ProgramRamBytes, 0x34);
+    AssertEqual((byte)0x34, device.ReadProgramRamByte(0));
+    device.WriteWordRamByte(1, 0x56);
+    device.WriteWordRamByte((uint)SegaCdHardwareProfile.WordRamBytes + 1, 0x78);
+    AssertEqual((byte)0x78, device.ReadWordRamByte(1));
+    device.WritePcmRamByte(2, 0x9A);
+    AssertEqual((byte)0x9A, device.ReadPcmRamByte(2));
+    AssertEqual((byte)0xFF, device.ReadBackupRamByte(0));
+    device.WriteBackupRamByte(0, 0xBC);
+    AssertEqual((byte)0xBC, device.ReadBackupRamByte(0));
+
+    device.WriteMainRegisterWord(0x10, 0xCAFE);
+    AssertEqual((ushort)0xCAFE, device.ReadMainRegisterWord(0x10));
+    SegaCdDevice.SegaCdState state = device.CaptureState();
+    device.WriteProgramRamByte(0, 0);
+    device.WriteWordRamByte(1, 0);
+    device.WriteBackupRamByte(0, 0);
+    device.WritePcmRamByte(2, 0);
+    device.WriteMainRegisterWord(0x10, 0);
+    device.RestoreState(state);
+
+    AssertEqual((byte)0x34, device.ReadProgramRamByte(0));
+    AssertEqual((byte)0x78, device.ReadWordRamByte(1));
+    AssertEqual((byte)0xBC, device.ReadBackupRamByte(0));
+    AssertEqual((byte)0x9A, device.ReadPcmRamByte(2));
+    AssertEqual((ushort)0xCAFE, device.ReadMainRegisterWord(0x10));
+
+    device.Reset();
+    AssertEqual((byte)0x00, device.ReadProgramRamByte(0));
+    AssertEqual((byte)0x00, device.ReadWordRamByte(1));
+    AssertEqual((byte)0xBC, device.ReadBackupRamByte(0));
+    AssertEqual((byte)0x00, device.ReadPcmRamByte(2));
+    AssertEqual((ushort)0x0000, device.ReadMainRegisterWord(0x10));
 }
 
 void ThirtyTwoXDeviceShell()
@@ -15050,6 +15204,13 @@ void VdpDirectColorDmaCaptureRendersFrame()
 byte[] CreateRom()
 {
     return new byte[512 * 1024];
+}
+
+string CreateTempDirectory()
+{
+    string path = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(path);
+    return path;
 }
 
 void DeclareSaveRam(byte[] data, uint start = 0x0020_0000, uint end = 0x0020_FFFF, byte lanes = 0x60)
