@@ -19,6 +19,7 @@ Run("Sega CD ISO disc image parsing", SegaCdIsoDiscImageParsing);
 Run("Sega CD CUE disc image parsing", SegaCdCueDiscImageParsing);
 Run("Sega CD BIOS discovery", SegaCdBiosDiscovery);
 Run("Sega CD device shell", SegaCdDeviceShell);
+Run("Sega CD main bus mapping", SegaCdMainBusMapping);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
 Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
@@ -576,6 +577,39 @@ void SegaCdDeviceShell()
     AssertEqual((byte)0xBC, device.ReadBackupRamByte(0));
     AssertEqual((byte)0x00, device.ReadPcmRamByte(2));
     AssertEqual((ushort)0x0000, device.ReadMainRegisterWord(0x10));
+}
+
+void SegaCdMainBusMapping()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FF_1000);
+    WriteLong(bios, 4, 0x0000_0200);
+    bios[0x100] = 0x53;
+    bios[0x101] = 0x45;
+    bios[0x102] = 0x47;
+    bios[0x103] = 0x41;
+
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: segaCd);
+    machine.Reset();
+
+    AssertEqual(0x00FF_1000u, machine.MainCpu.A[7]);
+    AssertEqual(0x0000_0200u, machine.MainCpu.PC);
+    AssertEqual((uint)0x5345_4741, machine.Bus.ReadLong(0x000100));
+
+    machine.Bus.WriteWord(SegaCdHardwareProfile.MainProgramRamWindowStart, 0x1234);
+    AssertEqual((ushort)0x1234, machine.Bus.ReadWord(SegaCdHardwareProfile.MainProgramRamWindowStart));
+    AssertEqual((byte)0x12, segaCd.ReadProgramRamByte(0));
+    AssertEqual((byte)0x34, segaCd.ReadProgramRamByte(1));
+
+    machine.Bus.WriteWord(SegaCdHardwareProfile.MainWordRamStart + 2, 0x5678);
+    AssertEqual((ushort)0x5678, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 2));
+    AssertEqual((byte)0x56, segaCd.ReadWordRamByte(2));
+    AssertEqual((byte)0x78, segaCd.ReadWordRamByte(3));
+
+    machine.Bus.WriteWord(SegaCdHardwareProfile.MainRegisterStart + 0x10, 0x9ABC);
+    AssertEqual((ushort)0x9ABC, machine.Bus.ReadWord(SegaCdHardwareProfile.MainRegisterStart + 0x10));
+    AssertEqual((ushort)0x9ABC, segaCd.ReadMainRegisterWord(0x10));
 }
 
 void ThirtyTwoXDeviceShell()

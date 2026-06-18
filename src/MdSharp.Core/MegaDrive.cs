@@ -3,6 +3,7 @@ using MdSharp.Core.Bus;
 using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Cpu.Z80;
+using MdSharp.Core.SegaCd;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Timing;
 using MdSharp.Core.Video;
@@ -19,7 +20,7 @@ public sealed class MegaDrive
     private static readonly double BassShelfAlpha = LowPassAlpha(AudioConstants.BassShelfCutoffHz, AudioConstants.DefaultSampleRate);
     private static readonly double OutputFilterAlpha = LowPassAlpha(AudioConstants.OutputLowPassCutoffHz, AudioConstants.DefaultSampleRate);
 
-    public MegaDrive(CartridgeImage cartridge, bool pal = false, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null, bool thirtyTwoXUseRealSh2BiosBoot = false)
+    public MegaDrive(CartridgeImage cartridge, bool pal = false, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null, bool thirtyTwoXUseRealSh2BiosBoot = false, SegaCdDevice? segaCd = null)
     {
         IsPal = pal;
         Vdp = new Vdp();
@@ -34,7 +35,8 @@ public sealed class MegaDrive
             thirtyTwoXM68kBios: thirtyTwoXM68kBios,
             thirtyTwoXMasterSh2Bios: thirtyTwoXMasterSh2Bios,
             thirtyTwoXSlaveSh2Bios: thirtyTwoXSlaveSh2Bios,
-            thirtyTwoXUseRealSh2BiosBoot: thirtyTwoXUseRealSh2BiosBoot);
+            thirtyTwoXUseRealSh2BiosBoot: thirtyTwoXUseRealSh2BiosBoot,
+            segaCd: segaCd);
         MainCpu = new M68kCpu(Bus);
         MainCpu.LineFInstructionOverride = TryHandleThirtyTwoXSdkLineF;
         MainCpu.TrapInstructionOverride = TryHandleThirtyTwoXSdkTrap;
