@@ -47,6 +47,7 @@ public sealed class M68kCpu
     public long Cycles { get; private set; }
     public uint USP { get; private set; }
     public bool TraceEnabled { get; set; }
+    public bool HistoryEnabled { get; set; }
     public Action<M68kInstructionTrace>? InstructionObserver { get; set; }
     public Action<M68kInterruptTrace>? InterruptObserver { get; set; }
     public Action<M68kExceptionTrace>? ExceptionObserver { get; set; }
@@ -142,9 +143,9 @@ public sealed class M68kCpu
         _currentOpcodeAddress = opcodeAddress;
         _currentOpcode = opcode;
 
-        if (TraceEnabled)
+        if (TraceEnabled || HistoryEnabled)
         {
-            if (_recentInstructionTrace.Count >= 1024)
+            if (_recentInstructionTrace.Count >= 65536)
             {
                 _recentInstructionTrace.Dequeue();
             }
@@ -152,7 +153,8 @@ public sealed class M68kCpu
             _recentInstructionTrace.Enqueue(
                 $"pc=${opcodeAddress:X6} opcode=${opcode:X4} sr=${SR:X4} sp=${A[7]:X8} " +
                 $"d0=${D[0]:X8} d1=${D[1]:X8} d2=${D[2]:X8} d3=${D[3]:X8} " +
-                $"a0=${A[0]:X8} a1=${A[1]:X8} a4=${A[4]:X8} a5=${A[5]:X8} a6=${A[6]:X8}");
+                $"a0=${A[0]:X8} a1=${A[1]:X8} a2=${A[2]:X8} a3=${A[3]:X8} " +
+                $"a4=${A[4]:X8} a5=${A[5]:X8} a6=${A[6]:X8}");
         }
 
         int cycles;
@@ -242,6 +244,224 @@ public sealed class M68kCpu
         return true;
     }
 
+    public bool TryFastForwardAddWordPostIncrementNestedDbfLoop(int cycleBudget, out int cycles, out int instructionCount)
+    {
+        const int CyclesPerInnerIteration = 18;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerInnerIteration)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        ushort add = _bus.ReadWord(pc);
+        if ((add & 0xF1F8) != 0xD058)
+        {
+            return false;
+        }
+
+        ushort innerDbf = _bus.ReadWord(pc + 2);
+        ushort outerDbf = _bus.ReadWord(pc + 6);
+        if ((innerDbf & 0xFFF8) != 0x51C8 || (outerDbf & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short innerDisplacement = (short)_bus.ReadWord(pc + 4);
+        short outerDisplacement = (short)_bus.ReadWord(pc + 8);
+        if (NormalizePc(unchecked(pc + 4u + (uint)innerDisplacement)) != pc ||
+            NormalizePc(unchecked(pc + 8u + (uint)outerDisplacement)) != pc)
+        {
+            return false;
+        }
+
+        int destinationRegister = (add >> 9) & 0x07;
+        int addressRegister = add & 0x07;
+        int innerCounterRegister = innerDbf & 0x07;
+        int outerCounterRegister = outerDbf & 0x07;
+        if (innerCounterRegister == outerCounterRegister)
+        {
+            return false;
+        }
+
+        int maxIterations = Math.Min(cycleBudget / CyclesPerInnerIteration, 4096);
+        if (maxIterations <= 0)
+        {
+            return false;
+        }
+
+        uint address = A[addressRegister];
+        ushort accumulator = (ushort)D[destinationRegister];
+        bool completed = false;
+        int iterations = 0;
+        for (; iterations < maxIterations; iterations++)
+        {
+            accumulator = unchecked((ushort)(accumulator + _bus.ReadWord(address)));
+            address = unchecked(address + 2);
+
+            ushort innerCounter = unchecked((ushort)((D[innerCounterRegister] & 0xFFFF) - 1));
+            D[innerCounterRegister] = (D[innerCounterRegister] & 0xFFFF_0000u) | innerCounter;
+            if (innerCounter != 0xFFFF)
+            {
+                continue;
+            }
+
+            ushort outerCounter = unchecked((ushort)((D[outerCounterRegister] & 0xFFFF) - 1));
+            D[outerCounterRegister] = (D[outerCounterRegister] & 0xFFFF_0000u) | outerCounter;
+            if (outerCounter == 0xFFFF)
+            {
+                completed = true;
+                iterations++;
+                break;
+            }
+        }
+
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        A[addressRegister] = address;
+        D[destinationRegister] = (D[destinationRegister] & 0xFFFF_0000u) | accumulator;
+        PC = completed ? NormalizePc(pc + 10) : pc;
+        cycles = iterations * CyclesPerInnerIteration;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
+    public bool TryFastForwardMoveLongRegisterQuadFillDbfLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 58;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        uint pc = PC;
+        uint basePc = pc;
+        ushort move = _bus.ReadWord(basePc);
+        int startMoveIndex = 0;
+        bool patternAtCurrentPc = (move & 0xF1F8) == 0x20C0 &&
+            _bus.ReadWord(basePc + 2) == move &&
+            _bus.ReadWord(basePc + 4) == move &&
+            _bus.ReadWord(basePc + 6) == move;
+        if (!patternAtCurrentPc)
+        {
+            bool found = false;
+            for (int candidateIndex = 1; candidateIndex < 4; candidateIndex++)
+            {
+                uint candidateBase = NormalizePc(pc - (uint)(candidateIndex * 2));
+                ushort candidateMove = _bus.ReadWord(candidateBase);
+                if ((candidateMove & 0xF1F8) == 0x20C0 &&
+                    _bus.ReadWord(candidateBase + 2) == candidateMove &&
+                    _bus.ReadWord(candidateBase + 4) == candidateMove &&
+                    _bus.ReadWord(candidateBase + 6) == candidateMove)
+                {
+                    basePc = candidateBase;
+                    move = candidateMove;
+                    startMoveIndex = candidateIndex;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        ushort dbcc = _bus.ReadWord(basePc + 8);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(basePc + 10);
+        if (NormalizePc(unchecked(basePc + 10u + (uint)displacement)) != basePc)
+        {
+            return false;
+        }
+
+        int sourceRegister = move & 0x07;
+        int addressRegister = (move >> 9) & 0x07;
+        int counterRegister = dbcc & 0x07;
+        if (sourceRegister == counterRegister)
+        {
+            return false;
+        }
+
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        uint address = A[addressRegister];
+        if (!canFastForwardAddress(address & AddressMask))
+        {
+            return false;
+        }
+
+        int remainingMovesThisIteration = 4 - startMoveIndex;
+        int completionCycles = counter == 0
+            ? (remainingMovesThisIteration * 12) + 14
+            : (remainingMovesThisIteration * 12) + 10 + ((counter - 1) * CyclesPerIteration) + 62;
+        bool completesLoop = cycleBudget >= completionCycles;
+        int iterations = completesLoop ? counter + 1 : Math.Min(counter, cycleBudget / CyclesPerIteration);
+        if (startMoveIndex != 0 && !completesLoop)
+        {
+            return false;
+        }
+
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        uint value = D[sourceRegister];
+        if (startMoveIndex != 0 && completesLoop)
+        {
+            for (int j = startMoveIndex; j < 4; j++)
+            {
+                _bus.WriteLong(address, value);
+                address = unchecked(address + 4);
+            }
+
+            iterations--;
+        }
+
+        for (int i = 0; i < iterations; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                _bus.WriteLong(address, value);
+                address = unchecked(address + 4);
+            }
+        }
+
+        A[addressRegister] = address;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) |
+            (completesLoop ? 0xFFFFu : (ushort)(counter - iterations));
+        if (completesLoop)
+        {
+            PC = NormalizePc(basePc + 12);
+        }
+
+        cycles = completesLoop ? completionCycles : iterations * CyclesPerIteration;
+        instructionCount = iterations * 5;
+        Cycles += cycles;
+        return true;
+    }
+
     public bool TryFastForwardMoveBytePostIncrementCopyDbfLoop(
         int cycleBudget,
         Func<uint, bool> canFastForwardAddress,
@@ -311,6 +531,228 @@ public sealed class M68kCpu
         D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | (ushort)(counter - iterations);
         cycles = iterations * CyclesPerIteration;
         instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
+    public bool TryFastForwardMoveLongPostIncrementCopyDbfLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 18;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        ushort move = _bus.ReadWord(PC);
+        if ((move & 0xF1F8) != 0x20D8)
+        {
+            return false;
+        }
+
+        ushort dbcc = _bus.ReadWord(PC + 2);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(PC + 4);
+        if (NormalizePc(unchecked(PC + 4u + (uint)displacement)) != PC)
+        {
+            return false;
+        }
+
+        int counterRegister = dbcc & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        int sourceAddressRegister = move & 0x07;
+        int destinationAddressRegister = (move >> 9) & 0x07;
+        uint sourceAddress = A[sourceAddressRegister];
+        uint destinationAddress = A[destinationAddressRegister];
+        if (!canFastForwardAddress(sourceAddress & AddressMask) ||
+            !canFastForwardAddress(destinationAddress & AddressMask))
+        {
+            return false;
+        }
+
+        int maxTakenIterations = cycleBudget / CyclesPerIteration;
+        int iterations = Math.Min(counter, maxTakenIterations);
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < iterations; i++)
+        {
+            uint value = _bus.ReadLong(sourceAddress);
+            _bus.WriteLong(destinationAddress, value);
+            sourceAddress = unchecked(sourceAddress + 4);
+            destinationAddress = unchecked(destinationAddress + 4);
+        }
+
+        A[sourceAddressRegister] = sourceAddress;
+        A[destinationAddressRegister] = destinationAddress;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | (ushort)(counter - iterations);
+        cycles = iterations * CyclesPerIteration;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
+    public bool TryFastForwardMoveLongPostIncrementCopyDbfLoopToFallthrough(
+        int maxIterations,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount,
+        bool trustCurrentInstructionPattern = false)
+    {
+        const int TakenIterationCycles = 18;
+        const int FallthroughIterationCycles = 22;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null)
+        {
+            return false;
+        }
+
+        ushort move = trustCurrentInstructionPattern ? (ushort)0x24D9 : _bus.ReadWord(PC);
+        if ((move & 0xF1F8) != 0x20D8)
+        {
+            return false;
+        }
+
+        ushort dbcc = trustCurrentInstructionPattern ? (ushort)0x51CF : _bus.ReadWord(PC + 2);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = trustCurrentInstructionPattern ? (short)-4 : (short)_bus.ReadWord(PC + 4);
+        if (NormalizePc(unchecked(PC + 4u + (uint)displacement)) != PC)
+        {
+            return false;
+        }
+
+        int counterRegister = dbcc & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        int iterations = counter + 1;
+        if (iterations <= 0 || iterations > maxIterations)
+        {
+            return false;
+        }
+
+        int sourceAddressRegister = move & 0x07;
+        int destinationAddressRegister = (move >> 9) & 0x07;
+        uint sourceAddress = A[sourceAddressRegister];
+        uint destinationAddress = A[destinationAddressRegister];
+        if (!canFastForwardAddress(sourceAddress & AddressMask) ||
+            !canFastForwardAddress(destinationAddress & AddressMask))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < iterations; i++)
+        {
+            uint value = _bus.ReadLong(sourceAddress);
+            _bus.WriteLong(destinationAddress, value);
+            sourceAddress = unchecked(sourceAddress + 4);
+            destinationAddress = unchecked(destinationAddress + 4);
+        }
+
+        A[sourceAddressRegister] = sourceAddress;
+        A[destinationAddressRegister] = destinationAddress;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | 0xFFFFu;
+        PC = NormalizePc(PC + 6);
+        cycles = counter * TakenIterationCycles + FallthroughIterationCycles;
+        instructionCount = iterations * 2;
+        Cycles += cycles;
+        return true;
+    }
+
+    public bool TryFastForwardMoveBytePostIncrementStridedCopyDbfLoop(
+        int cycleBudget,
+        Func<uint, bool> canFastForwardAddress,
+        out int cycles,
+        out int instructionCount)
+    {
+        const int CyclesPerIteration = 26;
+        cycles = 0;
+        instructionCount = 0;
+        if (Stopped || TraceEnabled || InstructionObserver is not null || cycleBudget < CyclesPerIteration)
+        {
+            return false;
+        }
+
+        ushort move = _bus.ReadWord(PC);
+        if ((move & 0xF1F8) != 0x10D8)
+        {
+            return false;
+        }
+
+        ushort addq = _bus.ReadWord(PC + 2);
+        int destinationAddressRegister = (move >> 9) & 0x07;
+        if (addq != (ushort)(0x5248 | destinationAddressRegister))
+        {
+            return false;
+        }
+
+        ushort dbcc = _bus.ReadWord(PC + 4);
+        if ((dbcc & 0xFFF8) != 0x51C8)
+        {
+            return false;
+        }
+
+        short displacement = (short)_bus.ReadWord(PC + 6);
+        if (NormalizePc(unchecked(PC + 6u + (uint)displacement)) != PC)
+        {
+            return false;
+        }
+
+        int counterRegister = dbcc & 0x07;
+        ushort counter = (ushort)(D[counterRegister] & 0xFFFF);
+        if (counter == 0)
+        {
+            return false;
+        }
+
+        int sourceAddressRegister = move & 0x07;
+        uint sourceAddress = A[sourceAddressRegister];
+        uint destinationAddress = A[destinationAddressRegister];
+        if (!canFastForwardAddress(sourceAddress & AddressMask) ||
+            !canFastForwardAddress(destinationAddress & AddressMask))
+        {
+            return false;
+        }
+
+        int maxTakenIterations = cycleBudget / CyclesPerIteration;
+        int iterations = Math.Min(counter, maxTakenIterations);
+        if (iterations <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < iterations; i++)
+        {
+            byte value = _bus.ReadByte(sourceAddress);
+            _bus.WriteByte(destinationAddress, value);
+            sourceAddress = unchecked(sourceAddress + 1);
+            destinationAddress = unchecked(destinationAddress + 2);
+        }
+
+        A[sourceAddressRegister] = sourceAddress;
+        A[destinationAddressRegister] = destinationAddress;
+        D[counterRegister] = (D[counterRegister] & 0xFFFF_0000u) | (ushort)(counter - iterations);
+        cycles = iterations * CyclesPerIteration;
+        instructionCount = iterations * 3;
         Cycles += cycles;
         return true;
     }
@@ -577,7 +1019,17 @@ public sealed class M68kCpu
         }
 
         uint pc = PC;
-        if (_bus.ReadWord(pc) != 0x4A79)
+        ushort testOpcode = _bus.ReadWord(pc);
+        OperandSize size;
+        if (testOpcode == 0x4A79)
+        {
+            size = OperandSize.Word;
+        }
+        else if (testOpcode == 0x4AB9)
+        {
+            size = OperandSize.Long;
+        }
+        else
         {
             return false;
         }
@@ -600,14 +1052,15 @@ public sealed class M68kCpu
             return false;
         }
 
-        uint value = _bus.ReadLong(address);
+        uint value = size == OperandSize.Long ? _bus.ReadLong(address) : _bus.ReadWord(address);
         if (value == 0)
         {
             return false;
         }
 
         SR = (ushort)(SR & ~0x000F);
-        if ((value & 0x8000_0000u) != 0)
+        uint signBit = size == OperandSize.Long ? 0x8000_0000u : 0x8000u;
+        if ((value & signBit) != 0)
         {
             SR |= 0x0008;
         }
@@ -2219,7 +2672,7 @@ public sealed class M68kCpu
         int condition = (opcode >> 8) & 0xF;
         int mode = (opcode >> 3) & 0x7;
         int register = opcode & 0x7;
-        uint _ = ReadWritableEffectiveAddress(mode, register, OperandSize.Byte, out WritableTarget target);
+        CalculateWritableTarget(mode, register, OperandSize.Byte, out WritableTarget target);
         WriteWritableTarget(target, ConditionTrue(condition) ? 0xFFu : 0u);
         return mode == 0 ? 4 : 8;
     }
@@ -2362,6 +2815,48 @@ public sealed class M68kCpu
     {
         target = WritableTarget.Memory(address, size);
         return ReadMemory(address, size);
+    }
+
+    private void CalculateWritableTarget(int mode, int register, OperandSize size, out WritableTarget target)
+    {
+        switch (mode)
+        {
+            case 0:
+                target = WritableTarget.DataRegister(register, size);
+                break;
+            case 1:
+                throw new M68kCpuException(IllegalInstructionVector);
+            case 2:
+                target = WritableTarget.Memory(A[register], size);
+                break;
+            case 3:
+            {
+                uint address = A[register];
+                A[register] += AddressRegisterIncrement(register, size);
+                target = WritableTarget.Memory(address, size);
+                break;
+            }
+            case 4:
+                A[register] -= AddressRegisterIncrement(register, size);
+                target = WritableTarget.Memory(A[register], size);
+                break;
+            case 5:
+                target = WritableTarget.Memory(unchecked((uint)(A[register] + (short)FetchWord())), size);
+                break;
+            case 6:
+                target = WritableTarget.Memory(CalculateIndexedAddress(A[register]), size);
+                break;
+            case 7 when register == 0:
+                target = WritableTarget.Memory((uint)(short)FetchWord(), size);
+                break;
+            case 7 when register == 1:
+                target = WritableTarget.Memory(FetchLong(), size);
+                break;
+            case 7:
+                throw new M68kCpuException(IllegalInstructionVector);
+            default:
+                throw new M68kException($"Unsupported writable effective address mode {mode}, register {register}, size {size}");
+        }
     }
 
     private void WriteWritableTarget(WritableTarget target, uint value)

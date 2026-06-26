@@ -36,15 +36,33 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         0x4C, 0xDF, 0x02, 0x80,
         0x4E, 0x75
     ];
+    private static readonly byte[] SegaCdMainBootHelperTemplate =
+    [
+        0x24, 0xD9,
+        0x51, 0xCF, 0xFF, 0xFC,
+        0x20, 0x39, 0x00, 0x20, 0x00, 0x0C,
+        0x67, 0x04,
+        0x21, 0xC0, 0xFD, 0x0E,
+        0x20, 0x39, 0x00, 0x20, 0x00, 0x10,
+        0x67, 0x04,
+        0x21, 0xC0, 0xFD, 0x08,
+        0x08, 0xF9, 0x00, 0x01, 0x00, 0xA1, 0x20, 0x03,
+        0x67, 0xF6,
+        0x4E, 0xD0
+    ];
     private const int Z80AreaM68kWaitCycles = 2;
     private const int Ym2612M68kWaitCycles = 2;
     private const int IoM68kWaitCycles = 2;
     private const int VdpPortM68kWaitCycles = 2;
     private const int CartridgeHardwareM68kWaitCycles = 2;
+    private const uint SegaCdMainBootHelperStart = 0x1024;
+    private const uint SegaCdMainBootHelperLoopEndExclusive = 0x102A;
+    private const uint SegaCdMainBootHelperEndExclusive = 0x104E;
 
     private readonly byte[] _workRam = new byte[64 * 1024];
     private readonly byte[] _z80Ram = new byte[8 * 1024];
     private readonly byte[] _tmss = new byte[4];
+    private readonly byte[] _segaCdMainBootHelperShadow = new byte[SegaCdMainBootHelperEndExclusive - SegaCdMainBootHelperStart];
     private readonly ThreeButtonController[] _controllers;
     private readonly SegaTeamPlayerAdapter _teamPlayer;
     private readonly SvpDevice? _svp;
@@ -70,6 +88,10 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
     private int _lightGunX = Vdp.ScreenWidth / 2;
     private int _lightGunY = Vdp.ScreenHeight / 2;
     private bool _lightGunVisible;
+    private bool _segaCdMainBootHelperShadowReady;
+    private bool _segaCdMainBootHelperShadowUsedForOverwrite;
+    private ulong _segaCdMainBootHelperShadowCapturedMask;
+    private bool _segaCdMainBootSyntheticDescriptorPassStarted;
 
     public GenesisBus(CartridgeImage cartridge, Vdp vdp, Psg psg, Ym2612 ym2612, bool pal = false, ThreeButtonController? controller1 = null, ThreeButtonController? controller2 = null, ThreeButtonController? controller3 = null, ThreeButtonController? controller4 = null, ReadOnlyMemory<byte>? thirtyTwoXM68kBios = null, ReadOnlyMemory<byte>? thirtyTwoXMasterSh2Bios = null, ReadOnlyMemory<byte>? thirtyTwoXSlaveSh2Bios = null, bool thirtyTwoXUseRealSh2BiosBoot = false, SegaCdDevice? segaCd = null)
     {
@@ -77,7 +99,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         Vdp = vdp;
         Psg = psg;
         Ym2612 = ym2612;
-        _versionRegister = BuildVersionRegister(cartridge, pal, segaCdAttached: segaCd is not null);
+        _versionRegister = BuildVersionRegister(cartridge, pal, segaCd);
         _controllers = new[]
         {
             controller1 ?? new ThreeButtonController(),
@@ -240,6 +262,7 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
 
         if (address >= 0xE0_0000)
         {
+            ApplySegaCdMainBiosDiscClassificationAssist();
             uint ramAddress = address & 0xFFFF;
             byte value = _workRam[ramAddress];
             MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | ramAddress, 1, value));
@@ -381,6 +404,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             uint ramAddress = address & 0xFFFF;
             _workRam[ramAddress] = value;
+            CaptureSegaCdMainBootHelperShadowByte(ramAddress, value);
+            ApplySegaCdMainBiosDiscClassificationAssist();
             MemoryWriteObserver?.Invoke(new MemoryWrite(CurrentM68kPc, 0x00FF_0000 | ramAddress, value));
         }
     }
@@ -396,6 +421,12 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (IsThirtyTwoXLowCartridgeRomBlocked(address))
         {
             return 0xFFFF;
+        }
+
+        if (TryReadSegaCdBootIpDescriptorWord(address, out ushort segaCdBootDescriptorWord))
+        {
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 2, segaCdBootDescriptorWord));
+            return segaCdBootDescriptorWord;
         }
 
         if (TryReadSegaCdWord(address, out ushort segaCdValue))
@@ -469,7 +500,15 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (address >= 0xE0_0000)
         {
             int offset = (int)(address & 0xFFFF);
+            if (TryReadSegaCdMainBootHelperShadowWord((uint)offset, out ushort shadowValue))
+            {
+                MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 2, shadowValue));
+                return shadowValue;
+            }
+
             ushort value = (ushort)((_workRam[offset] << 8) | _workRam[(offset + 1) & 0xFFFF]);
+            CaptureSegaCdMainBootHelperShadowByte((uint)offset, (byte)(value >> 8));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 1) & 0xFFFF), (byte)value);
             MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 2, value));
             return value;
         }
@@ -488,6 +527,18 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (IsThirtyTwoXLowCartridgeRomBlocked(address))
         {
             return 0xFFFF_FFFF;
+        }
+
+        if (TryReadSegaCdBootIpDescriptorLong(address, out uint segaCdBootEntryValue))
+        {
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 4, segaCdBootEntryValue));
+            return segaCdBootEntryValue;
+        }
+
+        if (TryReadSegaCdBootIpPayloadLong(address, out uint segaCdBootPayloadValue))
+        {
+            MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, address, 4, segaCdBootPayloadValue));
+            return segaCdBootPayloadValue;
         }
 
         if (TryReadSegaCdWord(address, out ushort highSegaCdValue) && TryReadSegaCdWord(address + 2, out ushort lowSegaCdValue))
@@ -535,7 +586,17 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         if (address >= 0xE0_0000)
         {
             int offset = (int)(address & 0xFFFF);
+            if (TryReadSegaCdMainBootHelperShadowLong((uint)offset, out uint shadowValue))
+            {
+                MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 4, shadowValue));
+                return shadowValue;
+            }
+
             uint value = (uint)((_workRam[offset] << 24) | (_workRam[(offset + 1) & 0xFFFF] << 16) | (_workRam[(offset + 2) & 0xFFFF] << 8) | _workRam[(offset + 3) & 0xFFFF]);
+            CaptureSegaCdMainBootHelperShadowByte((uint)offset, (byte)(value >> 24));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 1) & 0xFFFF), (byte)(value >> 16));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 2) & 0xFFFF), (byte)(value >> 8));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 3) & 0xFFFF), (byte)value);
             MemoryReadObserver?.Invoke(new MemoryRead(CurrentM68kPc, 0x00FF_0000 | (uint)offset, 4, value));
             return value;
         }
@@ -601,6 +662,9 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             int offset = (int)(address & 0xFFFF);
             _workRam[offset] = (byte)(value >> 8);
             _workRam[(offset + 1) & 0xFFFF] = (byte)value;
+            CaptureSegaCdMainBootHelperShadowByte((uint)offset, (byte)(value >> 8));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 1) & 0xFFFF), (byte)value);
+            ApplySegaCdMainBiosDiscClassificationAssist();
             return;
         }
 
@@ -629,6 +693,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             _workRam[(offset + 1) & 0xFFFF] = (byte)(value >> 16);
             _workRam[(offset + 2) & 0xFFFF] = (byte)(value >> 8);
             _workRam[(offset + 3) & 0xFFFF] = (byte)value;
+            CaptureSegaCdMainBootHelperShadowByte((uint)offset, (byte)(value >> 24));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 1) & 0xFFFF), (byte)(value >> 16));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 2) & 0xFFFF), (byte)(value >> 8));
+            CaptureSegaCdMainBootHelperShadowByte((uint)((offset + 3) & 0xFFFF), (byte)value);
+            ApplySegaCdMainBiosDiscClassificationAssist();
             return;
         }
 
@@ -1090,21 +1159,40 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return true;
         }
 
-        if (address is >= SegaCdHardwareProfile.MainProgramRamWindowStart and <= SegaCdHardwareProfile.MainProgramRamWindowEndInclusive)
+        if (_segaCd.TryMapMainProgramRamAddress(address, out uint programRamOffset))
         {
-            value = _segaCd.ReadProgramRamByte(address - SegaCdHardwareProfile.MainProgramRamWindowStart);
+            value = _segaCd.ReadProgramRamByte(programRamOffset);
             return true;
         }
 
         if (address is >= SegaCdHardwareProfile.MainWordRamStart and <= SegaCdHardwareProfile.MainWordRamEndInclusive)
         {
-            value = _segaCd.ReadWordRamByte(address - SegaCdHardwareProfile.MainWordRamStart);
+            value = _segaCd.ReadMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamStart, CurrentM68kPc);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamHighAliasStart and <= SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
+        {
+            value = _segaCd.ReadMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamHighAliasStart, CurrentM68kPc);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamAliasStart and <= SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
+        {
+            value = _segaCd.ReadMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamAliasStart, CurrentM68kPc);
             return true;
         }
 
         if (address is >= SegaCdHardwareProfile.MainRegisterStart and <= SegaCdHardwareProfile.MainRegisterEndInclusive)
         {
-            value = _segaCd.ReadMainRegisterByte(address - SegaCdHardwareProfile.MainRegisterStart);
+            value = _segaCd.ReadMainRegisterByte(address - SegaCdHardwareProfile.MainRegisterStart, CurrentM68kPc);
+            if (_segaCd.MainBootIpOverrideAllowed &&
+                CurrentM68kPc is >= 0x00FF_1042 and <= 0x00FF_104A &&
+                address is >= SegaCdHardwareProfile.MainRegisterStart + 0x02 and <= SegaCdHardwareProfile.MainRegisterStart + 0x03)
+            {
+                _segaCd.DisableMainBootIpOverride();
+            }
+
             return true;
         }
 
@@ -1124,6 +1212,253 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         return false;
     }
 
+    private void CaptureSegaCdMainBootHelperShadowByte(uint workRamOffset, byte value)
+    {
+        if (_segaCd is null ||
+            _segaCdMainBootHelperShadowReady ||
+            workRamOffset < SegaCdMainBootHelperStart ||
+            workRamOffset >= SegaCdMainBootHelperEndExclusive)
+        {
+            return;
+        }
+
+        _segaCdMainBootHelperShadow[workRamOffset - SegaCdMainBootHelperStart] = value;
+        _segaCdMainBootHelperShadowCapturedMask |= 1UL << (int)(workRamOffset - SegaCdMainBootHelperStart);
+
+        ulong helperMask = (1UL << SegaCdMainBootHelperTemplate.Length) - 1;
+        if ((_segaCdMainBootHelperShadowCapturedMask & helperMask) != helperMask)
+        {
+            return;
+        }
+
+        for (int i = 0; i < SegaCdMainBootHelperTemplate.Length; i++)
+        {
+            if (_segaCdMainBootHelperShadow[i] != SegaCdMainBootHelperTemplate[i])
+            {
+                return;
+            }
+        }
+
+        _segaCdMainBootHelperShadowReady = true;
+    }
+
+    private void ApplySegaCdMainBiosDiscClassificationAssist()
+    {
+        if (_segaCd is null ||
+            !_segaCd.MainBootIpOverrideAllowed ||
+            _segaCd.Disc is null ||
+            _workRam[0xFDDC] != 0xFF)
+        {
+            return;
+        }
+
+        bool hasDiscPacket =
+            _workRam[0xFDF0] == 0x00 &&
+            _workRam[0xFDF1] == 0x04 &&
+            _workRam[0xFDF2] == 0x00 &&
+            (_workRam[0xFDF3] == _segaCd.MainBiosDiscType ||
+             _workRam[0xFDF3] == 0x00 ||
+             _workRam[0xFDF3] == 0xFF);
+        bool hasDataDiscStatus = _workRam[0xFE3A] == 0x00 && _workRam[0xFE3B] == 0x04;
+        if (!hasDiscPacket && !hasDataDiscStatus)
+        {
+            return;
+        }
+
+        _workRam[0xFDDC] = _segaCd.MainBiosDiscType;
+        _workRam[0xFDF0] = 0x00;
+        _workRam[0xFDF1] = 0x04;
+        _workRam[0xFDF2] = 0x00;
+        _workRam[0xFDF3] = _segaCd.MainBiosDiscType;
+        if (_workRam[0xFE44] == 0x00)
+        {
+            _workRam[0xFE44] = _segaCd.MainBiosFirstTrack;
+        }
+
+        if (_workRam[0xFE45] == 0x00)
+        {
+            _workRam[0xFE45] = _segaCd.MainBiosLastTrack;
+        }
+    }
+
+    private bool TryReadSegaCdMainBootHelperShadowWord(uint workRamOffset, out ushort value)
+    {
+        value = 0;
+        if (!ShouldUseSegaCdMainBootHelperShadow(workRamOffset, 2))
+        {
+            return false;
+        }
+
+        int offset = (int)(workRamOffset - SegaCdMainBootHelperStart);
+        value = (ushort)((_segaCdMainBootHelperShadow[offset] << 8) | _segaCdMainBootHelperShadow[offset + 1]);
+        ushort live = (ushort)((_workRam[workRamOffset] << 8) | _workRam[(workRamOffset + 1) & 0xFFFF]);
+        if (live == value && !_segaCdMainBootHelperShadowUsedForOverwrite)
+        {
+            return false;
+        }
+
+        if (live != value)
+        {
+            _segaCdMainBootHelperShadowUsedForOverwrite = true;
+        }
+
+        return true;
+    }
+
+    private bool TryReadSegaCdMainBootHelperShadowLong(uint workRamOffset, out uint value)
+    {
+        value = 0;
+        if (!ShouldUseSegaCdMainBootHelperShadow(workRamOffset, 4))
+        {
+            return false;
+        }
+
+        int offset = (int)(workRamOffset - SegaCdMainBootHelperStart);
+        value =
+            ((uint)_segaCdMainBootHelperShadow[offset] << 24) |
+            ((uint)_segaCdMainBootHelperShadow[offset + 1] << 16) |
+            ((uint)_segaCdMainBootHelperShadow[offset + 2] << 8) |
+            _segaCdMainBootHelperShadow[offset + 3];
+        uint live =
+            ((uint)_workRam[workRamOffset] << 24) |
+            ((uint)_workRam[(workRamOffset + 1) & 0xFFFF] << 16) |
+            ((uint)_workRam[(workRamOffset + 2) & 0xFFFF] << 8) |
+            _workRam[(workRamOffset + 3) & 0xFFFF];
+        if (live == value && !_segaCdMainBootHelperShadowUsedForOverwrite)
+        {
+            return false;
+        }
+
+        if (live != value)
+        {
+            _segaCdMainBootHelperShadowUsedForOverwrite = true;
+        }
+
+        return true;
+    }
+
+    private bool ShouldUseSegaCdMainBootHelperShadow(uint workRamOffset, uint length)
+    {
+        if (_segaCd is null ||
+            (_segaCd.Disc is not null && !_segaCd.MainBootIpDescriptorOverrideAvailable) ||
+            !_segaCdMainBootHelperShadowReady ||
+            CurrentM68kPc < 0x00FF_0000 + SegaCdMainBootHelperStart ||
+            CurrentM68kPc >= 0x00FF_0000 + SegaCdMainBootHelperEndExclusive ||
+            workRamOffset < SegaCdMainBootHelperStart ||
+            workRamOffset + length > SegaCdMainBootHelperEndExclusive)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryReadSegaCdBootIpDescriptorLong(uint address, out uint value)
+    {
+        value = 0;
+        if (_segaCd is null || !_segaCd.MainBootIpOverrideAllowed)
+        {
+            return false;
+        }
+
+        bool descriptorRead =
+            (CurrentM68kPc == 0x00FF_1008 && IsSegaCdMainWordRamAliasOffset(address, 8)) ||
+            (CurrentM68kPc == 0x00FF_100E && IsSegaCdMainWordRamAliasOffset(address, 2));
+        if (!descriptorRead)
+        {
+            return false;
+        }
+
+        if (CurrentM68kPc == 0x00FF_1008 && IsSegaCdMainWordRamAliasOffset(address, 8))
+        {
+            if (_segaCdMainBootSyntheticDescriptorPassStarted)
+            {
+                _segaCd.DisableMainBootIpOverride();
+                return false;
+            }
+
+            _segaCdMainBootSyntheticDescriptorPassStarted = true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamStart and <= SegaCdHardwareProfile.MainWordRamEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpEntryLong(address - SegaCdHardwareProfile.MainWordRamStart, out value);
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamAliasStart and <= SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpEntryLong(address - SegaCdHardwareProfile.MainWordRamAliasStart, out value);
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamHighAliasStart and <= SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpEntryLong(address - SegaCdHardwareProfile.MainWordRamHighAliasStart, out value);
+        }
+
+        return false;
+    }
+
+    private bool TryReadSegaCdBootIpDescriptorWord(uint address, out ushort value)
+    {
+        value = 0;
+        if (_segaCd is null || !_segaCd.MainBootIpOverrideAllowed || CurrentM68kPc != 0x00FF_101E)
+        {
+            return false;
+        }
+
+        if (address == SegaCdHardwareProfile.MainWordRamStart + 6)
+        {
+            return _segaCd.TryReadMainBootIpCopyLengthWord(6, out value);
+        }
+
+        if (address == SegaCdHardwareProfile.MainWordRamAliasStart + 6)
+        {
+            return _segaCd.TryReadMainBootIpCopyLengthWord(6, out value);
+        }
+
+        if (address == SegaCdHardwareProfile.MainWordRamHighAliasStart + 6)
+        {
+            return _segaCd.TryReadMainBootIpCopyLengthWord(6, out value);
+        }
+
+        return false;
+    }
+
+    private bool TryReadSegaCdBootIpPayloadLong(uint address, out uint value)
+    {
+        value = 0;
+        if (_segaCd is null ||
+            !_segaCd.MainBootIpOverrideAllowed ||
+            CurrentM68kPc is < 0x00FF_101E or > 0x00FF_1026)
+        {
+            return false;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamStart + 0x100 and <= SegaCdHardwareProfile.MainWordRamEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpPayloadLong(address - SegaCdHardwareProfile.MainWordRamStart, out value);
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamAliasStart + 0x100 and <= SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpPayloadLong(address - SegaCdHardwareProfile.MainWordRamAliasStart, out value);
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamHighAliasStart + 0x100 and <= SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
+        {
+            return _segaCd.TryReadMainBootIpPayloadLong(address - SegaCdHardwareProfile.MainWordRamHighAliasStart, out value);
+        }
+
+        return false;
+    }
+
+    private static bool IsSegaCdMainWordRamAliasOffset(uint address, uint offset)
+    {
+        return address == SegaCdHardwareProfile.MainWordRamStart + offset ||
+            address == SegaCdHardwareProfile.MainWordRamAliasStart + offset ||
+            address == SegaCdHardwareProfile.MainWordRamHighAliasStart + offset;
+    }
+
     private bool TryWriteSegaCdByte(uint address, byte value)
     {
         if (_segaCd is null)
@@ -1131,15 +1466,27 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return false;
         }
 
-        if (address is >= SegaCdHardwareProfile.MainProgramRamWindowStart and <= SegaCdHardwareProfile.MainProgramRamWindowEndInclusive)
+        if (_segaCd.TryMapMainProgramRamAddress(address, out uint programRamOffset))
         {
-            _segaCd.WriteProgramRamByte(address - SegaCdHardwareProfile.MainProgramRamWindowStart, value);
+            _segaCd.WriteProgramRamByte(programRamOffset, value);
             return true;
         }
 
         if (address is >= SegaCdHardwareProfile.MainWordRamStart and <= SegaCdHardwareProfile.MainWordRamEndInclusive)
         {
-            _segaCd.WriteWordRamByte(address - SegaCdHardwareProfile.MainWordRamStart, value);
+            _segaCd.WriteMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamStart, value);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamHighAliasStart and <= SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
+        {
+            _segaCd.WriteMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamHighAliasStart, value);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamAliasStart and <= SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
+        {
+            _segaCd.WriteMainWordRamByte(address - SegaCdHardwareProfile.MainWordRamAliasStart, value);
             return true;
         }
 
@@ -1159,19 +1506,36 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             return false;
         }
 
-        if (address is >= SegaCdHardwareProfile.MainProgramRamWindowStart and < SegaCdHardwareProfile.MainProgramRamWindowEndInclusive)
+        if (_segaCd.TryMapMainProgramRamAddress(address, out uint programRamOffset) &&
+            _segaCd.TryMapMainProgramRamAddress((address + 1) & 0x00FF_FFFF, out uint nextProgramRamOffset) &&
+            nextProgramRamOffset == programRamOffset + 1)
         {
-            uint offset = address - SegaCdHardwareProfile.MainProgramRamWindowStart;
-            _segaCd.WriteProgramRamByte(offset, (byte)(value >> 8));
-            _segaCd.WriteProgramRamByte(offset + 1, (byte)value);
+            _segaCd.WriteProgramRamByte(programRamOffset, (byte)(value >> 8));
+            _segaCd.WriteProgramRamByte(nextProgramRamOffset, (byte)value);
             return true;
         }
 
         if (address is >= SegaCdHardwareProfile.MainWordRamStart and < SegaCdHardwareProfile.MainWordRamEndInclusive)
         {
             uint offset = address - SegaCdHardwareProfile.MainWordRamStart;
-            _segaCd.WriteWordRamByte(offset, (byte)(value >> 8));
-            _segaCd.WriteWordRamByte(offset + 1, (byte)value);
+            _segaCd.WriteMainWordRamByte(offset, (byte)(value >> 8));
+            _segaCd.WriteMainWordRamByte(offset + 1, (byte)value);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamHighAliasStart and < SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
+        {
+            uint offset = address - SegaCdHardwareProfile.MainWordRamHighAliasStart;
+            _segaCd.WriteMainWordRamByte(offset, (byte)(value >> 8));
+            _segaCd.WriteMainWordRamByte(offset + 1, (byte)value);
+            return true;
+        }
+
+        if (address is >= SegaCdHardwareProfile.MainWordRamAliasStart and < SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
+        {
+            uint offset = address - SegaCdHardwareProfile.MainWordRamAliasStart;
+            _segaCd.WriteMainWordRamByte(offset, (byte)(value >> 8));
+            _segaCd.WriteMainWordRamByte(offset + 1, (byte)value);
             return true;
         }
 
@@ -1588,17 +1952,22 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         Controller4.WriteData(th, CurrentMasterCycle);
     }
 
-    private static byte BuildVersionRegister(CartridgeImage cartridge, bool pal, bool segaCdAttached = false)
+    private static byte BuildVersionRegister(CartridgeImage cartridge, bool pal, SegaCdDevice? segaCd = null)
     {
-        string region = cartridge.Header.Region.ToUpperInvariant();
-        bool domesticOnly = (region.Contains('J') || region.Contains('1'))
-            && !region.Contains('U')
-            && !region.Contains('E')
-            && !region.Contains('W')
-            && !region.Contains('4')
-            && !region.Contains('8')
-            && !region.Contains('F');
-        byte version = segaCdAttached ? (byte)0x01 : (byte)0x21; // bit 5 clear means expansion unit present.
+        bool domesticOnly = segaCd?.Region == SegaCdRegion.Japan;
+        if (segaCd is null)
+        {
+            string region = cartridge.Header.Region.ToUpperInvariant();
+            domesticOnly = (region.Contains('J') || region.Contains('1'))
+                && !region.Contains('U')
+                && !region.Contains('E')
+                && !region.Contains('W')
+                && !region.Contains('4')
+                && !region.Contains('8')
+                && !region.Contains('F');
+        }
+
+        byte version = segaCd is not null ? (byte)0x01 : (byte)0x21; // bit 5 clear means expansion unit present.
         if (!domesticOnly)
         {
             version |= 0x80;
@@ -1858,7 +2227,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
             _z80BusGrantReadyCycle,
             _pendingM68kWaitCycles,
             _svp?.CaptureState(),
-            _thirtyTwoX?.CaptureState());
+            _thirtyTwoX?.CaptureState(),
+            _segaCd?.CaptureState());
     }
 
     public void RestoreState(BusState state)
@@ -1896,6 +2266,11 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         {
             _thirtyTwoX.RestoreState(state.ThirtyTwoX);
         }
+
+        if (_segaCd is not null && state.SegaCd is not null)
+        {
+            _segaCd.RestoreState(state.SegaCd);
+        }
     }
 
     public sealed record BusState(
@@ -1915,7 +2290,8 @@ public sealed class GenesisBus : IMemoryBus, IInstructionTraceSink, IZ80Bus
         long Z80BusGrantReadyCycle,
         int PendingM68kWaitCycles,
         SvpDevice.SvpState? Svp,
-        ThirtyTwoXDevice.ThirtyTwoXState? ThirtyTwoX);
+        ThirtyTwoXDevice.ThirtyTwoXState? ThirtyTwoX,
+        SegaCdDevice.SegaCdState? SegaCd);
 }
 
 public readonly record struct MemoryRead(uint Pc, uint Address, int Size, uint Value);

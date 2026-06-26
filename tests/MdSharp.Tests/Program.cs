@@ -2,6 +2,7 @@ using MdSharp.Core;
 using MdSharp.Core.Audio;
 using MdSharp.Core.Bus;
 using MdSharp.Core.Cartridge;
+using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Cpu.Z80;
 using MdSharp.Core.Input;
@@ -10,19 +11,56 @@ using MdSharp.Core.State;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 int failures = 0;
 
 Run("cartridge header parsing", CartridgeHeaderParsing);
 Run("cartridge diagnostics", CartridgeDiagnosticsReport);
 Run("Sega CD ISO disc image parsing", SegaCdIsoDiscImageParsing);
+Run("Sega CD ISO root file read", SegaCdIsoRootFileRead);
 Run("Sega CD CUE disc image parsing", SegaCdCueDiscImageParsing);
+Run("Sega CD CUE Mode1 sector read", SegaCdCueMode1SectorRead);
+Run("Sega CD CUE audio sector read", SegaCdCueAudioSectorRead);
+Run("Sega CD CUE WAV audio sector read", SegaCdCueWaveAudioSectorRead);
 Run("Sega CD BIOS discovery", SegaCdBiosDiscovery);
 Run("Sega CD device shell", SegaCdDeviceShell);
 Run("Sega CD sub CPU reset and state", SegaCdSubCpuResetAndState);
 Run("Sega CD main control register", SegaCdMainControlRegister);
+Run("Sega CD VBlank INT2 pulse", SegaCdVBlankInt2Pulse);
+Run("Sega CD main IRQ2 send is pulsed", SegaCdMainIrq2SendIsPulsed);
 Run("Sega CD CDD status handshake", SegaCdCddStatusHandshake);
+Run("Sega CD CDD TOC reports", SegaCdCddTocReports);
+Run("Sega CD CDD TOC response survives status tick", SegaCdCddTocResponseSurvivesStatusTick);
+Run("Sega CD CDD location reports preserve play status", SegaCdCddLocationReportsPreservePlayStatus);
+Run("Sega CD CD-DA playback render", SegaCdCddaPlaybackRender);
+Run("Sega CD CD-DA mixer output", SegaCdCddaMixerOutput);
+Run("Sega CD RF5C164 mapped RAM and playback", SegaCdPcmMappedRamAndPlayback);
+Run("Sega CD RF5C164 mixer output", SegaCdPcmMixerOutput);
+Run("Sega CD CDD seek completes to ready", SegaCdCddSeekCompletesToReady);
+Run("Sega CD main BIOS disc type packet", SegaCdMainBiosDiscTypePacket);
+Run("Sega CD generic BIOS disc type ready edge", SegaCdGenericBiosDiscTypeReadyEdge);
+Run("Sega CD main BIOS flag 7 boot edge", SegaCdMainBiosFlag7BootEdge);
+Run("Sega CD disc type packet yields to command status", SegaCdDiscTypePacketYieldsToCommandStatus);
+Run("Sega CD generic BIOS IRQ2 wait clears command flag", SegaCdGenericBiosIrq2WaitClearsCommandFlag);
+Run("Sega CD initial program stages at Word RAM base", SegaCdInitialProgramStagesAtWordRamBase);
+Run("Sega CD nonstandard initial program bypasses descriptor override", SegaCdNonstandardInitialProgramBypassesDescriptorOverride);
+Run("Sega CD generic boot main copy linearizes banked initial program", SegaCdGenericBootMainCopyLinearizesBankedInitialProgram);
+Run("Sega CD boot header stages sub system program", SegaCdBootHeaderStagesSubSystemProgram);
+Run("Sega CD generic boot IRQ2 bridge", SegaCdGenericBootIrq2Bridge);
+Run("Sega CD Sonic CD post-boot MMD handoff", SegaCdSonicCdPostBootMmdHandoff);
+Run("Sega CD Sonic CD system LoadFile bridge", SegaCdSonicCdSystemLoadFileBridge);
+Run("Sega CD Sonic CD title quad fill fast-forward", SegaCdSonicCdTitleQuadFillFastForward);
+Run("Sega CD main BIOS helper shadow survives sliced program copy", SegaCdMainBiosHelperShadowSurvivesSlicedProgramCopy);
+Run("Sega CD sub BIOS overlay reads program RAM data", SegaCdSubBiosOverlayReadsProgramRamData);
+Run("Sega CD CDC host sector transfer", SegaCdCdcHostSectorTransfer);
+Run("Sega CD sub BIOS boot read seeds CDC ring", SegaCdSubBiosBootReadSeedsCdcRing);
+Run("Sega CD generic boot CDC service raises ready edge", SegaCdGenericBootCdcServiceRaisesReadyEdge);
+Run("Sega CD graphics ASIC stamp render", SegaCdGraphicsAsicStampRender);
 Run("Sega CD main bus mapping", SegaCdMainBusMapping);
+Run("Sega CD main 1M Word RAM bank mapping", SegaCdMainOneMegWordRamBankMapping);
+Run("Sega CD Word RAM rearranges on 1M mode switch", SegaCdWordRamRearrangesOnOneMegModeSwitch);
+Run("Sega CD sub 1M Word RAM window", SegaCdSubOneMegWordRamWindow);
 Run("32X hardware profile", ThirtyTwoXHardwareProfileReport);
 Run("32X device shell", ThirtyTwoXDeviceShell);
 Run("32X SH-2 FRT input capture signal", ThirtyTwoXSh2FrtInputCaptureSignal);
@@ -250,19 +288,28 @@ Run("SVP pointer writes ignore modulo length", SvpPointerWritesIgnoreModuloLengt
 Run("SVP PM trace captures DRAM writes", SvpPmTraceCapturesDramWrites);
 Run("SVP pointer trace captures RAM operands", SvpPointerTraceCapturesRamOperands);
 Run("save-state round trip", SaveStateRoundTrip);
+Run("Sega CD save-state round trip", SegaCdSaveStateRoundTrip);
 Run("synthetic Genesis startup ROM", SyntheticGenesisStartupRom);
 Run("synthetic Genesis VBlank interrupt", SyntheticGenesisVBlankInterrupt);
 Run("synthetic Genesis pending VBlank interrupt after unmask", SyntheticGenesisPendingVBlankInterruptAfterUnmask);
+Run("synthetic Genesis VBlank interrupt after exhausted frame budget", SyntheticGenesisVBlankInterruptAfterExhaustedFrameBudget);
 Run("expanded 68k arithmetic and MOVEM", ExpandedCpuInstructions);
 Run("MegaDrive records 68000 fast-path counters", MegaDriveRecordsM68kFastPathCounters);
 Run("68000 MOVE.B DBF fill loop fast-forward", M68kMoveByteDbfFillLoopFastForward);
 Run("68000 MOVE.B postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementCopyDbfLoopFastForward);
+Run("68000 MOVE.L postincrement copy DBF loop fast-forward", M68kMoveLongPostIncrementCopyDbfLoopFastForward);
+Run("68000 Sega CD BIOS copy helper tail after fast-forward", SegaCdMainBiosCopyHelperTailAfterFastForward);
+Run("Sega CD main BIOS MOVE.L PRG copy fast-forward", SegaCdMainBiosMoveLongProgramCopyFastForward);
+Run("68000 MOVE.B strided postincrement copy DBF loop fast-forward", M68kMoveBytePostIncrementStridedCopyDbfLoopFastForward);
+Run("68000 ADD.W nested DBF checksum loop fast-forward", M68kAddWordNestedDbfChecksumLoopFastForward);
 Run("68000 MOVE.W absolute DBF fill loop fast-forward", M68kMoveWordAbsoluteDbfFillLoopFastForward);
 Run("68000 shift-register bit reader loop fast-forward", M68kShiftRegisterBitReaderLoopFastForward);
 Run("MegaDrive records 68000 bit-reader fast-path counters", MegaDriveRecordsM68kBitReaderFastPathCounters);
 Run("68000 word-pair compare subroutine DBF loop fast-forward", M68kWordPairCompareSubroutineDbfLoopFastForward);
 Run("MegaDrive records 68000 word-pair compare fast-path counters", MegaDriveRecordsM68kWordPairCompareFastPathCounters);
 Run("68000 BTST DBcc delay loop fast-forward", M68kBtstDbccDelayLoopFastForward);
+Run("68000 TST.W absolute-long BNE exits on zero word", M68kTstWordAbsoluteLongBneExitsOnZeroWord);
+Run("68000 TST.W BNE wait loop fast-forward", M68kTstWordBneWaitLoopFastForward);
 Run("68000 TST.L BNE wait loop fast-forward", M68kTstLongBneWaitLoopFastForward);
 Run("68000 CMP.L BEQ wait loop fast-forward", M68kCmpLongBeqWaitLoopFastForward);
 Run("68000 MOVEM predecrement stores original address register", MovemPredecrementStoresOriginalAddressRegister);
@@ -272,7 +319,9 @@ Run("68000 NEG Scc CHK and MOVEP instructions", NegSccChkAndMovepInstructions);
 Run("68000 MOVE from SR instruction", MoveFromSrInstruction);
 Run("68000 exchange TAS and dynamic bit ops", ExchangeTasAndBitOps);
 Run("68000 immediate bit write ops", ImmediateBitWriteOps);
+Run("68000 BCLR displacement branch flags", M68kBclrDisplacementBranchFlags);
 Run("68000 illegal exception and RTE", IllegalExceptionAndRte);
+Run("68000 Scc absolute-short consumes extension", SccAbsoluteShortConsumesExtension);
 Run("68000 ILLEGAL opcode vectors without extension word", IllegalOpcodeVectorsWithoutExtensionWord);
 Run("68000 invalid MOVEA.B vectors illegal", InvalidMoveaByteVectorsIllegal);
 Run("68000 invalid effective address vectors illegal", InvalidEffectiveAddressVectorsIllegal);
@@ -459,6 +508,31 @@ void SegaCdIsoDiscImageParsing()
     }
 }
 
+void SegaCdIsoRootFileRead()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string isoPath = Path.Combine(folder, "disc.iso");
+        byte[] payload = [0x12, 0x34, 0x56, 0x78, 0x9A];
+        File.WriteAllBytes(isoPath, CreateIsoWithRootFile("IPX___.MMD;1", payload));
+
+        DiscImage image = DiscImage.FromFile(isoPath);
+        AssertTrue(image.TryReadIso9660File("ipx___.mmd", out byte[] read), "Expected root file lookup to ignore case and version suffix");
+        AssertEqual(payload.Length, read.Length);
+        for (int i = 0; i < payload.Length; i++)
+        {
+            AssertEqual(payload[i], read[i]);
+        }
+
+        AssertTrue(!image.TryReadIso9660File("MISSING.BIN;1", out _), "Missing ISO file should not resolve");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
 void SegaCdCueDiscImageParsing()
 {
     string folder = CreateTempDirectory();
@@ -500,6 +574,153 @@ void SegaCdCueDiscImageParsing()
     }
 }
 
+void SegaCdCueMode1SectorRead()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string binPath = Path.Combine(folder, "disc.bin");
+        byte[] raw = new byte[2352 * 3];
+        for (int sector = 0; sector < 3; sector++)
+        {
+            int baseOffset = sector * 2352;
+            raw[baseOffset + 15] = 0x02;
+            for (int i = 0; i < 2048; i++)
+            {
+                raw[baseOffset + 16 + i] = (byte)((sector * 17 + i) & 0xFF);
+            }
+        }
+
+        File.WriteAllBytes(binPath, raw);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "disc.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage image = DiscImage.FromFile(cuePath);
+        byte[] data = new byte[2048];
+        AssertTrue(image.TryGetTrackForLba(1, out DiscTrack? track), "Expected LBA 1 to resolve to track 1");
+        AssertEqual(1, track.Number);
+        AssertTrue(image.TryReadDataSector2048(2, data), "Expected data sector 2 to read");
+        AssertEqual((byte)34, data[0]);
+        AssertEqual((byte)35, data[1]);
+        AssertEqual((byte)33, data[2047]);
+        AssertTrue(!image.TryReadDataSector2048(3, data), "Expected lead-out sector read to fail");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCueAudioSectorRead()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 2]);
+
+        byte[] audio = new byte[2352 * 2];
+        audio[0] = 0x34;
+        audio[1] = 0x12;
+        audio[2] = 0x78;
+        audio[3] = 0x56;
+        audio[2352] = 0xBC;
+        audio[2353] = 0x9A;
+        audio[2354] = 0xF0;
+        audio[2355] = 0xDE;
+        File.WriteAllBytes(audioPath, audio);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage image = DiscImage.FromFile(cuePath);
+        byte[] sector = new byte[2352];
+        AssertTrue(image.TryReadAudioSector2352(2, sector), "Expected first audio track sector to read");
+        AssertEqual((byte)0x34, sector[0]);
+        AssertEqual((byte)0x12, sector[1]);
+        AssertEqual((byte)0x78, sector[2]);
+        AssertEqual((byte)0x56, sector[3]);
+        AssertTrue(image.TryReadAudioSector2352(3, sector), "Expected second audio track sector to read");
+        AssertEqual((byte)0xBC, sector[0]);
+        AssertEqual((byte)0x9A, sector[1]);
+        AssertTrue(!image.TryReadAudioSector2352(0, sector), "Expected data-track audio read to fail");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCueWaveAudioSectorRead()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.wav");
+        File.WriteAllBytes(dataPath, new byte[2352 * 2]);
+
+        byte[] audio = new byte[2352 * 2];
+        audio[0] = 0x11;
+        audio[1] = 0x22;
+        audio[2] = 0x33;
+        audio[3] = 0x44;
+        audio[2352] = 0x55;
+        audio[2353] = 0x66;
+        audio[2354] = 0x77;
+        audio[2355] = 0x88;
+        WriteWaveFile(audioPath, audio);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.wav" WAVE
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage image = DiscImage.FromFile(cuePath);
+        byte[] sector = new byte[2352];
+        AssertEqual(2, image.Tracks.Count);
+        AssertEqual(2, image.Tracks[1].StartLba);
+        AssertEqual(2, image.Tracks[1].LengthFrames);
+        AssertTrue(image.Tracks[1].FileOffsetBytes > 0, "Expected WAV audio track to skip the RIFF header");
+        AssertTrue(image.TryReadAudioSector2352(2, sector), "Expected first WAV audio track sector to read");
+        AssertEqual((byte)0x11, sector[0]);
+        AssertEqual((byte)0x22, sector[1]);
+        AssertEqual((byte)0x33, sector[2]);
+        AssertEqual((byte)0x44, sector[3]);
+        AssertTrue(image.TryReadAudioSector2352(3, sector), "Expected second WAV audio track sector to read");
+        AssertEqual((byte)0x55, sector[0]);
+        AssertEqual((byte)0x66, sector[1]);
+        AssertTrue(!image.TryReadAudioSector2352(4, sector), "Expected WAV lead-out sector read to fail");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
 void SegaCdBiosDiscovery()
 {
     string folder = CreateTempDirectory();
@@ -507,21 +728,24 @@ void SegaCdBiosDiscovery()
     {
         string biosFolder = Path.Combine(folder, "Sega Mega CD BIOS Set v1");
         Directory.CreateDirectory(biosFolder);
+        File.WriteAllBytes(Path.Combine(biosFolder, "Sega CD (U) - M1 V1.10.bin"), Enumerable.Repeat((byte)0x10, 128 * 1024).ToArray());
         File.WriteAllBytes(Path.Combine(biosFolder, "Sega CD (U) - M2 V2.00 (Non-Working).bin"), new byte[128 * 1024]);
         File.WriteAllBytes(Path.Combine(biosFolder, "Sega CD (U) - M2 V2.00w.bin"), Enumerable.Repeat((byte)0x11, 128 * 1024).ToArray());
+        File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (E) - M1 V1.00.bin"), Enumerable.Repeat((byte)0x21, 128 * 1024).ToArray());
         File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (E) - M2 V2.00.bin"), Enumerable.Repeat((byte)0x22, 128 * 1024).ToArray());
         File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (J) - M1 V1.00p.bin"), Enumerable.Repeat((byte)0x33, 128 * 1024).ToArray());
+        File.WriteAllBytes(Path.Combine(biosFolder, "Mega CD (J(UE)) - M2 V2.00 ().bin"), Enumerable.Repeat((byte)0x44, 128 * 1024).ToArray());
 
         IReadOnlyList<SegaCdBiosImage> candidates = SegaCdBiosFinder.FindAll(folder);
-        AssertEqual(4, candidates.Count);
+        AssertEqual(7, candidates.Count);
         SegaCdBiosImage? us = SegaCdBiosFinder.FindBest(SegaCdRegion.Usa, folder);
         SegaCdBiosImage? eu = SegaCdBiosFinder.FindBest(SegaCdRegion.Europe, folder);
         SegaCdBiosImage? jp = SegaCdBiosFinder.FindBest(SegaCdRegion.Japan, folder);
         AssertTrue(us is not null, "Expected a US Sega CD BIOS candidate");
         AssertTrue(eu is not null, "Expected a European Mega-CD BIOS candidate");
         AssertTrue(jp is not null, "Expected a Japanese Mega-CD BIOS candidate");
-        AssertEqual("Sega CD (U) - M2 V2.00w.bin", us!.FileName);
-        AssertEqual("Mega CD (E) - M2 V2.00.bin", eu!.FileName);
+        AssertEqual("Sega CD (U) - M1 V1.10.bin", us!.FileName);
+        AssertEqual("Mega CD (E) - M1 V1.00.bin", eu!.FileName);
         AssertEqual("Mega CD (J) - M1 V1.00p.bin", jp!.FileName);
     }
     finally
@@ -629,12 +853,75 @@ void SegaCdMainControlRegister()
     device.WriteMainRegisterByte(1, 0x03);
     AssertTrue(device.SubCpuBusRequested, "Control bit 1 should request the sub CPU bus");
     AssertTrue(!device.SubCpuRunnable, "Bus request should pause the sub CPU");
+    device.WriteSubRegisterByte(1, 0x00);
+    AssertEqual((byte)0x03, (byte)(device.ReadSubRegisterByte(1) & 0x03));
 
     SegaCdDevice.SegaCdState state = device.CaptureState();
     device.WriteMainRegisterByte(1, 0x00);
     device.RestoreState(state);
     AssertTrue(device.SubCpuResetReleased, "Restore should preserve reset release state");
     AssertTrue(device.SubCpuBusRequested, "Restore should preserve bus request state");
+}
+
+void SegaCdVBlankInt2Pulse()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_1000);
+    WriteLong(bios, 4, 0x0000_0100);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    WriteLongToSegaCdPrg(device, 0, 0x00FE_1000);
+    WriteLongToSegaCdPrg(device, 4, 0x0000_0100);
+    WriteLongToSegaCdPrg(device, (uint)(4 * (24 + 2)), 0x0000_0200);
+    WriteWordToSegaCdPrg(device, 0x100, 0x4E71);
+    WriteWordToSegaCdPrg(device, 0x102, 0x4E71);
+    WriteWordToSegaCdPrg(device, 0x200, 0x4E71);
+
+    device.WriteMainRegisterByte(1, 0x01);
+    M68kCpu.M68kState unmasked = device.SubCpu.CaptureState() with { SR = 0x2000 };
+    device.SubCpu.RestoreState(unmasked);
+
+    bool accepted = false;
+    device.SubCpu.InterruptObserver = trace => accepted |= trace.Level == 2 && trace.HandlerPc == 0x0000_0200;
+    device.PulseMainVBlankInterrupt();
+    device.RunSubCpuCycles(16);
+    AssertTrue(!accepted, "Sub INT2 should be masked until the sub interrupt mask enables it");
+
+    device.SubCpu.RestoreState(unmasked);
+    device.WriteSubRegisterByte(0x33, 0x04);
+    device.PulseMainVBlankInterrupt();
+    device.RunSubCpuCycles(16);
+    AssertTrue(accepted, "Sub INT2 should vector when the VBlank pulse arrives with IEN2 set");
+}
+
+void SegaCdMainIrq2SendIsPulsed()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_1000);
+    WriteLong(bios, 4, 0x0000_0100);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    WriteLongToSegaCdPrg(device, 0, 0x00FE_1000);
+    WriteLongToSegaCdPrg(device, 4, 0x0000_0100);
+    WriteLongToSegaCdPrg(device, (uint)(4 * (24 + 2)), 0x0000_0200);
+    WriteWordToSegaCdPrg(device, 0x100, 0x4E71);
+    WriteWordToSegaCdPrg(device, 0x102, 0x4E71);
+    WriteWordToSegaCdPrg(device, 0x200, 0x4E71);
+
+    device.WriteMainRegisterByte(1, 0x01);
+    device.WriteSubRegisterByte(0x33, 0x04);
+    device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { SR = 0x2000 });
+
+    bool accepted = false;
+    device.SubCpu.InterruptObserver = trace => accepted |= trace.Level == 2 && trace.HandlerPc == 0x0000_0200;
+    device.WriteMainRegisterByte(0x00, 0x01);
+
+    AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x00) & 0x01));
+    device.RunSubCpuCycles(16);
+    AssertTrue(accepted, "main IRQ2 send should queue a sub INT2");
+    AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x00) & 0x01));
 }
 
 void SegaCdCddStatusHandshake()
@@ -647,23 +934,1381 @@ void SegaCdCddStatusHandshake()
 
     device.WriteSubRegisterByte(0x37, 0x04);
     AssertEqual((byte)0x04, (byte)(device.ReadSubRegisterByte(0x37) & 0x04));
-    AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x38));
-    AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x39));
+    AssertEqual((byte)0x0B, device.ReadSubRegisterByte(0x38));
+    AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
     AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
     AssertEqual((byte)0x01, (byte)(device.ReadMainRegisterByte(0x0F) & 0x01));
 
-    device.WriteSubRegisterByte(0x42, 0x00);
-    device.WriteSubRegisterByte(0x43, 0x0D);
+    device.WriteSubRegisterByte(0x42, 0x0D);
+    device.WriteSubRegisterByte(0x43, 0x00);
     for (uint offset = 0x44; offset <= 0x4A; offset++)
     {
         device.WriteSubRegisterByte(offset, 0x00);
     }
 
     device.WriteSubRegisterByte(0x4B, 0x02);
-    AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x39));
+    AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x38));
     AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
 
     AssertTrue(!device.SubCpuResetReleased, "Sub-side register writes must not release reset");
+}
+
+void SegaCdCddTocReports()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 200]);
+        File.WriteAllBytes(audioPath, new byte[2352 * 300]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteCddCommand(device, 0x02, 0x04);
+        AssertEqual((byte)0x09, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x3D));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x00, 0x00);
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x00);
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x04, (byte)(device.ReadSubRegisterByte(0x40) & 0x04));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x05, trackNumber: 1);
+        AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x3D));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3F));
+        AssertEqual((byte)0x08, (byte)(device.ReadSubRegisterByte(0x3E) & 0x08));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x40));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x03);
+        AssertEqual((byte)0x03, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x08, device.ReadSubRegisterByte(0x3D));
+        AssertEqual((byte)0x05, device.ReadSubRegisterByte(0x3E));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3F));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCddTocResponseSurvivesStatusTick()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 200]);
+        File.WriteAllBytes(audioPath, new byte[2352 * 300]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteSubRegisterByte(0x37, 0x04);
+        WriteCddCommand(device, 0x02, 0x04);
+        InvokeSegaCdPrivate(device, "AdvanceCddInterrupts", SegaCdHardwareProfile.SubCpuClockHz / 75);
+
+        AssertEqual((byte)0x09, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x3D));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        InvokeSegaCdPrivate(device, "AdvanceCddInterrupts", SegaCdHardwareProfile.SubCpuClockHz / 75);
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCddLocationReportsPreservePlayStatus()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 200];
+        File.WriteAllBytes(dataPath, sectors);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteCddPlayCommand(device, 0, 2, 0);
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x38));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x00);
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x3D));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3E));
+        AssertEqual((byte)0x04, (byte)(device.ReadSubRegisterByte(0x40) & 0x04));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        device.WriteSubRegisterByte(0x37, 0x04);
+        InvokeSegaCdPrivate(device, "AdvanceCddInterrupts", (SegaCdHardwareProfile.SubCpuClockHz / 75) + 1);
+        AssertEqual(1, device.DebugCurrentCdcLba);
+        WriteCddCommand(device, 0x02, 0x00);
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x3D));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3E));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x3F));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x01);
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3B));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3C));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3D));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3E));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x02, 0x02);
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x39));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x3A));
+        AssertEqual((byte)0x01, device.ReadSubRegisterByte(0x3B));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        WriteCddCommand(device, 0x01, 0x00);
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x38));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCddaPlaybackRender()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 2]);
+
+        byte[] audio = new byte[2352 * 2];
+        WriteLittleEndianInt16(audio, 0, 0x1234);
+        WriteLittleEndianInt16(audio, 2, unchecked((short)0xFEDC));
+        WriteLittleEndianInt16(audio, 4, 0x2345);
+        WriteLittleEndianInt16(audio, 6, unchecked((short)0xEDCB));
+        WriteLittleEndianInt16(audio, 2352, 0x3456);
+        WriteLittleEndianInt16(audio, 2354, unchecked((short)0xDCBA));
+        File.WriteAllBytes(audioPath, audio);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteCddPlayCommand(device, 0, 2, 2);
+        short[] output = new short[4];
+        device.RenderCddaStereoSamplesInto(output, 2);
+
+        AssertEqual((short)0x1234, output[0]);
+        AssertEqual(unchecked((short)0xFEDC), output[1]);
+        AssertEqual((short)0x2345, output[2]);
+        AssertEqual(unchecked((short)0xEDCB), output[3]);
+
+        output = new short[587 * 2];
+        device.RenderCddaStereoSamplesInto(output, 587);
+        AssertEqual((short)0x3456, output[1172]);
+        AssertEqual(unchecked((short)0xDCBA), output[1173]);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCddaMixerOutput()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string audioPath = Path.Combine(folder, "track02.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 2]);
+
+        byte[] audio = new byte[2352];
+        for (int sample = 0; sample < 588; sample++)
+        {
+            WriteLittleEndianInt16(audio, sample * 4, 0x2000);
+            WriteLittleEndianInt16(audio, (sample * 4) + 2, 0x1000);
+        }
+
+        File.WriteAllBytes(audioPath, audio);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa, disc);
+        MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+        machine.Reset();
+        WriteCddPlayCommand(segaCd, 0, 2, 2);
+
+        short[] mixed = machine.RenderStereoAudioSamples(800);
+        AssertTrue(mixed.Any(sample => Math.Abs(sample) > 100), "Expected CD-DA to contribute audible samples through the Mega Drive mixer");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdPcmMappedRamAndPlayback()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    device.WritePcmMappedByte(0x0F, 0x81);
+    device.WritePcmMappedByte(0x2001, 0x5A);
+    AssertEqual((byte)0x5A, device.ReadPcmRamByte(0x1000));
+    AssertEqual((byte)0x5A, device.ReadPcmMappedByte(0x2001));
+
+    ConfigurePcmChannel0(device);
+    short[] output = new short[40];
+    device.RenderPcmStereoSamplesInto(output, 20);
+
+    AssertTrue(output.Any(sample => sample > 0), "Expected RF5C164 channel 0 to render positive sign-magnitude samples");
+
+    SegaCdDevice.SegaCdState state = device.CaptureState();
+    short[] next = new short[4];
+    device.RenderPcmStereoSamplesInto(next, 2);
+    device.RestoreState(state);
+    short[] restored = new short[4];
+    device.RenderPcmStereoSamplesInto(restored, 2);
+    AssertEqual(next[0], restored[0]);
+    AssertEqual(next[1], restored[1]);
+}
+
+void SegaCdPcmMixerOutput()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+    machine.Reset();
+    ConfigurePcmChannel0(segaCd);
+
+    short[] mixed = machine.RenderStereoAudioSamples(800);
+    AssertTrue(mixed.Any(sample => Math.Abs(sample) > 100), "Expected RF5C164 PCM to contribute audible samples through the Mega Drive mixer");
+}
+
+void SegaCdCddSeekCompletesToReady()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 200]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteSubRegisterByte(0x37, 0x04);
+        WriteCddSeekCommand(device, 0, 2, 0);
+        AssertEqual((byte)0x02, device.ReadSubRegisterByte(0x38));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+
+        InvokeSegaCdPrivate(device, "AdvanceCddInterrupts", SegaCdHardwareProfile.SubCpuClockHz / 10);
+
+        AssertEqual((byte)0x04, device.ReadSubRegisterByte(0x38));
+        AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x39));
+        AssertEqual(ExpectedCddChecksum(device, 0x38), device.ReadSubRegisterByte(0x41));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdCdcHostSectorTransfer()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 2];
+        sectors[16] = 0x12;
+        sectors[17] = 0x34;
+        sectors[18] = 0x56;
+        sectors[19] = 0x78;
+        sectors[2352 + 16] = 0x9A;
+        sectors[2352 + 17] = 0xBC;
+        File.WriteAllBytes(dataPath, sectors);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteCddPlayCommand(device, 0, 2, 0);
+        StartCdcTransfer(device, 2052);
+        AssertEqual((byte)0x40, (byte)(device.ReadSubRegisterByte(0x04) & 0xC0));
+        AssertEqual((ushort)0x0002, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x0001, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x1234, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x5678, device.ReadSubRegisterWord(0x08));
+        for (int i = 0; i < 1022; i++)
+        {
+            _ = device.ReadSubRegisterWord(0x08);
+        }
+
+        AssertEqual((byte)0x00, (byte)(device.ReadSubRegisterByte(0x04) & 0xC0));
+
+        device.WriteSubRegisterByte(0x05, 0x07);
+        device.WriteSubRegisterByte(0x07, 0x00);
+        AssertEqual((byte)0x00, (byte)(device.ReadSubRegisterByte(0x04) & 0xC0));
+
+        StartCdcTransfer(device, 2052);
+        AssertEqual((ushort)0x0002, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x0101, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x9ABC, device.ReadSubRegisterWord(0x08));
+
+        device.Reset();
+        WriteProgramRamLong(device, 0x5B34, 1);
+        WriteProgramRamLong(device, 0x5B38, 1);
+        WriteProgramRamWord(device, 0x5A44, 8);
+        WriteProgramRamWord(device, 0x5A46, 8);
+        WriteProgramRamWord(device, 0x5A48, 8);
+        WriteProgramRamWord(device, 0x5A4A, 8);
+        WriteProgramRamWord(device, 0x5A4E, 0x20);
+        device.WriteProgramRamByte(0x5B24, 0x10);
+        StartCdcTransfer(device, 2052);
+        AssertEqual((byte)0x10, device.ReadProgramRamByte(0x5A4B));
+        AssertEqual((byte)0x00, device.ReadProgramRamByte(0x5A5C));
+        AssertEqual((byte)0x02, device.ReadProgramRamByte(0x5A5D));
+        AssertEqual((byte)0x01, device.ReadProgramRamByte(0x5A5E));
+        AssertEqual((byte)0x01, device.ReadProgramRamByte(0x5A5F));
+        AssertEqual((ushort)0x0002, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x0101, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x9ABC, device.ReadSubRegisterWord(0x08));
+
+        device.Reset();
+        WriteProgramRamLong(device, 0x5B34, 1);
+        WriteProgramRamLong(device, 0x5B38, 1);
+        device.WriteProgramRamByte(0x5B24, 0x10);
+        StartCdcTransfer(device, 2052);
+        WriteProgramRamLong(device, 0x5B34, 0);
+        AssertEqual((ushort)0x0002, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x0001, device.ReadSubRegisterWord(0x08));
+        AssertEqual((ushort)0x1234, device.ReadSubRegisterWord(0x08));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdSubBiosBootReadSeedsCdcRing()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 4];
+        sectors[2352 + 16] = 0x9A;
+        sectors[2352 + 17] = 0xBC;
+        File.WriteAllBytes(dataPath, sectors);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteProgramRamLong(device, 0x5B34, 1);
+        WriteProgramRamLong(device, 0x5B38, 0x0003_0000);
+        WriteProgramRamWord(device, 0x5B3C, 0x0300);
+        WriteProgramRamWord(device, 0x5A44, 8);
+        WriteProgramRamWord(device, 0x5A46, 8);
+        WriteProgramRamWord(device, 0x5A48, 8);
+        WriteProgramRamWord(device, 0x5A4A, 8);
+        WriteProgramRamWord(device, 0x5A4E, 0x20);
+
+        device.WriteMainRegisterByte(1, 0x01);
+        device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0000_3A54, SR = 0x2000 });
+        _ = device.RunSubCpuCycles(4);
+
+        AssertTrue(device.DebugCdcRunning, "sub BIOS boot-read helper should wake the CDC stream");
+        AssertEqual(1, device.DebugBootReadStartLba);
+        AssertEqual(3, device.DebugBootReadSectorCount);
+        AssertEqual((byte)0x10, device.ReadProgramRamByte(0x5A4B));
+        AssertEqual((byte)0x00, device.ReadProgramRamByte(0x5A5C));
+        AssertEqual((byte)0x02, device.ReadProgramRamByte(0x5A5D));
+        AssertEqual((byte)0x01, device.ReadProgramRamByte(0x5A5E));
+        AssertEqual((byte)0x01, device.ReadProgramRamByte(0x5A5F));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBootCdcServiceRaisesReadyEdge()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 4];
+        sectors[2352 + 16] = 0x9A;
+        sectors[2352 + 17] = 0xBC;
+        File.WriteAllBytes(dataPath, sectors);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        WriteLong(bios, 0, 0x00FE_0000);
+        WriteLong(bios, 4, 0x0000_0200);
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        WriteProgramRamLong(device, 0x5B34, 1);
+        WriteProgramRamLong(device, 0x5B38, 0x0003_0000);
+        WriteProgramRamWord(device, 0x5B3C, 0x0300);
+        WriteProgramRamWord(device, 0x5A44, 8);
+        WriteProgramRamWord(device, 0x5A46, 8);
+        WriteProgramRamWord(device, 0x5A48, 8);
+        WriteProgramRamWord(device, 0x5A4A, 8);
+        WriteProgramRamWord(device, 0x5A4E, 0x20);
+
+        device.WriteMainRegisterByte(1, 0x01);
+        device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0000_3A54, SR = 0x2000 });
+        _ = device.RunSubCpuCycles(4);
+
+        device.WriteSubRegisterByte(0x0F, 0x01);
+        device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0001_8C04, SR = 0x2000 });
+
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_0600) & 0x80));
+        AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05C6) & 0x80));
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+
+        device.WriteSubRegisterByte(0x03, 0x06);
+        device.WriteWordRamByte(0, 0x43);
+        device.WriteWordRamByte(1, 0xFA);
+        device.WriteWordRamByte(2, 0x00);
+        device.WriteWordRamByte(3, 0x0A);
+        device.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x40, (byte)(device.ReadMainRegisterByte(0x0F, 0x0000_1334) & 0x40));
+        AssertEqual((byte)0x01, (byte)(device.DebugMainWordRamModeRegister & 0x01));
+        AssertEqual((byte)0x00, (byte)(device.DebugMainWordRamModeRegister & 0x04));
+        AssertEqual((byte)0x43, device.ReadMainWordRamByte(0));
+        AssertEqual((byte)0xFA, device.ReadMainWordRamByte(1));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(2));
+        AssertEqual((byte)0x0A, device.ReadMainWordRamByte(3));
+        AssertEqual((byte)0x04, (byte)(device.ReadMainRegisterByte(0x0E) & 0x04));
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05E8) & 0x40));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdMainBiosDiscTypePacket()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteSubRegisterByte(0x0F, 0x04);
+
+        AssertEqual((byte)0x00, device.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, device.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x23]);
+        AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+
+        SegaCdDevice mainRequestDevice = new(bios, SegaCdRegion.Usa, disc);
+        mainRequestDevice.Reset();
+        mainRequestDevice.WriteSubRegisterByte(0x20, 0x12);
+        mainRequestDevice.WriteSubRegisterByte(0x21, 0x34);
+        mainRequestDevice.WriteSubRegisterByte(0x22, 0x56);
+        mainRequestDevice.WriteSubRegisterByte(0x23, 0x78);
+        mainRequestDevice.WriteMainRegisterByte(0x0E, 0x04);
+
+        AssertEqual((byte)0x00, mainRequestDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, mainRequestDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, mainRequestDevice.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, mainRequestDevice.MainRegisters[0x23]);
+        AssertEqual((byte)0x02, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        mainRequestDevice.WriteSubRegisterByte(0x20, 0x99);
+        mainRequestDevice.WriteSubRegisterByte(0x21, 0x99);
+        mainRequestDevice.WriteSubRegisterByte(0x22, 0x99);
+        mainRequestDevice.WriteSubRegisterByte(0x23, 0x99);
+        AssertEqual((byte)0x00, mainRequestDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, mainRequestDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, mainRequestDevice.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, mainRequestDevice.MainRegisters[0x23]);
+
+        SegaCdDevice classifyDevice = new(bios, SegaCdRegion.Usa, disc);
+        classifyDevice.Reset();
+        MegaDrive classifyMachine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: classifyDevice);
+        classifyMachine.Bus.WriteByte(0x00FF_FDDC, 0xFF);
+        classifyMachine.Bus.WriteByte(0x00FF_FDF0, 0x00);
+        classifyMachine.Bus.WriteByte(0x00FF_FDF1, 0x04);
+        classifyMachine.Bus.WriteByte(0x00FF_FDF2, 0x00);
+        classifyMachine.Bus.WriteByte(0x00FF_FDF3, 0x04);
+        AssertEqual((byte)0x04, classifyMachine.Bus.ReadByte(0x00FF_FDDC));
+        AssertEqual((byte)0x01, classifyMachine.Bus.ReadByte(0x00FF_FE44));
+        AssertEqual((byte)0x01, classifyMachine.Bus.ReadByte(0x00FF_FE45));
+
+        mainRequestDevice.WriteMainRegisterByte(0x0E, 0x06);
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        mainRequestDevice.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x02, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        mainRequestDevice.WriteMainRegisterByte(0x0E, 0x06);
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        mainRequestDevice.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x00, (byte)(mainRequestDevice.ReadMainRegisterByte(0x0F) & 0x02));
+
+        SegaCdDevice loadedProgramDevice = new(bios, SegaCdRegion.Usa, disc);
+        loadedProgramDevice.Reset();
+        loadedProgramDevice.WriteMainRegisterByte(0x0E, 0x04);
+        loadedProgramDevice.WriteMainRegisterByte(0x0E, 0x06);
+        loadedProgramDevice.WriteMainRegisterByte(0x10, 0x23);
+        AssertEqual((byte)0x00, loadedProgramDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, loadedProgramDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, loadedProgramDevice.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, loadedProgramDevice.MainRegisters[0x23]);
+        loadedProgramDevice.WriteMainRegisterByte(0x10, 0x00);
+        AssertEqual((byte)0x00, loadedProgramDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, loadedProgramDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, loadedProgramDevice.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, loadedProgramDevice.MainRegisters[0x23]);
+        AssertEqual((byte)0x02, (byte)(loadedProgramDevice.ReadMainRegisterByte(0x0F) & 0x02));
+
+        SegaCdDevice splitCommandDevice = new(bios, SegaCdRegion.Usa, disc);
+        splitCommandDevice.Reset();
+        splitCommandDevice.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x04, splitCommandDevice.MainRegisters[0x21]);
+        splitCommandDevice.WriteMainRegisterByte(0x10, 0x00);
+        splitCommandDevice.WriteMainRegisterByte(0x11, 0x23);
+        AssertEqual((byte)0x04, splitCommandDevice.MainRegisters[0x21]);
+        splitCommandDevice.WriteMainRegisterByte(0x10, 0x00);
+        splitCommandDevice.WriteMainRegisterByte(0x11, 0x00);
+        AssertEqual((byte)0x00, splitCommandDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x00, splitCommandDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+
+        splitCommandDevice = new(bios, SegaCdRegion.Usa, disc);
+        splitCommandDevice.Reset();
+        splitCommandDevice.WriteMainRegisterByte(0x0E, 0x04);
+        splitCommandDevice.WriteMainRegisterByte(0x0E, 0x06);
+        splitCommandDevice.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x00, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x00, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x02, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+
+        SegaCdDevice stagedIpDevice = new(bios, SegaCdRegion.Usa, disc);
+        stagedIpDevice.Reset();
+        stagedIpDevice.WriteMainRegisterByte(0x0E, 0x04);
+        stagedIpDevice.WriteMainWordRamByte(0, 0x43);
+        stagedIpDevice.WriteMainWordRamByte(1, 0xFA);
+        stagedIpDevice.WriteMainWordRamByte(2, 0x00);
+        stagedIpDevice.WriteMainWordRamByte(3, 0x0A);
+        stagedIpDevice.WriteMainRegisterByte(0x0E, 0x06);
+        AssertEqual((byte)0x00, (byte)(stagedIpDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        stagedIpDevice.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x00, (byte)(stagedIpDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x00, (byte)(stagedIpDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        AssertEqual((byte)0x00, (byte)(stagedIpDevice.ReadMainRegisterByte(0x0F) & 0x02));
+
+        splitCommandDevice.WriteMainWordRamByte(0, 0x43);
+        splitCommandDevice.WriteMainWordRamByte(1, 0xFA);
+        splitCommandDevice.WriteMainWordRamByte(2, 0x00);
+        splitCommandDevice.WriteMainWordRamByte(3, 0x0A);
+        splitCommandDevice.WriteMainRegisterByte(0x10, 0x00);
+        splitCommandDevice.WriteMainRegisterByte(0x11, 0x23);
+        AssertEqual((byte)0x00, splitCommandDevice.MainRegisters[0x20]);
+        AssertEqual((byte)0x01, splitCommandDevice.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, splitCommandDevice.MainRegisters[0x22]);
+        AssertEqual((byte)0x00, splitCommandDevice.MainRegisters[0x23]);
+        AssertEqual((ushort)0x0001, splitCommandDevice.ReadMainRegisterWord(0x20));
+        AssertEqual((byte)0x02, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+        MegaDrive postBootMachine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: splitCommandDevice);
+        postBootMachine.Bus.CurrentM68kPc = 0x00FF_100E;
+        AssertEqual(0x00_0A_00_00u, postBootMachine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 2));
+        AssertEqual((byte)0x43, postBootMachine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamStart));
+        AssertEqual((byte)0xFA, postBootMachine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamHighAliasStart + 1));
+        AssertEqual((byte)0x02, (byte)(postBootMachine.Bus.ReadByte(SegaCdHardwareProfile.MainRegisterStart + 0x0F) & 0x02));
+        splitCommandDevice.WriteMainRegisterByte(0x10, 0x00);
+        splitCommandDevice.WriteMainRegisterByte(0x11, 0x00);
+        AssertEqual((ushort)0x0000, splitCommandDevice.ReadMainRegisterWord(0x20));
+        AssertEqual((byte)0x00, (byte)(splitCommandDevice.ReadMainRegisterByte(0x0F) & 0x02));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBiosDiscTypeReadyEdge()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteMainRegisterByte(0x0E, 0x04);
+
+        AssertEqual((byte)0x00, device.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, device.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x23]);
+        AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x0000_128C) & 0x02));
+        AssertEqual((byte)0x00, device.MainRegisters[0x20]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x21]);
+        AssertEqual((byte)0x00, device.MainRegisters[0x22]);
+        AssertEqual((byte)0x04, device.MainRegisters[0x23]);
+
+        AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F, 0x0000_1294) & 0x02));
+        AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdMainBiosFlag7BootEdge()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+
+    device.WriteMainRegisterByte(0x0E, 0x80);
+    device.WriteSubRegisterByte(0x0F, 0x80);
+
+    AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+    InvokeSegaCdPrivate(device, "AdvanceSubFlag7BootClear", SegaCdHardwareProfile.SubCpuClockHz / 60);
+    byte firstBootClearRead = device.ReadMainRegisterByte(0x0F);
+    AssertEqual((byte)0x00, (byte)(firstBootClearRead & 0x80));
+    AssertEqual((byte)0x00, (byte)(firstBootClearRead & 0x02));
+    for (int i = 0; i < 63; i++)
+    {
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+    }
+
+    AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+
+    device.WriteSubRegisterByte(0x0F, 0x80);
+    device.WriteProgramRamByte(0x5B24, 0x10);
+    SegaCdDevice.SegaCdState state = device.CaptureState();
+    AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+
+    device.RestoreState(state);
+    AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+    InvokeSegaCdPrivate(device, "AdvanceSubFlag7BootClear", SegaCdHardwareProfile.SubCpuClockHz / 4);
+    AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+    device.WriteProgramRamByte(0x5B24, 0x00);
+    InvokeSegaCdPrivate(device, "AdvanceSubFlag7BootClear", SegaCdHardwareProfile.SubCpuClockHz / 60);
+    AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+    for (int i = 0; i < 63; i++)
+    {
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+    }
+
+    AssertEqual((byte)0x02, (byte)(device.ReadMainRegisterByte(0x0F) & 0x02));
+    device.WriteSubRegisterByte(0x0F, 0x00);
+    AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+}
+
+void SegaCdDiscTypePacketYieldsToCommandStatus()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteMainRegisterByte(0x0E, 0x04);
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x04, device.ReadMainRegisterByte(0x21));
+
+        device.WriteMainRegisterByte(0x0E, 0x02);
+        device.WriteSubRegisterByte(0x20, 0x01);
+        device.WriteSubRegisterByte(0x21, 0x01);
+        device.WriteSubRegisterByte(0x22, 0x01);
+        device.WriteSubRegisterByte(0x23, 0x02);
+
+        AssertEqual((byte)0x01, device.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x01, device.ReadMainRegisterByte(0x21));
+        AssertEqual((byte)0x01, device.ReadMainRegisterByte(0x22));
+        AssertEqual((byte)0x02, device.ReadMainRegisterByte(0x23));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBiosIrq2WaitClearsCommandFlag()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+        device.WriteProgramRamByte(0x5EA4, 0x01);
+        device.WriteMainRegisterByte(0x01, 0x01);
+        device.WriteMainRegisterByte(0x0E, 0x80);
+        device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0000_05E8, SR = 0x2000 });
+
+        int executed = device.RunSubCpuCycles(4);
+
+        AssertTrue(executed > 0, "generic BIOS IRQ2 wait HLE should consume cycles");
+        AssertEqual((byte)0x00, (byte)(device.ReadProgramRamByte(0x5EA4) & 0x01));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdInitialProgramStagesAtWordRamBase()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 17];
+        Encoding.ASCII.GetBytes("SEGADISCSYSTEM").CopyTo(sectors, 16);
+        sectors[16 + 0x200] = 0x43;
+        sectors[16 + 0x201] = 0xFA;
+        sectors[16 + 0x202] = 0x00;
+        sectors[16 + 0x203] = 0x0A;
+        sectors[16 + 0x204] = 0x4E;
+        sectors[16 + 0x205] = 0xB8;
+        sectors[16 + 0x206] = 0x03;
+        sectors[16 + 0x207] = 0x64;
+        sectors[16 + 0x208] = 0x60;
+        sectors[16 + 0x209] = 0x00;
+        sectors[16 + 0x20A] = 0x05;
+        sectors[16 + 0x20B] = 0x7A;
+        sectors[16 + 0x600] = 0x13;
+        sectors[16 + 0x601] = 0xFC;
+        sectors[16 + 0x602] = 0x00;
+        sectors[16 + 0x603] = 0xFF;
+        File.WriteAllBytes(dataPath, sectors);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteSubRegisterByte(0x03, 0x04);
+        InvokeSegaCdPrivate(device, "StageInitialProgramInWordRamIfNeeded");
+
+        AssertEqual((byte)0x43, device.ReadMainWordRamByte(0));
+        AssertEqual((byte)0xFA, device.ReadMainWordRamByte(1));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(2));
+        AssertEqual((byte)0x0A, device.ReadMainWordRamByte(3));
+        AssertEqual((byte)0x13, device.ReadMainWordRamByte(0x400));
+        AssertEqual((byte)0xFC, device.ReadMainWordRamByte(0x401));
+
+        MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: device);
+        machine.Bus.CurrentM68kPc = 0x00FF_100E;
+        AssertEqual(0x00FF_0000u, machine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 2));
+        machine.Bus.CurrentM68kPc = 0x00FF_101E;
+        AssertEqual((ushort)0x0364, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 6));
+        machine.Bus.CurrentM68kPc = 0x00FF_1024;
+        AssertEqual(0x43FA_000Au, machine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 0x100));
+        machine.Bus.CurrentM68kPc = 0x00FF_101E;
+        AssertEqual(0x43FA_000Au, machine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 0x100));
+        AssertEqual(0x6000_057Au, machine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 8));
+        machine.Bus.CurrentM68kPc = 0x00FF_1008;
+        AssertEqual(0x00FF_0584u, machine.Bus.ReadLong(SegaCdHardwareProfile.MainWordRamStart + 8));
+        AssertEqual((ushort)0x6000, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 8));
+        AssertEqual((ushort)0x057A, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 10));
+
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdNonstandardInitialProgramBypassesDescriptorOverride()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        byte[] prefix = [0x43, 0xFA, 0x12, 0x34, 0x12, 0x34, 0x00, 0x00, 0x60, 0x00];
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            device.WriteWordRamByte((uint)i, prefix[i]);
+        }
+
+        AssertEqual((byte)0x00, (byte)(device.DebugMainWordRamModeRegister & 0x04));
+        AssertTrue(!device.TryReadMainBootIpEntryLong(2, out _), "nonstandard IP should not synthesize descriptor entry");
+        AssertTrue(!device.TryReadMainBootIpCopyLengthWord(6, out _), "nonstandard IP should not synthesize copy length");
+        AssertTrue(!device.TryReadMainBootIpPayloadLong(0x100, out _), "nonstandard IP should not synthesize payload copy");
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBootMainCopyLinearizesBankedInitialProgram()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        device.WriteSubRegisterByte(0x03, 0x06);
+        byte[] prefix = [0x43, 0xFA, 0x00, 0x0A, 0x4E, 0xB8, 0x03, 0x64, 0x60, 0x00];
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            device.WriteWordRamByte((uint)MapOneMegPhysicalToLinearTestAddress(i), prefix[i]);
+        }
+
+        AssertEqual((byte)0x43, device.ReadMainWordRamByte(0, 0x0000_51F2));
+        AssertEqual((byte)0xFA, device.ReadMainWordRamByte(1, 0x0000_51F2));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(2, 0x0000_51F2));
+        AssertEqual((byte)0x0A, device.ReadMainWordRamByte(3, 0x0000_51F2));
+        AssertEqual((byte)0x4E, device.ReadMainWordRamByte(4, 0x0000_51F2));
+        AssertEqual((byte)0xB8, device.ReadMainWordRamByte(5, 0x0000_51F2));
+        AssertEqual((byte)0x03, device.ReadMainWordRamByte(6, 0x0000_51F2));
+        AssertEqual((byte)0x64, device.ReadMainWordRamByte(7, 0x0000_51F2));
+        AssertEqual((byte)0x60, device.ReadMainWordRamByte(8, 0x0000_51F2));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(9, 0x0000_51F2));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+static int MapOneMegPhysicalToLinearTestAddress(int address)
+{
+    const int bankBytes = SegaCdHardwareProfile.WordRamBytes / 2;
+    int rawOffset = address & (SegaCdHardwareProfile.WordRamBytes - 1);
+    int wordPairOffset = ((rawOffset >> 2) << 1) | (rawOffset & 1);
+    if ((rawOffset & 2) != 0)
+    {
+        wordPairOffset += bankBytes;
+    }
+
+    return wordPairOffset & (SegaCdHardwareProfile.WordRamBytes - 1);
+}
+
+void SegaCdBootHeaderStagesSubSystemProgram()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        byte[] sectors = new byte[2352 * 16];
+        int userBase = 16;
+        WriteAscii(sectors, userBase, "SEGADISCSYSTEM  ");
+        WriteLong(sectors, userBase + 0x30, 0x0000_0800);
+        WriteLong(sectors, userBase + 0x34, 0x0000_0800);
+        WriteLong(sectors, userBase + 0x40, 0x0000_1000);
+        WriteLong(sectors, userBase + 0x44, 0x0000_0040);
+
+        int spRawOffset = (0x1000 / 2048 * 2352) + 16 + (0x1000 % 2048);
+        WriteAscii(sectors, spRawOffset, "MAIN TESTSP");
+        sectors[spRawOffset + 0x20] = 0x60;
+        sectors[spRawOffset + 0x21] = 0x00;
+        sectors[spRawOffset + 0x22] = 0x12;
+        sectors[spRawOffset + 0x23] = 0x34;
+        File.WriteAllBytes(dataPath, sectors);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+
+        InvokeSegaCdPrivate(device, "StageInitialProgramInWordRamIfNeeded");
+
+        AssertEqual((byte)'M', device.ProgramRam[0x6000]);
+        AssertEqual((byte)'A', device.ProgramRam[0x6001]);
+        AssertEqual((byte)'I', device.ProgramRam[0x6002]);
+        AssertEqual((byte)'N', device.ProgramRam[0x6003]);
+        AssertEqual((byte)0x60, device.ProgramRam[0x6020]);
+        AssertEqual((byte)0x00, device.ProgramRam[0x6021]);
+        AssertEqual((byte)0x12, device.ProgramRam[0x6022]);
+        AssertEqual((byte)0x34, device.ProgramRam[0x6023]);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBootIrq2Bridge()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string isoPath = Path.Combine(folder, "disc.iso");
+        File.WriteAllBytes(isoPath, CreateIsoWithRootFile("DUMMY.BIN;1", [0x00]));
+
+        DiscImage disc = DiscImage.FromFile(isoPath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+        WriteProgramRamWord(device, 0x5F34, 0x4EF9);
+        WriteProgramRamLong(device, 0x5F36, 0x0000_6108);
+        device.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0000_6000, 0x2000, false, 0, 0));
+
+        InvokeSegaCdPrivate(device, "QueueSubInterrupt", 2);
+        InvokeSegaCdPrivate(device, "ServicePendingSubInterrupts");
+
+        AssertEqual((byte)0x00, device.ProgramRam[0x68]);
+        AssertEqual((byte)0x00, device.ProgramRam[0x69]);
+        AssertEqual((byte)0x5F, device.ProgramRam[0x6A]);
+        AssertEqual((byte)0x7C, device.ProgramRam[0x6B]);
+        AssertEqual((byte)0x4E, device.ProgramRam[0x5F7C]);
+        AssertEqual((byte)0xB9, device.ProgramRam[0x5F7D]);
+        AssertEqual((byte)0x00, device.ProgramRam[0x5F7E]);
+        AssertEqual((byte)0x00, device.ProgramRam[0x5F7F]);
+        AssertEqual((byte)0x5F, device.ProgramRam[0x5F80]);
+        AssertEqual((byte)0x34, device.ProgramRam[0x5F81]);
+        AssertEqual((byte)0x4E, device.ProgramRam[0x5F82]);
+        AssertEqual((byte)0x73, device.ProgramRam[0x5F83]);
+        AssertEqual(0x0000_5F7Cu, device.SubCpu.PC);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdSonicCdPostBootMmdHandoff()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        byte[] ipx = new byte[0x180];
+        ipx[2] = 0x00;
+        ipx[3] = 0xFF;
+        ipx[4] = 0x20;
+        ipx[5] = 0x00;
+        ipx[6] = 0x00;
+        ipx[7] = 0x20;
+        ipx[8] = 0x00;
+        ipx[9] = 0xFF;
+        ipx[10] = 0x20;
+        ipx[11] = 0xAE;
+        ipx[0x100] = 0x4E;
+        ipx[0x101] = 0x71;
+        ipx[0x102] = 0x4E;
+        ipx[0x103] = 0x75;
+
+        string isoPath = Path.Combine(folder, "disc.iso");
+        byte[] iso = CreateIsoWithRootFile("IPX___.MMD;1", ipx);
+        iso[0x200] = 0x43;
+        iso[0x201] = 0xFA;
+        iso[0x202] = 0x00;
+        iso[0x203] = 0x0A;
+        iso[0x204] = 0x4E;
+        iso[0x205] = 0xB8;
+        iso[0x208] = 0x60;
+        iso[0x209] = 0x00;
+        iso[0x20A] = 0x05;
+        iso[0x20B] = 0x7A;
+        File.WriteAllBytes(isoPath, iso);
+
+        DiscImage disc = DiscImage.FromFile(isoPath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+        InvokeSegaCdPrivate(device, "StageInitialProgramInWordRamIfNeeded");
+
+        device.WriteMainRegisterByte(0x11, 0x23);
+        AssertEqual((byte)0x01, device.ReadMainRegisterByte(0x21));
+        device.WriteMainRegisterByte(0x11, 0x00);
+        device.WriteMainRegisterByte(0x11, 0x23);
+        device.WriteSubRegisterByte(0x0F, 0x80);
+
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(2));
+        AssertEqual((byte)0xFF, device.ReadMainWordRamByte(3));
+        AssertEqual((byte)0x20, device.ReadMainWordRamByte(4));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(5));
+        AssertEqual((byte)0x00, device.ReadMainWordRamByte(8));
+        AssertEqual((byte)0xFF, device.ReadMainWordRamByte(9));
+        AssertEqual((byte)0x20, device.ReadMainWordRamByte(10));
+        AssertEqual((byte)0xAE, device.ReadMainWordRamByte(11));
+        AssertEqual((byte)0x4E, device.ReadMainWordRamByte(0x100));
+        AssertEqual((byte)0x01, device.ReadMainRegisterByte(0x21));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdSonicCdSystemLoadFileBridge()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        byte[] payload = [0x40, 0x00, 0x00, 0xFF, 0x20, 0x00, 0x00, 0x07, 0x4E, 0x71];
+        string isoPath = Path.Combine(folder, "disc.iso");
+        File.WriteAllBytes(isoPath, CreateIsoWithRootFile("MDINIT.MMD;1", payload));
+
+        DiscImage disc = DiscImage.FromFile(isoPath);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+        SetSegaCdPrivateField(device, "_sonicCdMmdHandoffStageSuccesses", 1);
+        device.WriteMainRegisterByte(0x01, 0x01);
+
+        const uint fileNameAddress = 0x0000_C000;
+        const uint destination = 0x0008_0000;
+        const uint stack = 0x0000_FFFC;
+        const uint returnAddress = 0x0000_C234;
+        byte[] fileName = System.Text.Encoding.ASCII.GetBytes("MDINIT.MMD;1");
+        for (int i = 0; i < fileName.Length; i++)
+        {
+            device.WriteProgramRamByte(fileNameAddress + (uint)i, fileName[i]);
+        }
+
+        WriteProgramRamLong(device, stack, returnAddress);
+        uint[] d = new uint[8];
+        uint[] a = new uint[8];
+        a[0] = fileNameAddress;
+        a[1] = destination;
+        a[7] = stack;
+        device.SubCpu.RestoreState(new M68kCpu.M68kState(d, a, 0x0000_7800, 0x2000, false, 0, 0));
+
+        int cycles = device.RunSubCpuCycles(256);
+        AssertTrue(cycles > 0, "LoadFile bridge should consume cycles.");
+        AssertEqual(returnAddress, device.SubCpu.PC);
+        AssertEqual(stack + 4, device.SubCpu.A[7]);
+        for (int i = 0; i < payload.Length; i++)
+        {
+            AssertEqual(payload[i], device.ReadWordRamByte((uint)i));
+        }
+
+        AssertEqual(1, device.DebugSonicCdLoadFileHleSuccesses);
+        AssertEqual(1, device.DebugSonicCdLoadFileHleAttempts);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdSubBiosOverlayReadsProgramRamData()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0x000, 0x0000_8000);
+    WriteLong(bios, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(bios, ref pc, 0x2C7C); // MOVEA.L #$00008000,A6
+    EmitLong(bios, ref pc, 0x0000_8000);
+    EmitWord(bios, ref pc, 0x08AE); // BCLR #7,$0043(A6)
+    EmitWord(bios, ref pc, 0x0007);
+    EmitWord(bios, ref pc, 0x0043);
+    EmitWord(bios, ref pc, 0x6704); // BEQ failure if program RAM bit 7 was not seen
+    EmitWord(bios, ref pc, 0x7001); // MOVEQ #1,D0
+    EmitWord(bios, ref pc, 0x6002); // BRA done
+    EmitWord(bios, ref pc, 0x7002); // MOVEQ #2,D0
+    EmitWord(bios, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(bios, ref pc, 0x2700);
+
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+    device.WriteProgramRamByte(0x8043, 0xA0);
+
+    for (int i = 0; i < 6; i++)
+    {
+        device.SubCpu.Step();
+    }
+
+    AssertEqual(1u, device.SubCpu.D[0] & 0xFF);
+    AssertEqual((byte)0x20, device.ReadProgramRamByte(0x8043));
+    AssertTrue(device.SubCpu.Stopped, "sub CPU should stop after BIOS overlay data access program");
+}
+
+void SegaCdGraphicsAsicStampRender()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice device = new(bios, SegaCdRegion.Usa);
+    device.Reset();
+
+    uint stampBase = 0x80;
+    device.WriteWordRamByte(stampBase + 0, 0x12);
+    device.WriteWordRamByte(stampBase + 1, 0x34);
+    device.WriteWordRamByte(stampBase + 2, 0x56);
+    device.WriteWordRamByte(stampBase + 3, 0x78);
+    WriteWordToSegaCdWordRam(device, 0x20000, 0x0001);
+    WriteWordToSegaCdWordRam(device, 0x100, 0x0000);
+    WriteWordToSegaCdWordRam(device, 0x102, 0x0000);
+    WriteWordToSegaCdWordRam(device, 0x104, 0x0800);
+    WriteWordToSegaCdWordRam(device, 0x106, 0x0000);
+
+    device.WriteSubRegisterWord(0x58, 0x0004);
+    device.WriteSubRegisterWord(0x5A, 0x8000);
+    device.WriteSubRegisterWord(0x5C, 0x0000);
+    device.WriteSubRegisterWord(0x5E, 0x6000);
+    device.WriteSubRegisterWord(0x60, 0x0000);
+    device.WriteSubRegisterWord(0x62, 0x0008);
+    device.WriteSubRegisterWord(0x64, 0x0001);
+    device.WriteSubRegisterByte(0x33, 0x02);
+    device.WriteSubRegisterWord(0x66, 0x0040);
+
+    AssertEqual((byte)0x12, device.ReadWordRamByte(0x18000));
+    AssertEqual((byte)0x34, device.ReadWordRamByte(0x18001));
+    AssertEqual((byte)0x56, device.ReadWordRamByte(0x18002));
+    AssertEqual((byte)0x78, device.ReadWordRamByte(0x18003));
+    AssertEqual((byte)0x00, device.ReadSubRegisterByte(0x65));
 }
 
 void SegaCdMainBusMapping()
@@ -694,15 +2339,126 @@ void SegaCdMainBusMapping()
     AssertEqual((byte)0x12, segaCd.ReadProgramRamByte(0));
     AssertEqual((byte)0x34, segaCd.ReadProgramRamByte(1));
 
+    machine.Bus.WriteLong(0x000A_4EB8, 0x43FA_0036);
+    AssertEqual(0x43FA_0036u, machine.Bus.ReadLong(0x000A_4EB8));
+    AssertEqual((byte)0x43, segaCd.ReadProgramRamByte(0x4EB8));
+    AssertEqual((byte)0xFA, segaCd.ReadProgramRamByte(0x4EB9));
+    AssertEqual((byte)0x00, segaCd.ReadProgramRamByte(0x4EBA));
+    AssertEqual((byte)0x36, segaCd.ReadProgramRamByte(0x4EBB));
+
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x40);
+    machine.Bus.WriteLong(0x000A_4EB8, 0x55AA_1234);
+    AssertEqual(0x55AA_1234u, machine.Bus.ReadLong(0x000A_4EB8));
+    AssertEqual((byte)0x43, segaCd.ReadProgramRamByte(0x4EB8));
+    AssertEqual((byte)0x55, segaCd.ReadProgramRamByte(0x2_4EB8));
+    AssertEqual((byte)0xAA, segaCd.ReadProgramRamByte(0x2_4EB9));
+    AssertEqual((byte)0x40, (byte)(machine.Bus.ReadByte(SegaCdHardwareProfile.MainRegisterStart + 0x03) & 0xC0));
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x00);
+
+    machine.Bus.WriteWord(0x0042_0002, 0xCAFE);
+    AssertEqual((ushort)0xCAFE, machine.Bus.ReadWord(0x0042_0002));
+    AssertEqual((byte)0xCA, segaCd.ReadProgramRamByte(2));
+    AssertEqual((byte)0xFE, segaCd.ReadProgramRamByte(3));
+
     machine.Bus.WriteWord(SegaCdHardwareProfile.MainWordRamStart + 2, 0x5678);
     AssertEqual((ushort)0x5678, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 2));
     AssertEqual((byte)0x56, segaCd.ReadWordRamByte(2));
     AssertEqual((byte)0x78, segaCd.ReadWordRamByte(3));
 
+    AssertEqual((ushort)0x5678, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamHighAliasStart + 2));
+    machine.Bus.WriteWord(SegaCdHardwareProfile.MainWordRamHighAliasStart + 6, 0xBEEF);
+    AssertEqual((ushort)0xBEEF, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 6));
+    AssertEqual((byte)0xBE, segaCd.ReadWordRamByte(6));
+    AssertEqual((byte)0xEF, segaCd.ReadWordRamByte(7));
+
+    machine.Bus.WriteWord(SegaCdHardwareProfile.MainWordRamAliasStart + 4, 0x9A55);
+    AssertEqual((ushort)0x9A55, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamAliasStart + 4));
+    AssertEqual((ushort)0x9A55, machine.Bus.ReadWord(SegaCdHardwareProfile.MainWordRamStart + 4));
+    AssertEqual((byte)0x9A, segaCd.ReadWordRamByte(4));
+    AssertEqual((byte)0x55, segaCd.ReadWordRamByte(5));
+
     machine.Bus.WriteWord(SegaCdHardwareProfile.MainRegisterStart + 0x10, 0x9ABC);
     AssertEqual((ushort)0x9ABC, machine.Bus.ReadWord(SegaCdHardwareProfile.MainRegisterStart + 0x10));
     AssertEqual((ushort)0x9ABC, segaCd.ReadMainRegisterWord(0x10));
     AssertEqual((byte)0x01, (byte)(machine.Bus.ReadByte(SegaCdHardwareProfile.MainRegisterStart + 0x03) & 0x01));
+}
+
+void SegaCdMainOneMegWordRamBankMapping()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    CartridgeImage cartridge = CartridgeImage.FromBytes(new byte[0x200000]);
+    MegaDrive machine = new(cartridge, segaCd: segaCd);
+
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x06);
+    segaCd.WriteWordRamByte(0x0000, 0x11);
+    segaCd.WriteWordRamByte(0x0002, 0x22);
+    segaCd.WriteWordRamByte(0x2_0000, 0x55);
+    AssertEqual((byte)0x11, machine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamStart));
+    AssertEqual((byte)0x11, machine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamStart));
+    AssertEqual((byte)0x22, machine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamStart + 2));
+
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainWordRamStart + 2, 0x33);
+    AssertEqual((byte)0x33, segaCd.ReadWordRamByte(0x0002));
+
+    segaCd.WriteSubRegisterByte(0x03, 0x05);
+    AssertEqual((byte)0x55, machine.Bus.ReadByte(SegaCdHardwareProfile.MainWordRamStart));
+}
+
+void SegaCdWordRamRearrangesOnOneMegModeSwitch()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    CartridgeImage cartridge = CartridgeImage.FromBytes(new byte[0x200000]);
+    MegaDrive machine = new(cartridge, segaCd: segaCd);
+    int bankBytes = SegaCdHardwareProfile.WordRamBytes / 2;
+
+    segaCd.WriteWordRamByte(0, 0x10);
+    segaCd.WriteWordRamByte(1, 0x11);
+    segaCd.WriteWordRamByte(2, 0x20);
+    segaCd.WriteWordRamByte(3, 0x21);
+    segaCd.WriteWordRamByte(4, 0x30);
+    segaCd.WriteWordRamByte(5, 0x31);
+    segaCd.WriteWordRamByte(6, 0x40);
+    segaCd.WriteWordRamByte(7, 0x41);
+
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x04);
+    AssertEqual((byte)0x10, segaCd.ReadWordRamByte(0));
+    AssertEqual((byte)0x11, segaCd.ReadWordRamByte(1));
+    AssertEqual((byte)0x30, segaCd.ReadWordRamByte(2));
+    AssertEqual((byte)0x31, segaCd.ReadWordRamByte(3));
+    AssertEqual((byte)0x20, segaCd.ReadWordRamByte((uint)bankBytes));
+    AssertEqual((byte)0x21, segaCd.ReadWordRamByte((uint)bankBytes + 1));
+    AssertEqual((byte)0x40, segaCd.ReadWordRamByte((uint)bankBytes + 2));
+    AssertEqual((byte)0x41, segaCd.ReadWordRamByte((uint)bankBytes + 3));
+
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x00);
+    AssertEqual((byte)0x10, segaCd.ReadWordRamByte(0));
+    AssertEqual((byte)0x11, segaCd.ReadWordRamByte(1));
+    AssertEqual((byte)0x20, segaCd.ReadWordRamByte(2));
+    AssertEqual((byte)0x21, segaCd.ReadWordRamByte(3));
+    AssertEqual((byte)0x30, segaCd.ReadWordRamByte(4));
+    AssertEqual((byte)0x31, segaCd.ReadWordRamByte(5));
+    AssertEqual((byte)0x40, segaCd.ReadWordRamByte(6));
+    AssertEqual((byte)0x41, segaCd.ReadWordRamByte(7));
+}
+
+void SegaCdSubOneMegWordRamWindow()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    object subBus = typeof(SegaCdDevice)
+        .GetField("_subBus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+        .GetValue(segaCd)!;
+    Type subBusType = subBus.GetType();
+    System.Reflection.MethodInfo writeByte = subBusType.GetMethod("WriteByte")!;
+    System.Reflection.MethodInfo readByte = subBusType.GetMethod("ReadByte")!;
+
+    segaCd.WriteSubRegisterByte(0x03, 0x04);
+    writeByte.Invoke(subBus, [SegaCdHardwareProfile.SubWordRam1MStart + 0x600u, (byte)0x5A]);
+
+    AssertEqual((byte)0x5A, segaCd.ReadWordRamByte(0x2_0600));
+    AssertEqual((byte)0x5A, (byte)readByte.Invoke(subBus, [SegaCdHardwareProfile.SubWordRam1MStart + 0x600u])!);
 }
 
 void ThirtyTwoXDeviceShell()
@@ -10734,6 +12490,19 @@ void HardwareVersionRegisterReflectsRegion()
     WriteAscii(rom, 0x1F0, "J");
     MegaDrive domestic = new(CartridgeImage.FromBytes(rom), pal: false);
     AssertEqual((byte)0x21, domestic.Bus.ReadByte(0x00A1_0001));
+
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    CartridgeImage blankCdCart = CartridgeImage.FromBytes(new byte[512 * 1024]);
+    MegaDrive japaneseCd = new(blankCdCart, segaCd: new SegaCdDevice(bios, SegaCdRegion.Japan));
+    AssertEqual((byte)0x01, japaneseCd.Bus.ReadByte(0x00A1_0001));
+
+    MegaDrive usaCd = new(blankCdCart, segaCd: new SegaCdDevice(bios, SegaCdRegion.Usa));
+    AssertEqual((byte)0x81, usaCd.Bus.ReadByte(0x00A1_0001));
+
+    MegaDrive europeCd = new(blankCdCart, pal: true, segaCd: new SegaCdDevice(bios, SegaCdRegion.Europe));
+    AssertEqual((byte)0xC1, europeCd.Bus.ReadByte(0x00A1_0001));
 }
 
 void PsgToneGeneration()
@@ -12907,6 +14676,50 @@ void SyntheticGenesisStartupRom()
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the startup program");
 }
 
+void SegaCdSaveStateRoundTrip()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0, 0x00FE_0000);
+    WriteLong(bios, 4, 0x0000_0200);
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+    machine.Reset();
+    segaCd.WriteProgramRamByte(0x1234, 0x56);
+    segaCd.WriteWordRamByte(0x2345, 0x67);
+    segaCd.WriteBackupRamByte(0x345, 0x78);
+    ConfigurePcmChannel0(segaCd);
+    string path = Path.Combine(Path.GetTempPath(), $"mdsharp-{Guid.NewGuid():N}.mdss");
+
+    try
+    {
+        SaveStateSerializer.Save(machine, path);
+        short[] expected = new short[4];
+        segaCd.RenderPcmStereoSamplesInto(expected, 2);
+        segaCd.WriteProgramRamByte(0x1234, 0xAA);
+        segaCd.WriteWordRamByte(0x2345, 0xBB);
+        segaCd.WriteBackupRamByte(0x345, 0xCC);
+        segaCd.RenderPcmStereoSamplesInto(new short[20], 10);
+
+        SaveStateSerializer.Load(machine, path);
+
+        SegaCdDevice restored = machine.Bus.SegaCd ?? throw new InvalidOperationException("Expected Sega CD device after load");
+        AssertEqual((byte)0x56, restored.ReadProgramRamByte(0x1234));
+        AssertEqual((byte)0x67, restored.ReadWordRamByte(0x2345));
+        AssertEqual((byte)0x78, restored.ReadBackupRamByte(0x345));
+        short[] after = new short[4];
+        restored.RenderPcmStereoSamplesInto(after, 2);
+        AssertEqual(expected[0], after[0]);
+        AssertEqual(expected[1], after[1]);
+    }
+    finally
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+}
+
 void SyntheticGenesisVBlankInterrupt()
 {
     byte[] rom = CreateRom();
@@ -12968,6 +14781,34 @@ void SyntheticGenesisPendingVBlankInterruptAfterUnmask()
     machine.Vdp.WriteControlPort(0x8120); // Enable VBlank interrupt.
 
     machine.RunFrame(300_000);
+    AssertEqual(6u, machine.MainCpu.D[6]);
+}
+
+void SyntheticGenesisVBlankInterruptAfterExhaustedFrameBudget()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+    WriteLong(rom, 0x078, 0x0000_0300); // Level 6 interrupt vector.
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x46FC); // MOVE #$2000,SR
+    EmitWord(rom, ref pc, 0x2000);
+    EmitWord(rom, ref pc, 0x4A39); // TST.B $FF0000
+    EmitLong(rom, ref pc, 0x00FF_0000);
+    EmitWord(rom, ref pc, 0x66F8); // BNE.S TST
+
+    pc = 0x300;
+    EmitWord(rom, ref pc, 0x7C06); // MOVEQ #6,D6
+    EmitWord(rom, ref pc, 0x4E73); // RTE
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteByte(0x00FF_0000, 1);
+    machine.Vdp.WriteControlPort(0x8120); // Enable VBlank interrupt.
+
+    machine.RunFrame(1);
+    machine.RunFrame(1);
     AssertEqual(6u, machine.MainCpu.D[6]);
 }
 
@@ -13180,6 +15021,419 @@ void M68kMoveBytePostIncrementCopyDbfLoopFastForward()
     }
 
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the copy loop");
+}
+
+void M68kMoveLongPostIncrementCopyDbfLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x303C); // MOVE.W #4,D0
+    EmitWord(rom, ref pc, 0x0004);
+    EmitWord(rom, ref pc, 0x43F9); // LEA $00FF2000,A1
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    EmitWord(rom, ref pc, 0x4BF9); // LEA $00FF2100,A5
+    EmitLong(rom, ref pc, 0x00FF_2100);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x2AD9); // MOVE.L (A1)+,(A5)+
+    EmitWord(rom, ref pc, 0x51C8); // DBF D0,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    uint[] source = [0x1022_3446u, 0x586A_7C8Eu, 0x90A2_B4C6u, 0xD8EA_FC0Eu, 0x2143_6587u];
+    for (int i = 0; i < source.Length; i++)
+    {
+        machine.Bus.WriteLong((uint)(0x00FF_2000 + (i * 4)), source[i]);
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardMoveLongPostIncrementCopyDbfLoop(
+            54,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "fast-forward should recognize the postincrement long copy loop");
+    AssertEqual(54, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(1u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual(0x00FF_200Cu, machine.MainCpu.A[1]);
+    AssertEqual(0x00FF_210Cu, machine.MainCpu.A[5]);
+    for (int i = 0; i < 3; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadLong((uint)(0x00FF_2100 + (i * 4))));
+    }
+
+    for (int i = 0; i < 5; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFFFu, machine.MainCpu.D[0] & 0xFFFF);
+    for (int i = 0; i < source.Length; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadLong((uint)(0x00FF_2100 + (i * 4))));
+    }
+
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the long copy loop");
+}
+
+void SegaCdSonicCdTitleQuadFillFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x22C2); // MOVE.L D2,(A1)+
+    EmitWord(rom, ref pc, 0x22C2); // MOVE.L D2,(A1)+
+    EmitWord(rom, ref pc, 0x22C2); // MOVE.L D2,(A1)+
+    EmitWord(rom, ref pc, 0x22C2); // MOVE.L D2,(A1)+
+    EmitWord(rom, ref pc, 0x51CF); // DBF D7,loop
+    EmitWord(rom, ref pc, 0xFFF6);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.MainCpu.D[2] = 0x1234_ABCDu;
+    machine.MainCpu.D[7] = 2;
+    machine.MainCpu.A[1] = 0x00FF_2000;
+
+    AssertTrue(
+        machine.MainCpu.TryFastForwardMoveLongRegisterQuadFillDbfLoop(
+            0x40000,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "Sonic CD IPX quad fill should fast-forward through the whole loop with a full budget");
+    AssertTrue(cycles > 58, "full-budget quad fill should consume more than one loop iteration");
+    AssertTrue(instructions > 5, "full-budget quad fill should cover the unrolled moves and DBF instructions");
+    AssertEqual(0x020Cu, machine.MainCpu.PC);
+    AssertEqual(0xFFFFu, machine.MainCpu.D[7] & 0xFFFF);
+    AssertEqual(0x00FF_2030u, machine.MainCpu.A[1]);
+    for (int i = 0; i < 12; i++)
+    {
+        AssertEqual(0x1234_ABCDu, machine.Bus.ReadLong((uint)(0x00FF_2000 + (i * 4))));
+    }
+
+    byte[] midRom = CreateRom();
+    WriteLong(midRom, 0x000, 0x00FF_0000);
+    WriteLong(midRom, 0x004, 0x0000_0204);
+
+    pc = 0x200;
+    EmitWord(midRom, ref pc, 0x22C2);
+    EmitWord(midRom, ref pc, 0x22C2);
+    EmitWord(midRom, ref pc, 0x22C2);
+    EmitWord(midRom, ref pc, 0x22C2);
+    EmitWord(midRom, ref pc, 0x51CF);
+    EmitWord(midRom, ref pc, 0xFFF6);
+    EmitWord(midRom, ref pc, 0x4E72);
+    EmitWord(midRom, ref pc, 0x2700);
+
+    MegaDrive midEntry = new(CartridgeImage.FromBytes(midRom));
+    midEntry.Reset();
+    midEntry.MainCpu.D[2] = 0xCAFE_BABEu;
+    midEntry.MainCpu.D[7] = 1;
+    midEntry.MainCpu.A[1] = 0x00FF_3008;
+
+    AssertTrue(
+        midEntry.MainCpu.TryFastForwardMoveLongRegisterQuadFillDbfLoop(
+            0x40000,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int midCycles,
+            out int midInstructions),
+        "quad fill should recover from a mid-unroll entry after an interrupt");
+    AssertTrue(midCycles > 0, "mid-unroll quad fill should report elapsed cycles");
+    AssertTrue(midInstructions > 0, "mid-unroll quad fill should report executed instructions");
+    AssertEqual(0x020Cu, midEntry.MainCpu.PC);
+    AssertEqual(0xFFFFu, midEntry.MainCpu.D[7] & 0xFFFF);
+    AssertEqual(0x00FF_3020u, midEntry.MainCpu.A[1]);
+    for (int i = 0; i < 6; i++)
+    {
+        AssertEqual(0xCAFE_BABEu, midEntry.Bus.ReadLong((uint)(0x00FF_3008 + (i * 4))));
+    }
+}
+
+void SegaCdMainBiosMoveLongProgramCopyFastForward()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0x000, 0x00FF_0000);
+    WriteLong(bios, 0x004, 0x00FF_1024);
+
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: segaCd);
+    machine.Reset();
+
+    machine.Bus.WriteWord(0x00FF_1024, 0x24D9); // MOVE.L (A1)+,(A2)+
+    machine.Bus.WriteWord(0x00FF_1026, 0x51CF); // DBF D7,loop
+    machine.Bus.WriteWord(0x00FF_1028, 0xFFFC);
+    machine.Bus.WriteWord(0x00FF_102A, 0x4E72); // STOP #$2700
+    machine.Bus.WriteWord(0x00FF_102C, 0x2700);
+
+    uint[] source = [0x1022_3446u, 0x586A_7C8Eu, 0x90A2_B4C6u];
+    for (int i = 0; i < source.Length; i++)
+    {
+        machine.Bus.WriteLong((uint)(SegaCdHardwareProfile.MainWordRamStart + 0x1000 + (i * 4)), source[i]);
+    }
+
+    machine.MainCpu.A[1] = SegaCdHardwareProfile.MainWordRamStart + 0x1000;
+    machine.MainCpu.A[2] = 0x000A_4000;
+    machine.MainCpu.D[7] = 2;
+
+    machine.RunFrameCycles(32);
+
+    AssertTrue(machine.M68kMoveLongCopyDbfFastPathHits > 0, "Sega CD BIOS PRG copy should use the long-copy fast path");
+    AssertEqual(0xFFFFu, machine.MainCpu.D[7] & 0xFFFF);
+    for (int i = 0; i < source.Length; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadLong((uint)(0x000A_4000 + (i * 4))));
+    }
+
+    AssertTrue(!machine.MainCpu.ExceptionCounts.ContainsKey(4), "Sega CD BIOS PRG copy helper should not fall into an illegal opcode");
+    AssertTrue(!machine.MainCpu.ExceptionCounts.ContainsKey(11), "Sega CD BIOS PRG copy helper should not execute a Line-F extension word as an opcode");
+
+    WriteLong(bios, 0x004, 0x00FF_0698);
+    SegaCdDevice alternateSegaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive alternate = new(CartridgeImage.FromBytes(CreateRom()), segaCd: alternateSegaCd);
+    alternate.Reset();
+
+    alternate.Bus.WriteWord(0x00FF_0698, 0x20D9); // MOVE.L (A1)+,(A0)+
+    alternate.Bus.WriteWord(0x00FF_069A, 0x51C8); // DBF D0,loop
+    alternate.Bus.WriteWord(0x00FF_069C, 0xFFFC);
+    alternate.Bus.WriteWord(0x00FF_069E, 0x4E72); // STOP #$2700
+    alternate.Bus.WriteWord(0x00FF_06A0, 0x2700);
+    for (int i = 0; i < source.Length; i++)
+    {
+        alternate.Bus.WriteLong((uint)(SegaCdHardwareProfile.MainWordRamStart + 0x2000 + (i * 4)), source[i]);
+    }
+
+    alternate.MainCpu.A[1] = SegaCdHardwareProfile.MainWordRamStart + 0x2000;
+    alternate.MainCpu.A[0] = 0x000A_5000;
+    alternate.MainCpu.D[0] = 2;
+
+    alternate.RunFrameCycles(32);
+
+    AssertTrue(alternate.M68kMoveLongCopyDbfFastPathHits > 0, "Sega CD BIOS alternate PRG copy should use the long-copy fast path");
+    AssertEqual(0xFFFFu, alternate.MainCpu.D[0] & 0xFFFF);
+    for (int i = 0; i < source.Length; i++)
+    {
+        AssertEqual(source[i], alternate.Bus.ReadLong((uint)(0x000A_5000 + (i * 4))));
+    }
+
+    AssertTrue(!alternate.MainCpu.ExceptionCounts.ContainsKey(4), "Sega CD BIOS alternate PRG copy helper should not vector through a corrupted stack frame");
+}
+
+void SegaCdMainBiosCopyHelperTailAfterFastForward()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0x000, 0x00FF_0000);
+    WriteLong(bios, 0x004, 0x00FF_1024);
+
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: segaCd);
+    machine.Reset();
+
+    machine.Bus.WriteWord(0x00FF_1024, 0x24D9); // MOVE.L (A1)+,(A2)+
+    machine.Bus.WriteWord(0x00FF_1026, 0x51CF); // DBF D7,loop
+    machine.Bus.WriteWord(0x00FF_1028, 0xFFFC);
+    machine.Bus.WriteWord(0x00FF_102A, 0x2039); // MOVE.L $0020000C,D0
+    machine.Bus.WriteLong(0x00FF_102C, 0x0020_000C);
+    machine.Bus.WriteWord(0x00FF_1030, 0x6704); // BEQ.S over the store
+    machine.Bus.WriteWord(0x00FF_1032, 0x21C0); // MOVE.L D0,($FD0E).W
+    machine.Bus.WriteWord(0x00FF_1034, 0xFD0E);
+    machine.Bus.WriteWord(0x00FF_1036, 0x4E72); // STOP #$2700
+    machine.Bus.WriteWord(0x00FF_1038, 0x2700);
+
+    uint[] source = [0x1022_3446u, 0x586A_7C8Eu, 0x90A2_B4C6u];
+    for (int i = 0; i < source.Length; i++)
+    {
+        machine.Bus.WriteLong((uint)(SegaCdHardwareProfile.MainWordRamStart + 0x1000 + (i * 4)), source[i]);
+    }
+
+    machine.Bus.WriteLong(0x0020_000C, 0x00FF_4EF9);
+    machine.MainCpu.A[1] = SegaCdHardwareProfile.MainWordRamStart + 0x1000;
+    machine.MainCpu.A[2] = 0x000A_4000;
+    machine.MainCpu.D[7] = 2;
+
+    machine.RunFrameCycles(64);
+
+    AssertTrue(machine.M68kMoveLongCopyDbfFastPathHits > 0, "Sega CD BIOS helper should use the long-copy fast path");
+    AssertEqual(0xFFFFu, machine.MainCpu.D[7] & 0xFFFF);
+    AssertEqual(0x00FF_4EF9u, machine.Bus.ReadLong(0x00FF_FD0E));
+    AssertEqual(0, machine.MainCpu.ExceptionCounts.Count);
+}
+
+void SegaCdMainBiosHelperShadowSurvivesSlicedProgramCopy()
+{
+    byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+    WriteLong(bios, 0x000, 0x00FF_0000);
+    WriteLong(bios, 0x004, 0x00FF_1024);
+
+    SegaCdDevice segaCd = new(bios, SegaCdRegion.Usa);
+    MegaDrive machine = new(CartridgeImage.FromBytes(CreateRom()), segaCd: segaCd);
+    machine.Reset();
+
+    byte[] helper =
+    [
+        0x24, 0xD9,
+        0x51, 0xCF, 0xFF, 0xFC,
+        0x20, 0x39, 0x00, 0x20, 0x00, 0x0C,
+        0x67, 0x04,
+        0x21, 0xC0, 0xFD, 0x0E,
+        0x20, 0x39, 0x00, 0x20, 0x00, 0x10,
+        0x67, 0x04,
+        0x21, 0xC0, 0xFD, 0x08,
+        0x08, 0xF9, 0x00, 0x01, 0x00, 0xA1, 0x20, 0x03,
+        0x67, 0xF6,
+        0x4E, 0xD0,
+    ];
+
+    for (int i = 0; i < helper.Length; i++)
+    {
+        machine.Bus.WriteByte((uint)(0x00FF_1024 + i), helper[i]);
+    }
+
+    int longsToCopy = 0x1100;
+    for (int i = 0; i <= longsToCopy; i++)
+    {
+        machine.Bus.WriteLong((uint)(SegaCdHardwareProfile.MainWordRamStart + 0x100 + (i * 4)), 0x4AFC_4AFCu);
+    }
+
+    machine.Bus.WriteWord(0x00FF_8000, 0x4E72); // STOP #$2700
+    machine.Bus.WriteWord(0x00FF_8002, 0x2700);
+    machine.Bus.WriteByte(SegaCdHardwareProfile.MainRegisterStart + 0x03, 0x02);
+    machine.MainCpu.A[0] = 0x00FF_8000;
+    machine.MainCpu.A[1] = SegaCdHardwareProfile.MainWordRamStart + 0x100;
+    machine.MainCpu.A[2] = 0x00FF_0000;
+    machine.MainCpu.D[7] = (uint)longsToCopy;
+
+    for (int i = 0; i < 24; i++)
+    {
+        machine.RunFrameCycles(4096);
+    }
+
+    AssertTrue(machine.M68kMoveLongCopyDbfFastPathHits > 0, "Sega CD helper should fast-forward after the copy overwrites its live loop bytes");
+    AssertTrue((machine.MainCpu.D[7] & 0xFFFF) < 0x0100 || (machine.MainCpu.D[7] & 0xFFFF) == 0xFFFF, "Sliced helper copy should continue making progress after self-overwrite");
+    AssertTrue(!machine.MainCpu.ExceptionCounts.ContainsKey(4), "Sega CD helper shadow should prevent decoding overwritten payload as an illegal opcode");
+    AssertTrue(!machine.MainCpu.ExceptionCounts.ContainsKey(11), "Sega CD helper shadow should prevent decoding overwritten payload as a Line-F opcode");
+}
+
+void M68kMoveBytePostIncrementStridedCopyDbfLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x45F9); // LEA $00FF3000,A2
+    EmitLong(rom, ref pc, 0x00FF_3000);
+    EmitWord(rom, ref pc, 0x47F9); // LEA $00FF4001,A3
+    EmitLong(rom, ref pc, 0x00FF_4001);
+    EmitWord(rom, ref pc, 0x383C); // MOVE.W #4,D4
+    EmitWord(rom, ref pc, 0x0004);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x16DA); // MOVE.B (A2)+,(A3)+
+    EmitWord(rom, ref pc, 0x524B); // ADDQ.W #1,A3
+    EmitWord(rom, ref pc, 0x51CC); // DBF D4,loop
+    EmitWord(rom, ref pc, 0xFFFA);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    byte[] source = [0x11, 0x22, 0x33, 0x44, 0x55];
+    for (int i = 0; i < source.Length; i++)
+    {
+        machine.Bus.WriteByte((uint)(0x00FF_3000 + i), source[i]);
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardMoveBytePostIncrementStridedCopyDbfLoop(
+            104,
+            address => (address & 0x00FF_0000u) == 0x00FF_0000u,
+            out int cycles,
+            out int instructions),
+        "fast-forward should recognize the Sonic CD-style strided byte copy loop");
+    AssertEqual(104, cycles);
+    AssertEqual(12, instructions);
+    AssertEqual(0u, machine.MainCpu.D[4] & 0xFFFF);
+    AssertEqual(0x00FF_3004u, machine.MainCpu.A[2]);
+    AssertEqual(0x00FF_4009u, machine.MainCpu.A[3]);
+    for (int i = 0; i < 4; i++)
+    {
+        AssertEqual(source[i], machine.Bus.ReadByte((uint)(0x00FF_4001 + (i * 2))));
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(0xFFFFu, machine.MainCpu.D[4] & 0xFFFF);
+    AssertEqual(source[4], machine.Bus.ReadByte(0x00FF_4009));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the strided copy loop");
+}
+
+void M68kAddWordNestedDbfChecksumLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x323C); // MOVE.W #0,D1
+    EmitWord(rom, ref pc, 0x0000);
+    EmitWord(rom, ref pc, 0x343C); // MOVE.W #2,D2
+    EmitWord(rom, ref pc, 0x0002);
+    EmitWord(rom, ref pc, 0x41F9); // LEA $00FF2000,A0
+    EmitLong(rom, ref pc, 0x00FF_2000);
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0xD058); // ADD.W (A0)+,D0
+    EmitWord(rom, ref pc, 0x51CA); // DBF D2,loop
+    EmitWord(rom, ref pc, 0xFFFC);
+    EmitWord(rom, ref pc, 0x51C9); // DBF D1,loop
+    EmitWord(rom, ref pc, 0xFFF8);
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteWord(0x00FF_2000, 0x0100);
+    machine.Bus.WriteWord(0x00FF_2002, 0x0020);
+    machine.Bus.WriteWord(0x00FF_2004, 0x0003);
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardAddWordPostIncrementNestedDbfLoop(256, out int cycles, out int instructions),
+        "fast-forward should recognize the nested checksum loop");
+    AssertEqual(54, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(0x0123u, machine.MainCpu.D[0] & 0xFFFF);
+    AssertEqual(0xFFFFu, machine.MainCpu.D[1] & 0xFFFF);
+    AssertEqual(0xFFFFu, machine.MainCpu.D[2] & 0xFFFF);
+    AssertEqual(0x00FF_2006u, machine.MainCpu.A[0]);
+    AssertEqual(loopPc + 10, machine.MainCpu.PC);
 }
 
 void M68kMoveWordAbsoluteDbfFillLoopFastForward()
@@ -13464,7 +15718,7 @@ void M68kTstLongBneWaitLoopFastForward()
 
     int pc = 0x200;
     uint loopPc = (uint)pc;
-    EmitWord(rom, ref pc, 0x4A79); // TST.L $00FFCAD0
+    EmitWord(rom, ref pc, 0x4AB9); // TST.L $00FFCAD0
     EmitLong(rom, ref pc, 0x00FF_CAD0);
     EmitWord(rom, ref pc, 0x66F8); // BNE loop
     EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
@@ -13488,6 +15742,65 @@ void M68kTstLongBneWaitLoopFastForward()
     AssertTrue(
         !machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(56, _ => true, out _, out _),
         "zero wait flag should fall back to the interpreter so the branch can exit");
+}
+
+void M68kTstWordAbsoluteLongBneExitsOnZeroWord()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x4A79); // TST.W $00FFCAD0
+    EmitLong(rom, ref pc, 0x00FF_CAD0);
+    EmitWord(rom, ref pc, 0x66F8); // BNE loop
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteLong(0x00FF_CAD0, 0x0000_0001);
+
+    machine.StepInstruction();
+    AssertTrue((machine.MainCpu.SR & 0x0004) != 0, "TST.W should set Z from the addressed word, not the following word");
+    machine.StepInstruction();
+    AssertEqual(0x0000_0208u, machine.MainCpu.PC);
+    machine.StepInstruction();
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after the TST.W/BNE fall-through path");
+}
+
+void M68kTstWordBneWaitLoopFastForward()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    uint loopPc = (uint)pc;
+    EmitWord(rom, ref pc, 0x4A79); // TST.W $00FFCAD0
+    EmitLong(rom, ref pc, 0x00FF_CAD0);
+    EmitWord(rom, ref pc, 0x66F8); // BNE loop
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    machine.Bus.WriteLong(0x00FF_CAD0, 0x8000_0001);
+
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue(
+        machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(42, address => (address & 0x00FF_0000u) == 0x00FF_0000u, out int cycles, out int instructions),
+        "fast-forward should recognize the word-sized absolute work-RAM wait loop");
+    AssertEqual(42, cycles);
+    AssertEqual(6, instructions);
+    AssertEqual(loopPc, machine.MainCpu.PC);
+    AssertTrue((machine.MainCpu.SR & 0x0004) == 0, "nonzero TST.W result should leave Z clear");
+    AssertTrue((machine.MainCpu.SR & 0x0008) != 0, "negative TST.W result should set N from bit 15");
+
+    machine.Bus.WriteLong(0x00FF_CAD0, 0x0000_FFFF);
+    AssertTrue(
+        !machine.MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(42, _ => true, out _, out _),
+        "zero addressed word should fall back to the interpreter even when the following word is nonzero");
 }
 
 void M68kCmpLongBeqWaitLoopFastForward()
@@ -13760,6 +16073,40 @@ void ImmediateBitWriteOps()
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after immediate bit write program");
 }
 
+void M68kBclrDisplacementBranchFlags()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x2C7C); // MOVEA.L #$00FF1000,A6
+    EmitLong(rom, ref pc, 0x00FF_1000);
+    EmitWord(rom, ref pc, 0x1D7C); // MOVE.B #$A0,$0043(A6)
+    EmitWord(rom, ref pc, 0x00A0);
+    EmitWord(rom, ref pc, 0x0043);
+    EmitWord(rom, ref pc, 0x08AE); // BCLR #7,$0043(A6)
+    EmitWord(rom, ref pc, 0x0007);
+    EmitWord(rom, ref pc, 0x0043);
+    EmitWord(rom, ref pc, 0x6704); // BEQ failure if bit 7 was reported clear
+    EmitWord(rom, ref pc, 0x7001); // MOVEQ #1,D0
+    EmitWord(rom, ref pc, 0x6002); // BRA done
+    EmitWord(rom, ref pc, 0x7002); // MOVEQ #2,D0
+    EmitWord(rom, ref pc, 0x4E72); // STOP #$2700
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    machine.Reset();
+    for (int i = 0; i < 8; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(1u, machine.MainCpu.D[0] & 0xFF);
+    AssertEqual((byte)0x20, machine.Bus.ReadByte(0x00FF_1043));
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after BCLR displacement branch program");
+}
+
 void IllegalExceptionAndRte()
 {
     byte[] rom = CreateRom();
@@ -13787,6 +16134,36 @@ void IllegalExceptionAndRte()
     AssertEqual(7u, machine.MainCpu.D[0]);
     AssertEqual(5u, machine.MainCpu.D[1]);
     AssertTrue(machine.MainCpu.Stopped, "CPU should stop after returning from illegal exception");
+}
+
+void SccAbsoluteShortConsumesExtension()
+{
+    byte[] rom = CreateRom();
+    WriteLong(rom, 0x000, 0x00FF_0000);
+    WriteLong(rom, 0x004, 0x0000_0200);
+
+    int pc = 0x200;
+    EmitWord(rom, ref pc, 0x50F8); // ST ($FE53).W
+    EmitWord(rom, ref pc, 0xFE53);
+    EmitWord(rom, ref pc, 0x7007); // MOVEQ #7,D0 proves the extension was consumed.
+    EmitWord(rom, ref pc, 0x4E72);
+    EmitWord(rom, ref pc, 0x2700);
+
+    MegaDrive machine = new(CartridgeImage.FromBytes(rom));
+    List<uint> reads = new();
+    machine.Bus.MemoryReadObserver = read => reads.Add(read.Address);
+    machine.Reset();
+    for (int i = 0; i < 3; i++)
+    {
+        machine.StepInstruction();
+    }
+
+    AssertEqual(7u, machine.MainCpu.D[0]);
+    AssertTrue(!reads.Contains(0x00FF_FE53), "Scc must not read the destination byte before writing it");
+    machine.Bus.MemoryReadObserver = null;
+    AssertEqual((byte)0xFF, machine.Bus.ReadByte(0x00FF_FE53));
+    AssertTrue(!machine.MainCpu.ExceptionCounts.ContainsKey(11), "Scc extension word must not execute as a Line-F opcode");
+    AssertTrue(machine.MainCpu.Stopped, "CPU should stop after Scc absolute-short program");
 }
 
 void IllegalOpcodeVectorsWithoutExtensionWord()
@@ -15485,10 +17862,88 @@ void WriteAscii(byte[] data, int offset, string text)
     }
 }
 
+byte[] CreateIsoWithRootFile(string fileIdentifier, byte[] payload)
+{
+    const int sectorBytes = 2048;
+    const int pvdLba = 16;
+    const int rootLba = 18;
+    const int fileLba = 20;
+    int fileSectors = Math.Max(1, (payload.Length + sectorBytes - 1) / sectorBytes);
+    byte[] iso = new byte[(fileLba + fileSectors) * sectorBytes];
+
+    int pvd = pvdLba * sectorBytes;
+    iso[pvd] = 0x01;
+    WriteAscii(iso, pvd + 1, "CD001");
+    iso[pvd + 6] = 0x01;
+    WriteIsoDirectoryRecord(iso, pvd + 156, rootLba, sectorBytes, "\0", isDirectory: true);
+
+    int root = rootLba * sectorBytes;
+    int cursor = root;
+    cursor += WriteIsoDirectoryRecord(iso, cursor, rootLba, sectorBytes, "\0", isDirectory: true);
+    cursor += WriteIsoDirectoryRecord(iso, cursor, rootLba, sectorBytes, "\u0001", isDirectory: true);
+    WriteIsoDirectoryRecord(iso, cursor, fileLba, payload.Length, fileIdentifier, isDirectory: false);
+    payload.CopyTo(iso.AsSpan(fileLba * sectorBytes));
+    return iso;
+}
+
+int WriteIsoDirectoryRecord(byte[] data, int offset, int extentLba, int byteLength, string identifier, bool isDirectory)
+{
+    byte[] nameBytes = Encoding.ASCII.GetBytes(identifier);
+    int length = 33 + nameBytes.Length;
+    if ((length & 1) != 0)
+    {
+        length++;
+    }
+
+    data[offset] = (byte)length;
+    WriteLittleEndianUInt32(data, offset + 2, (uint)extentLba);
+    WriteLittleEndianUInt32(data, offset + 10, (uint)byteLength);
+    data[offset + 25] = isDirectory ? (byte)0x02 : (byte)0x00;
+    data[offset + 28] = 0x01;
+    data[offset + 31] = 0x01;
+    data[offset + 32] = (byte)nameBytes.Length;
+    nameBytes.CopyTo(data.AsSpan(offset + 33));
+    return length;
+}
+
+void WriteLittleEndianUInt32(byte[] data, int offset, uint value)
+{
+    data[offset] = (byte)value;
+    data[offset + 1] = (byte)(value >> 8);
+    data[offset + 2] = (byte)(value >> 16);
+    data[offset + 3] = (byte)(value >> 24);
+}
+
 void WriteWord(byte[] data, int offset, ushort value)
 {
     data[offset] = (byte)(value >> 8);
     data[offset + 1] = (byte)value;
+}
+
+void WriteLittleEndianInt16(byte[] data, int offset, short value)
+{
+    data[offset] = (byte)value;
+    data[offset + 1] = (byte)(value >> 8);
+}
+
+void WriteWaveFile(string path, byte[] pcmBytes)
+{
+    using FileStream stream = File.Create(path);
+    using BinaryWriter writer = new(stream);
+    writer.Write("RIFF"u8);
+    writer.Write(36 + pcmBytes.Length);
+    writer.Write("WAVE"u8);
+    writer.Write("fmt "u8);
+    writer.Write(16);
+    writer.Write((ushort)1);
+    writer.Write((ushort)2);
+    writer.Write(44_100);
+    writer.Write(44_100 * 2 * 2);
+    writer.Write((ushort)4);
+    writer.Write((ushort)16);
+    writer.Write("data"u8);
+    writer.Write(pcmBytes.Length);
+    writer.Write(pcmBytes);
 }
 
 void WriteLong(byte[] data, int offset, uint value)
@@ -15503,6 +17958,116 @@ void WriteLongToSegaCdPrg(SegaCdDevice device, uint offset, uint value)
     device.WriteProgramRamByte(offset + 1, (byte)(value >> 16));
     device.WriteProgramRamByte(offset + 2, (byte)(value >> 8));
     device.WriteProgramRamByte(offset + 3, (byte)value);
+}
+
+void WriteWordToSegaCdPrg(SegaCdDevice device, uint offset, ushort value)
+{
+    device.WriteProgramRamByte(offset, (byte)(value >> 8));
+    device.WriteProgramRamByte(offset + 1, (byte)value);
+}
+
+void WriteWordToSegaCdWordRam(SegaCdDevice device, uint offset, ushort value)
+{
+    device.WriteWordRamByte(offset, (byte)(value >> 8));
+    device.WriteWordRamByte(offset + 1, (byte)value);
+}
+
+void WriteCddCommand(SegaCdDevice device, int command, int request, int trackNumber = 0)
+{
+    device.WriteSubRegisterByte(0x42, (byte)(command & 0x0F));
+    device.WriteSubRegisterByte(0x43, 0x00);
+    device.WriteSubRegisterByte(0x44, 0x00);
+    device.WriteSubRegisterByte(0x45, (byte)(request & 0x0F));
+    device.WriteSubRegisterByte(0x46, (byte)(trackNumber / 10));
+    device.WriteSubRegisterByte(0x47, (byte)(trackNumber % 10));
+    for (uint offset = 0x48; offset <= 0x4A; offset++)
+    {
+        device.WriteSubRegisterByte(offset, 0x00);
+    }
+
+    device.WriteSubRegisterByte(0x4B, 0x00);
+}
+
+void InvokeSegaCdPrivate(SegaCdDevice device, string name, params object[] args)
+{
+    System.Reflection.MethodInfo method = typeof(SegaCdDevice).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException($"{name} helper was not found");
+    method.Invoke(device, args);
+}
+
+void SetSegaCdPrivateField(SegaCdDevice device, string name, object value)
+{
+    System.Reflection.FieldInfo field = typeof(SegaCdDevice).GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException($"{name} field was not found");
+    field.SetValue(device, value);
+}
+
+void WriteCddPlayCommand(SegaCdDevice device, int minutes, int seconds, int frames)
+{
+    device.WriteSubRegisterByte(0x42, 0x03);
+    device.WriteSubRegisterByte(0x43, 0x00);
+    WriteCddBcdPair(device, 0x44, minutes);
+    WriteCddBcdPair(device, 0x46, seconds);
+    WriteCddBcdPair(device, 0x48, frames);
+    device.WriteSubRegisterByte(0x4A, 0x00);
+    device.WriteSubRegisterByte(0x4B, 0x00);
+}
+
+void WriteCddSeekCommand(SegaCdDevice device, int minutes, int seconds, int frames)
+{
+    device.WriteSubRegisterByte(0x42, 0x04);
+    device.WriteSubRegisterByte(0x43, 0x00);
+    WriteCddBcdPair(device, 0x44, minutes);
+    WriteCddBcdPair(device, 0x46, seconds);
+    WriteCddBcdPair(device, 0x48, frames);
+    device.WriteSubRegisterByte(0x4A, 0x00);
+    device.WriteSubRegisterByte(0x4B, 0x00);
+}
+
+void ConfigurePcmChannel0(SegaCdDevice device)
+{
+    device.WritePcmRamByte(0, 0xFE);
+    device.WritePcmRamByte(1, 0xFD);
+    device.WritePcmRamByte(2, 0xFF);
+    device.WritePcmMappedByte(0x0F, 0xC0);
+    device.WritePcmMappedByte(0x01, 0xFF);
+    device.WritePcmMappedByte(0x03, 0xFF);
+    device.WritePcmMappedByte(0x05, 0x00);
+    device.WritePcmMappedByte(0x07, 0x08);
+    device.WritePcmMappedByte(0x09, 0x00);
+    device.WritePcmMappedByte(0x0B, 0x00);
+    device.WritePcmMappedByte(0x0D, 0x00);
+    device.WritePcmMappedByte(0x11, 0xFE);
+}
+
+void WriteCddBcdPair(SegaCdDevice device, uint offset, int value)
+{
+    device.WriteSubRegisterByte(offset, (byte)(value / 10));
+    device.WriteSubRegisterByte(offset + 1, (byte)(value % 10));
+}
+
+void WriteProgramRamLong(SegaCdDevice device, uint offset, uint value)
+{
+    device.WriteProgramRamByte(offset, (byte)(value >> 24));
+    device.WriteProgramRamByte(offset + 1, (byte)(value >> 16));
+    device.WriteProgramRamByte(offset + 2, (byte)(value >> 8));
+    device.WriteProgramRamByte(offset + 3, (byte)value);
+}
+
+void WriteProgramRamWord(SegaCdDevice device, uint offset, ushort value)
+{
+    device.WriteProgramRamByte(offset, (byte)(value >> 8));
+    device.WriteProgramRamByte(offset + 1, (byte)value);
+}
+
+void StartCdcTransfer(SegaCdDevice device, int byteCount)
+{
+    device.WriteSubRegisterByte(0x05, 0x02);
+    device.WriteSubRegisterByte(0x07, (byte)(byteCount & 0xFF));
+    device.WriteSubRegisterByte(0x07, (byte)(byteCount >> 8));
+    device.WriteSubRegisterByte(0x07, 0x00);
+    device.WriteSubRegisterByte(0x07, 0x00);
+    device.WriteSubRegisterByte(0x07, 0x00);
 }
 
 byte ExpectedCddChecksum(SegaCdDevice device, uint packetStart)

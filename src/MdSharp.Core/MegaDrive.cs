@@ -17,6 +17,14 @@ public sealed class MegaDrive
     private const int ThirtyTwoXSystemWordPollLoopCycles = 26;
     private const int ResetAudioFadeInSamples = 512;
     private const int MaxStoppedM68kIdleBatchCycles = 64;
+    private const byte M68kVBlankInterruptBits = (1 << 5) | (1 << 6);
+    private const uint SegaCdMainBootVectorRestoreStart = 0x00FF_0584;
+    private const uint SegaCdMainBootVectorRestoreEndExclusive = 0x00FF_059C;
+    private const uint SegaCdMainBootGenericFlag7Clear = 0x00FF_05BE;
+    private const uint SegaCdMainBootGenericReadyPollStart = 0x00FF_05C6;
+    private const uint SegaCdMainBootGenericReadyPollBranch = 0x00FF_05CE;
+    private const uint SegaCdMainBootHelperStart = 0x00FF_1024;
+    private const uint SegaCdMainBootHelperEndExclusive = 0x00FF_104E;
     private static readonly double PsgFilterAlpha = LowPassAlpha(AudioConstants.PsgLowPassCutoffHz, AudioConstants.DefaultSampleRate);
     private static readonly double BassShelfAlpha = LowPassAlpha(AudioConstants.BassShelfCutoffHz, AudioConstants.DefaultSampleRate);
     private static readonly double OutputFilterAlpha = LowPassAlpha(AudioConstants.OutputLowPassCutoffHz, AudioConstants.DefaultSampleRate);
@@ -73,6 +81,8 @@ public sealed class MegaDrive
     public long M68kLongCmpBeqWaitFastPathCycles => _m68kLongCmpBeqWaitFastPathCycles;
     public long M68kMoveByteCopyDbfFastPathHits => _m68kMoveByteCopyDbfFastPathHits;
     public long M68kMoveByteCopyDbfFastPathCycles => _m68kMoveByteCopyDbfFastPathCycles;
+    public long M68kMoveLongCopyDbfFastPathHits => _m68kMoveLongCopyDbfFastPathHits;
+    public long M68kMoveLongCopyDbfFastPathCycles => _m68kMoveLongCopyDbfFastPathCycles;
     public long M68kMoveWordVdpFillDbfFastPathHits => _m68kMoveWordVdpFillDbfFastPathHits;
     public long M68kMoveWordVdpFillDbfFastPathCycles => _m68kMoveWordVdpFillDbfFastPathCycles;
     public long M68kBitReaderFastPathHits => _m68kBitReaderFastPathHits;
@@ -90,6 +100,8 @@ public sealed class MegaDrive
     private short[] _psgMixBuffer = new short[1024];
     private short[] _ymMixBuffer = new short[2048];
     private short[] _thirtyTwoXPwmMixBuffer = new short[2048];
+    private short[] _segaCdCddaMixBuffer = new short[2048];
+    private short[] _segaCdPcmMixBuffer = new short[2048];
     private FramePerformanceAccumulator _framePerformance;
     private long _z80MasterCycleCursor;
     private double _thirtyTwoXInstructionCarry;
@@ -110,6 +122,8 @@ public sealed class MegaDrive
     private long _m68kLongCmpBeqWaitFastPathCycles;
     private long _m68kMoveByteCopyDbfFastPathHits;
     private long _m68kMoveByteCopyDbfFastPathCycles;
+    private long _m68kMoveLongCopyDbfFastPathHits;
+    private long _m68kMoveLongCopyDbfFastPathCycles;
     private long _m68kMoveWordVdpFillDbfFastPathHits;
     private long _m68kMoveWordVdpFillDbfFastPathCycles;
     private long _m68kBitReaderFastPathHits;
@@ -154,6 +168,8 @@ public sealed class MegaDrive
         _m68kLongCmpBeqWaitFastPathCycles = 0;
         _m68kMoveByteCopyDbfFastPathHits = 0;
         _m68kMoveByteCopyDbfFastPathCycles = 0;
+        _m68kMoveLongCopyDbfFastPathHits = 0;
+        _m68kMoveLongCopyDbfFastPathCycles = 0;
         _m68kMoveWordVdpFillDbfFastPathHits = 0;
         _m68kMoveWordVdpFillDbfFastPathCycles = 0;
         _m68kBitReaderFastPathHits = 0;
@@ -243,6 +259,7 @@ public sealed class MegaDrive
                 if ((interrupts & Vdp.Interrupts.Vertical) != 0)
                 {
                     z80InterruptPending = true;
+                    Bus.SegaCd?.PulseMainVBlankInterrupt();
                     if (VBlankInterruptEnabled())
                     {
                         QueueM68kInterrupt(GetM68kVBlankInterruptLevel());
@@ -335,6 +352,7 @@ public sealed class MegaDrive
         {
             Bus.CurrentMasterCycle = lineStartMasterCycle + (lineCycleOffset * GenesisScheduler.M68kDivider);
             Bus.CurrentScanlineMasterCycleOffset = lineCycleOffset * GenesisScheduler.M68kDivider;
+            ServicePendingM68kInterrupts();
             if (!RunAddOnHardwareForMasterCycles((long)cycleBudget * GenesisScheduler.M68kDivider, shouldAbort))
             {
                 return -1;
@@ -356,7 +374,52 @@ public sealed class MegaDrive
 
             Bus.CurrentMasterCycle = lineStartMasterCycle + ((lineCycleOffset + consumed) * GenesisScheduler.M68kDivider);
             Bus.CurrentScanlineMasterCycleOffset = (lineCycleOffset + consumed) * GenesisScheduler.M68kDivider;
+            Bus.CurrentM68kPc = MainCpu.PC & 0x00FF_FFFFu;
             ServicePendingM68kInterrupts();
+            bool allowM68kLoopFastPaths = Bus.SegaCd is null;
+            ClearSegaCdSonicCdIpxVSyncWaitIfNeeded();
+
+            if (IsSegaCdMainBiosGenericFlag7PulseClear())
+            {
+                int yieldCycles = Math.Min(cycleBudget - consumed, SegaCdMinimumCycleBatch);
+                MainCpu.AddWaitCycles(yieldCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)yieldCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += yieldCycles;
+                continue;
+            }
+
+            if (IsSegaCdMainBiosGenericReadyPollLoop())
+            {
+                int yieldCycles = Math.Min(cycleBudget - consumed, SegaCdMinimumCycleBatch);
+                MainCpu.AddWaitCycles(yieldCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)yieldCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += yieldCycles;
+                continue;
+            }
+
+            if (Bus.SegaCd is not null &&
+                IsSegaCdSonicCdIpxWordRamWaitLoop() &&
+                (Bus.SegaCd.TryHandleSonicCdIpxWordRamWaitHle((ushort)(MainCpu.D[1] & 0xFFFF)) ||
+                    Bus.SegaCd.TryReturnSonicCdIpxWordRamToMainHle()))
+            {
+                const int hleCycles = 8;
+                MainCpu.AddWaitCycles(hleCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)hleCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += hleCycles;
+                continue;
+            }
 
             if (TryFastForwardThirtyTwoXSystemWordPollLoop(cycleBudget - consumed, out int pollCycles))
             {
@@ -383,7 +446,8 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardLongAbsoluteTstBneWaitLoop(
                     cycleBudget - consumed,
                     IsM68kWorkRamAddress,
@@ -397,11 +461,11 @@ public sealed class MegaDrive
                 }
 
                 consumed += waitLoopCycles;
-                remainingInstructions = Math.Max(0, remainingInstructions - waitLoopInstructions);
                 continue;
             }
 
-            if (Bus.ThirtyTwoX is null &&
+            if (allowM68kLoopFastPaths &&
+                Bus.ThirtyTwoX is null &&
                 MainCpu.TryFastForwardMoveBytePostIncrementDbfLoop(cycleBudget - consumed, out int fastCycles, out int fastInstructions))
             {
                 RecordM68kFastPath(fastCycles, ref _m68kMoveByteFillDbfFastPathHits, ref _m68kMoveByteFillDbfFastPathCycles);
@@ -415,7 +479,29 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (Bus.SegaCd is not null &&
+                MainCpu.TryFastForwardMoveLongRegisterQuadFillDbfLoop(
+                    IsSegaCdSonicCdIpxFileBufferClearLoop() ? 0x40000 : cycleBudget - consumed,
+                    IsM68kFastSegaCdProgramCopyAddress,
+                    out int quadFillCycles,
+                    out int quadFillInstructions))
+            {
+                int quadFillWaitCycles = Bus.ConsumeM68kWaitCycles();
+                MainCpu.AddWaitCycles(quadFillWaitCycles);
+                int elapsedCycles = quadFillCycles + quadFillWaitCycles;
+                RecordM68kFastPath(elapsedCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += Math.Min(cycleBudget - consumed, elapsedCycles);
+                remainingInstructions = Math.Max(0, remainingInstructions - quadFillInstructions);
+                continue;
+            }
+
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardLongAbsoluteCmpBeqWaitLoop(
                     cycleBudget - consumed,
                     IsM68kWorkRamAddress,
@@ -429,11 +515,11 @@ public sealed class MegaDrive
                 }
 
                 consumed += cmpWaitLoopCycles;
-                remainingInstructions = Math.Max(0, remainingInstructions - cmpWaitLoopInstructions);
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardShiftRegisterBitReaderLoop(cycleBudget - consumed, out int bitReaderCycles, out int bitReaderInstructions))
             {
                 RecordM68kFastPath(bitReaderCycles, ref _m68kBitReaderFastPathHits, ref _m68kBitReaderFastPathCycles);
@@ -447,7 +533,8 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardWordPairCompareSubroutineDbfLoop(cycleBudget - consumed, out int wordPairCycles, out int wordPairInstructions))
             {
                 RecordM68kFastPath(wordPairCycles, ref _m68kWordPairCompareFastPathHits, ref _m68kWordPairCompareFastPathCycles);
@@ -461,7 +548,8 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardBtstRegisterDbccLoop(cycleBudget - consumed, out int btstDbccCycles, out int btstDbccInstructions))
             {
                 RecordM68kFastPath(btstDbccCycles);
@@ -475,7 +563,8 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardMoveBytePostIncrementCopyDbfLoop(
                     cycleBudget - consumed,
                     IsM68kFastByteCopyAddress,
@@ -496,7 +585,57 @@ public sealed class MegaDrive
                 continue;
             }
 
-            if (_pendingM68kInterruptLevels == 0 &&
+            bool segaCdMainBiosProgramCopyLoop = IsSegaCdMainBiosProgramCopyLoop();
+            bool segaCdMainBiosHelperCopyLoop = (MainCpu.PC & 0x00FF_FFFFu) == 0x00FF_1024u;
+            if (segaCdMainBiosProgramCopyLoop &&
+                segaCdMainBiosHelperCopyLoop &&
+                !HasServiceableM68kInterrupt() &&
+                MainCpu.TryFastForwardMoveLongPostIncrementCopyDbfLoopToFallthrough(
+                    0x4000,
+                    IsM68kFastSegaCdProgramCopyAddress,
+                    out int fullLongCopyCycles,
+                    out int fullLongCopyInstructions,
+                    trustCurrentInstructionPattern: true))
+            {
+                int fullLongCopyWaitCycles = Bus.ConsumeM68kWaitCycles();
+                MainCpu.AddWaitCycles(fullLongCopyWaitCycles);
+                int elapsedCycles = fullLongCopyCycles + fullLongCopyWaitCycles;
+                RecordM68kFastPath(elapsedCycles, ref _m68kMoveLongCopyDbfFastPathHits, ref _m68kMoveLongCopyDbfFastPathCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += Math.Min(cycleBudget - consumed, elapsedCycles);
+                remainingInstructions = Math.Max(0, remainingInstructions - fullLongCopyInstructions);
+                continue;
+            }
+
+            bool allowM68kLongCopyFastPath = allowM68kLoopFastPaths || segaCdMainBiosProgramCopyLoop;
+            if (allowM68kLongCopyFastPath &&
+                !HasServiceableM68kInterrupt() &&
+                MainCpu.TryFastForwardMoveLongPostIncrementCopyDbfLoop(
+                    cycleBudget - consumed,
+                    Bus.SegaCd is null ? IsM68kFastLongCopyAddress : IsM68kFastSegaCdProgramCopyAddress,
+                    out int longCopyCycles,
+                    out int longCopyInstructions))
+            {
+                int longCopyWaitCycles = Bus.ConsumeM68kWaitCycles();
+                MainCpu.AddWaitCycles(longCopyWaitCycles);
+                int elapsedCycles = longCopyCycles + longCopyWaitCycles;
+                RecordM68kFastPath(elapsedCycles, ref _m68kMoveLongCopyDbfFastPathHits, ref _m68kMoveLongCopyDbfFastPathCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)elapsedCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += elapsedCycles;
+                remainingInstructions = Math.Max(0, remainingInstructions - longCopyInstructions);
+                continue;
+            }
+
+            if (allowM68kLoopFastPaths &&
+                !HasServiceableM68kInterrupt() &&
                 MainCpu.TryFastForwardMoveWordAbsoluteDbfLoop(
                     cycleBudget - consumed,
                     IsM68kVdpDataPortAddress,
@@ -585,6 +724,26 @@ public sealed class MegaDrive
         _m68kFastPathCycles += cycles;
     }
 
+    private bool HasServiceableM68kInterrupt()
+    {
+        if (_pendingM68kInterruptLevels == 0 ||
+            IsSegaCdMainBiosBootCriticalSectionActive())
+        {
+            return false;
+        }
+
+        int mask = (MainCpu.SR >> 8) & 0x07;
+        for (int level = 7; level > mask; level--)
+        {
+            if ((_pendingM68kInterruptLevels & (1 << level)) != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryFastForwardThirtyTwoXSystemWordPollLoop(int cycleBudget, out int cycles)
     {
         cycles = 0;
@@ -637,6 +796,157 @@ public sealed class MegaDrive
     {
         address &= 0x00FF_FFFFu;
         return address < 0x00A0_0000u || address >= 0x00E0_0000u;
+    }
+
+    private bool IsM68kFastLongCopyAddress(uint address)
+    {
+        if (!IsM68kFastByteCopyAddress(address))
+        {
+            return false;
+        }
+
+        if (Bus.SegaCd is null)
+        {
+            return true;
+        }
+
+        address &= 0x00FF_FFFFu;
+        return !IsInRange(address, SegaCdHardwareProfile.MainProgramRamMirrorLowStart, SegaCdHardwareProfile.MainProgramRamMirrorLowEndInclusive) &&
+            !IsInRange(address, SegaCdHardwareProfile.MainProgramRamMirrorHighStart, SegaCdHardwareProfile.MainProgramRamMirrorHighEndInclusive) &&
+            !IsInRange(address, SegaCdHardwareProfile.MainWordRamStart, SegaCdHardwareProfile.MainWordRamEndInclusive) &&
+            !IsInRange(address, SegaCdHardwareProfile.MainWordRamHighAliasStart, SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive) &&
+            !IsInRange(address, SegaCdHardwareProfile.MainWordRamAliasStart, SegaCdHardwareProfile.MainWordRamAliasEndInclusive) &&
+            !IsInRange(address, SegaCdHardwareProfile.MainRegisterStart, SegaCdHardwareProfile.MainRegisterEndInclusive);
+    }
+
+    private bool IsSegaCdMainBiosProgramCopyLoop()
+    {
+        if (Bus.SegaCd is null ||
+            MainCpu.InstructionObserver is not null)
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        return pc is 0x00FF_0698u or 0x00FF_1024u;
+    }
+
+    private bool IsSegaCdMainBiosBootCriticalSectionActive()
+    {
+        if (Bus.SegaCd is null)
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        return (pc >= SegaCdMainBootHelperStart && pc < SegaCdMainBootHelperEndExclusive) ||
+            (pc >= SegaCdMainBootVectorRestoreStart && pc < SegaCdMainBootVectorRestoreEndExclusive);
+    }
+
+    private bool IsSegaCdMainBiosGenericReadyPollLoop()
+    {
+        SegaCdDevice? segaCd = Bus.SegaCd;
+        if (segaCd is null ||
+            !segaCd.ShouldYieldMainForGenericBootReadyPoll ||
+            HasServiceableM68kInterrupt())
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        if (pc is not (SegaCdMainBootGenericReadyPollStart or SegaCdMainBootGenericReadyPollBranch))
+        {
+            return false;
+        }
+
+        return Bus.ReadWord(SegaCdMainBootGenericReadyPollStart) == 0x0839 &&
+            Bus.ReadWord(SegaCdMainBootGenericReadyPollStart + 2) == 0x0007 &&
+            Bus.ReadWord(SegaCdMainBootGenericReadyPollStart + 4) == 0x00A1 &&
+            Bus.ReadWord(SegaCdMainBootGenericReadyPollStart + 6) == 0x200F &&
+            Bus.ReadWord(SegaCdMainBootGenericReadyPollStart + 8) == 0x6700 &&
+            Bus.ReadWord(SegaCdMainBootGenericReadyPollStart + 10) == 0xFFF6;
+    }
+
+    private bool IsSegaCdMainBiosGenericFlag7PulseClear()
+    {
+        SegaCdDevice? segaCd = Bus.SegaCd;
+        if (segaCd is null || HasServiceableM68kInterrupt())
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        if (pc != SegaCdMainBootGenericFlag7Clear)
+        {
+            return false;
+        }
+
+        if (Bus.ReadWord(pc) != 0x08B9 ||
+            Bus.ReadWord(pc + 2) != 0x0007 ||
+            Bus.ReadWord(pc + 4) != 0x00A1 ||
+            Bus.ReadWord(pc + 6) != 0x200E)
+        {
+            return false;
+        }
+
+        return segaCd.TryConsumeGenericBootMainFlag7PulseYield();
+    }
+
+    private bool IsSegaCdSonicCdIpxFileBufferClearLoop()
+    {
+        if (Bus.SegaCd is null)
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        return pc is >= 0x00FF_0B0Cu and < 0x00FF_0B14u;
+    }
+
+    private bool IsSegaCdSonicCdIpxWordRamWaitLoop()
+    {
+        if (Bus.SegaCd is null)
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        return pc is 0x00FF_0D10u or 0x00FF_0D18u;
+    }
+
+    private void ClearSegaCdSonicCdIpxVSyncWaitIfNeeded()
+    {
+        if (Bus.SegaCd is null)
+        {
+            return;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        if (pc is not (0x00FF_0D6Au or 0x00FF_0D72u))
+        {
+            return;
+        }
+
+        const uint SonicCdIpxVSyncFlag = 0x00FF_0F00u;
+        if (Bus.ReadByte(SonicCdIpxVSyncFlag) != 0)
+        {
+            Bus.WriteByte(SonicCdIpxVSyncFlag, 0);
+        }
+    }
+
+    private static bool IsM68kFastSegaCdProgramCopyAddress(uint address)
+    {
+        address &= 0x00FF_FFFFu;
+        return address < 0x00A0_0000u ||
+            address >= 0x00E0_0000u ||
+            IsInRange(address, SegaCdHardwareProfile.MainProgramRamMirrorHighStart, SegaCdHardwareProfile.MainProgramRamMirrorHighEndInclusive) ||
+            IsInRange(address, SegaCdHardwareProfile.MainWordRamHighAliasStart, SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive) ||
+            IsInRange(address, SegaCdHardwareProfile.MainWordRamAliasStart, SegaCdHardwareProfile.MainWordRamAliasEndInclusive);
+    }
+
+    private static bool IsInRange(uint address, uint start, uint endInclusive)
+    {
+        return address >= start && address <= endInclusive;
     }
 
     private static bool IsM68kVdpDataPortAddress(uint address)
@@ -818,11 +1128,16 @@ public sealed class MegaDrive
 
     private void ServicePendingM68kInterrupts()
     {
-        const byte vBlankInterruptBits = (1 << 5) | (1 << 6);
-        if ((_pendingM68kInterruptLevels & vBlankInterruptBits) != 0
+        if ((_pendingM68kInterruptLevels & M68kVBlankInterruptBits) != 0
             && (!VBlankInterruptEnabled() || !Vdp.VInterruptLineActive || VBlankVectorTargetsThirtyTwoXBootErrorStub()))
         {
-            _pendingM68kInterruptLevels &= unchecked((byte)~vBlankInterruptBits);
+            _pendingM68kInterruptLevels &= unchecked((byte)~M68kVBlankInterruptBits);
+        }
+
+        if (_pendingM68kInterruptLevels != 0 &&
+            IsSegaCdMainBiosBootCriticalSectionActive())
+        {
+            return;
         }
 
         int mask = (MainCpu.SR >> 8) & 0x07;
@@ -873,16 +1188,22 @@ public sealed class MegaDrive
         Span<short> psg = _psgMixBuffer.AsSpan(0, samples);
         Span<short> ym = _ymMixBuffer.AsSpan(0, samples * AudioConstants.StereoChannels);
         Span<short> pwm = _thirtyTwoXPwmMixBuffer.AsSpan(0, samples * AudioConstants.StereoChannels);
+        Span<short> cdda = _segaCdCddaMixBuffer.AsSpan(0, samples * AudioConstants.StereoChannels);
+        Span<short> segaCdPcm = _segaCdPcmMixBuffer.AsSpan(0, samples * AudioConstants.StereoChannels);
         Psg.RenderMonoSamplesInto(psg, samples);
         Ym2612.RenderStereoSamplesInto(ym, samples, channelEnergy: ymChannelEnergy);
         pwm.Clear();
         Bus.ThirtyTwoX?.RenderPwmStereoSamplesInto(pwm, samples);
+        cdda.Clear();
+        Bus.SegaCd?.RenderCddaStereoSamplesInto(cdda, samples);
+        segaCdPcm.Clear();
+        Bus.SegaCd?.RenderPcmStereoSamplesInto(segaCdPcm, samples, sampleRate: AudioConstants.DefaultSampleRate);
         for (int i = 0; i < samples; i++)
         {
             _psgFilter += (psg[i] - _psgFilter) * PsgFilterAlpha;
             double psgSample = _psgFilter * AudioConstants.PsgMixLevel;
-            double left = psgSample + (ym[i * 2] * AudioConstants.YmMixLevel) + pwm[i * 2];
-            double right = psgSample + (ym[(i * 2) + 1] * AudioConstants.YmMixLevel) + pwm[(i * 2) + 1];
+            double left = psgSample + (ym[i * 2] * AudioConstants.YmMixLevel) + pwm[i * 2] + (cdda[i * 2] * AudioConstants.SegaCdCddaMixLevel) + (segaCdPcm[i * 2] * AudioConstants.SegaCdPcmMixLevel);
+            double right = psgSample + (ym[(i * 2) + 1] * AudioConstants.YmMixLevel) + pwm[(i * 2) + 1] + (cdda[(i * 2) + 1] * AudioConstants.SegaCdCddaMixLevel) + (segaCdPcm[(i * 2) + 1] * AudioConstants.SegaCdPcmMixLevel);
             _audioBassFilterLeft += (left - _audioBassFilterLeft) * BassShelfAlpha;
             _audioBassFilterRight += (right - _audioBassFilterRight) * BassShelfAlpha;
             left += _audioBassFilterLeft * AudioConstants.BassShelfGain;
@@ -975,6 +1296,16 @@ public sealed class MegaDrive
         if (_thirtyTwoXPwmMixBuffer.Length < stereoSamples)
         {
             _thirtyTwoXPwmMixBuffer = new short[stereoSamples];
+        }
+
+        if (_segaCdCddaMixBuffer.Length < stereoSamples)
+        {
+            _segaCdCddaMixBuffer = new short[stereoSamples];
+        }
+
+        if (_segaCdPcmMixBuffer.Length < stereoSamples)
+        {
+            _segaCdPcmMixBuffer = new short[stereoSamples];
         }
     }
 

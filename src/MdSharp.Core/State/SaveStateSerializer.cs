@@ -4,6 +4,7 @@ using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Cpu.Sh2;
 using MdSharp.Core.Cpu.Z80;
+using MdSharp.Core.SegaCd;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Timing;
 using MdSharp.Core.Video;
@@ -13,7 +14,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 69;
+    private const int Version = 86;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -286,6 +287,12 @@ public static class SaveStateSerializer
         {
             WriteThirtyTwoX(writer, state.ThirtyTwoX);
         }
+
+        writer.Write(state.SegaCd is not null);
+        if (state.SegaCd is not null)
+        {
+            WriteSegaCd(writer, state.SegaCd);
+        }
     }
 
     private static GenesisBus.BusState ReadBus(BinaryReader reader, int version)
@@ -307,7 +314,233 @@ public static class SaveStateSerializer
         int pendingM68kWaitCycles = version >= 26 ? reader.ReadInt32() : 0;
         SvpDevice.SvpState? svp = version >= 25 && reader.ReadBoolean() ? ReadSvp(reader) : null;
         ThirtyTwoXDevice.ThirtyTwoXState? thirtyTwoX = version >= 31 && reader.ReadBoolean() ? ReadThirtyTwoX(reader, version) : null;
-        return new GenesisBus.BusState(workRam, z80Ram, tmss, ioData, ioControl, z80BusRequested, z80ResetAsserted, z80BankRegister, saveRam, bankRegisters, bankSwitchingEnabled, fallbackSaveRamActive, saveRamEnabled, z80BusGrantReadyCycle, pendingM68kWaitCycles, svp, thirtyTwoX);
+        SegaCdDevice.SegaCdState? segaCd = version >= 70 && reader.ReadBoolean() ? ReadSegaCd(reader, version) : null;
+        return new GenesisBus.BusState(workRam, z80Ram, tmss, ioData, ioControl, z80BusRequested, z80ResetAsserted, z80BankRegister, saveRam, bankRegisters, bankSwitchingEnabled, fallbackSaveRamActive, saveRamEnabled, z80BusGrantReadyCycle, pendingM68kWaitCycles, svp, thirtyTwoX, segaCd);
+    }
+
+    private static void WriteSegaCd(BinaryWriter writer, SegaCdDevice.SegaCdState state)
+    {
+        WriteArray(writer, state.ProgramRam);
+        WriteArray(writer, state.WordRam);
+        WriteArray(writer, state.BackupRam);
+        WriteArray(writer, state.PcmRam);
+        WriteArray(writer, state.MainRegisters);
+        WriteArray(writer, state.MainToSubCommand);
+        WriteArray(writer, state.SubToMainStatus);
+        writer.Write(state.SubBiosMapped);
+        writer.Write(state.SubCpuResetReleased);
+        writer.Write(state.SubCpuBusRequested);
+        writer.Write(state.CddInterruptCycleCarry);
+        writer.Write(state.CdcInterruptCycleCarry);
+        writer.Write(state.CddStatusCode);
+        writer.Write(state.CddStatusReady);
+        writer.Write(state.CddResponseLatched);
+        writer.Write(state.CddSeekTicksRemaining);
+        WriteArray(writer, state.CdcRegisters);
+        WriteArray(writer, state.CdcPacket);
+        writer.Write(state.CdcAddress);
+        writer.Write(state.CdcPacketOffset);
+        writer.Write(state.CdcPacketLength);
+        writer.Write(state.CurrentCdcLba);
+        writer.Write(state.BootReadStartLba);
+        writer.Write(state.BootReadSectorCount);
+        writer.Write(state.BootReadStreamActive);
+        writer.Write(state.CdcRunning);
+        writer.Write(state.CddaLba);
+        writer.Write(state.CddaSectorLba);
+        writer.Write(state.CddaSectorSampleIndex);
+        writer.Write(state.CddaPlaying);
+        WriteArray(writer, state.CddaSector);
+        WriteSegaCdPcmChannels(writer, state.PcmChannels);
+        writer.Write(state.PcmControlChannel);
+        writer.Write(state.PcmWriteBank);
+        writer.Write(state.PcmEnabled);
+        writer.Write(state.PcmRenderCycleCarry);
+        writer.Write(state.StickySubFlag6);
+        writer.Write(state.SubFlag7BootClearCycles);
+        writer.Write(state.BootReadyFlagClearReadsUntilReady);
+        writer.Write(state.GenericBootReadyFollowUpFlagPending);
+        writer.Write(state.GenericBootReadyEdgeReadPending);
+        writer.Write(state.GenericBootMainFlag7PulseYieldPending);
+        writer.Write(state.GenericBootMainFlag7SubReadEdgePending);
+        writer.Write(state.PendingSubInterruptLevels);
+        writer.Write(state.WordRamModeBits);
+        writer.Write(state.WordRamOwnedByMain);
+        writer.Write(state.SuppressBootStatusUntilMainCommand);
+        writer.Write(state.MainCommunicationFlags);
+        writer.Write(state.SubCommunicationFlags);
+        writer.Write(state.DiscTypeCommPacketPending);
+        writer.Write(state.DiscTypeCommPacketReadyAfterClearObserved);
+        writer.Write(state.DiscTypeCommPacketClearReadsUntilReady);
+        writer.Write(state.DiscTypeCommPacketSyntheticEdgeUsed);
+        writer.Write(state.MainBootIpOverrideAllowed);
+        writer.Write(state.SyntheticCommand23AckCount);
+        WriteCpu(writer, state.SubCpu);
+    }
+
+    private static SegaCdDevice.SegaCdState ReadSegaCd(BinaryReader reader, int version)
+    {
+        byte[] programRam = ReadByteArray(reader);
+        byte[] wordRam = ReadByteArray(reader);
+        byte[] backupRam = ReadByteArray(reader);
+        byte[] pcmRam = ReadByteArray(reader);
+        byte[] mainRegisters = ReadByteArray(reader);
+        byte[] mainToSubCommand = version >= 76 ? ReadByteArray(reader) : ReadRegisterWindow(mainRegisters, 0x10);
+        byte[] subToMainStatus = version >= 76 ? ReadByteArray(reader) : ReadRegisterWindow(mainRegisters, 0x20);
+        bool subBiosMapped = reader.ReadBoolean();
+        bool subCpuResetReleased = reader.ReadBoolean();
+        bool subCpuBusRequested = reader.ReadBoolean();
+        double cddInterruptCycleCarry = reader.ReadDouble();
+        double cdcInterruptCycleCarry = reader.ReadDouble();
+        byte cddStatusCode = reader.ReadByte();
+        bool cddStatusReady = reader.ReadBoolean();
+        bool cddResponseLatched = reader.ReadBoolean();
+        int cddSeekTicksRemaining = reader.ReadInt32();
+        byte[] cdcRegisters = ReadByteArray(reader);
+        byte[] cdcPacket = ReadByteArray(reader);
+        byte cdcAddress = reader.ReadByte();
+        int cdcPacketOffset = reader.ReadInt32();
+        int cdcPacketLength = reader.ReadInt32();
+        int currentCdcLba = reader.ReadInt32();
+        int bootReadStartLba = version >= 71 ? reader.ReadInt32() : -1;
+        int bootReadSectorCount = version >= 71 ? reader.ReadInt32() : 0;
+        bool bootReadStreamActive = version >= 72 && reader.ReadBoolean();
+
+        bool cddaRunning = reader.ReadBoolean();
+        int cddaLba = reader.ReadInt32();
+        int cddaSectorLba = reader.ReadInt32();
+        int cddaSectorSampleIndex = reader.ReadInt32();
+        bool cddaPlaying = reader.ReadBoolean();
+        byte[] cddaSector = ReadByteArray(reader);
+        SegaCdDevice.PcmChannelState[] pcmChannels = ReadSegaCdPcmChannels(reader);
+        byte pcmControlChannel = reader.ReadByte();
+        ushort pcmWriteBank = reader.ReadUInt16();
+        bool pcmEnabled = reader.ReadBoolean();
+        double pcmRenderCycleCarry = reader.ReadDouble();
+        bool stickySubFlag6 = reader.ReadBoolean();
+        int subFlag7BootClearCycles = reader.ReadInt32();
+        byte bootReadyFlagClearReadsUntilReady = version >= 80 ? reader.ReadByte() : (byte)0;
+        bool genericBootReadyFollowUpFlagPending = version >= 83 && reader.ReadBoolean();
+        bool genericBootReadyEdgeReadPending = version >= 84 && reader.ReadBoolean();
+        bool genericBootMainFlag7PulseYieldPending = version >= 85 && reader.ReadBoolean();
+        bool genericBootMainFlag7SubReadEdgePending = version >= 86 && reader.ReadBoolean();
+        byte pendingSubInterruptLevels = reader.ReadByte();
+        byte wordRamModeBits = reader.ReadByte();
+        bool wordRamOwnedByMain = reader.ReadBoolean();
+        bool suppressBootStatusUntilMainCommand = version >= 73 && reader.ReadBoolean();
+        byte mainCommunicationFlags;
+        byte subCommunicationFlags;
+        if (version >= 74)
+        {
+            mainCommunicationFlags = reader.ReadByte();
+            subCommunicationFlags = reader.ReadByte();
+        }
+        else
+        {
+            mainCommunicationFlags = mainRegisters.Length > 0x0E ? mainRegisters[0x0E] : (byte)0;
+            subCommunicationFlags = mainRegisters.Length > 0x0F ? mainRegisters[0x0F] : (byte)0;
+        }
+
+        bool discTypeCommPacketPending = version >= 75 && reader.ReadBoolean();
+        bool discTypeCommPacketReadyAfterClearObserved = version >= 77 && reader.ReadBoolean();
+        byte discTypeCommPacketClearReadsUntilReady = version >= 79
+            ? reader.ReadByte()
+            : discTypeCommPacketReadyAfterClearObserved ? (byte)1 : (byte)0;
+        bool discTypeCommPacketSyntheticEdgeUsed = version >= 78 && reader.ReadBoolean();
+        bool mainBootIpOverrideAllowed = version < 81 || reader.ReadBoolean();
+        byte syntheticCommand23AckCount = version >= 82 ? reader.ReadByte() : (byte)0;
+
+        return new SegaCdDevice.SegaCdState(
+            programRam,
+            wordRam,
+            backupRam,
+            pcmRam,
+            mainRegisters,
+            mainToSubCommand,
+            subToMainStatus,
+            subBiosMapped,
+            subCpuResetReleased,
+            subCpuBusRequested,
+            cddInterruptCycleCarry,
+            cdcInterruptCycleCarry,
+            cddStatusCode,
+            cddStatusReady,
+            cddResponseLatched,
+            cddSeekTicksRemaining,
+            cdcRegisters,
+            cdcPacket,
+            cdcAddress,
+            cdcPacketOffset,
+            cdcPacketLength,
+            currentCdcLba,
+            bootReadStartLba,
+            bootReadSectorCount,
+            bootReadStreamActive,
+            cddaRunning,
+            cddaLba,
+            cddaSectorLba,
+            cddaSectorSampleIndex,
+            cddaPlaying,
+            cddaSector,
+            pcmChannels,
+            pcmControlChannel,
+            pcmWriteBank,
+            pcmEnabled,
+            pcmRenderCycleCarry,
+            stickySubFlag6,
+            subFlag7BootClearCycles,
+            bootReadyFlagClearReadsUntilReady,
+            genericBootReadyFollowUpFlagPending,
+            genericBootReadyEdgeReadPending,
+            genericBootMainFlag7PulseYieldPending,
+            genericBootMainFlag7SubReadEdgePending,
+            pendingSubInterruptLevels,
+            wordRamModeBits,
+            wordRamOwnedByMain,
+            suppressBootStatusUntilMainCommand,
+            mainCommunicationFlags,
+            subCommunicationFlags,
+            discTypeCommPacketPending,
+            discTypeCommPacketReadyAfterClearObserved,
+            discTypeCommPacketClearReadsUntilReady,
+            discTypeCommPacketSyntheticEdgeUsed,
+            mainBootIpOverrideAllowed,
+            syntheticCommand23AckCount,
+            ReadCpu(reader));
+    }
+
+    private static void WriteSegaCdPcmChannels(BinaryWriter writer, SegaCdDevice.PcmChannelState[] channels)
+    {
+        writer.Write(channels.Length);
+        foreach (SegaCdDevice.PcmChannelState channel in channels)
+        {
+            writer.Write(channel.Enabled);
+            writer.Write(channel.Envelope);
+            writer.Write(channel.Pan);
+            writer.Write(channel.Start);
+            writer.Write(channel.Address);
+            writer.Write(channel.Step);
+            writer.Write(channel.LoopStart);
+        }
+    }
+
+    private static SegaCdDevice.PcmChannelState[] ReadSegaCdPcmChannels(BinaryReader reader)
+    {
+        int count = Math.Clamp(reader.ReadInt32(), 0, 8);
+        SegaCdDevice.PcmChannelState[] channels = new SegaCdDevice.PcmChannelState[count];
+        for (int i = 0; i < count; i++)
+        {
+            channels[i] = new SegaCdDevice.PcmChannelState(
+                reader.ReadBoolean(),
+                reader.ReadByte(),
+                reader.ReadByte(),
+                reader.ReadByte(),
+                reader.ReadUInt32(),
+                reader.ReadUInt16(),
+                reader.ReadUInt16());
+        }
+
+        return channels;
     }
 
     private static void WriteThirtyTwoX(BinaryWriter writer, ThirtyTwoXDevice.ThirtyTwoXState state)
@@ -1103,6 +1336,17 @@ public static class SaveStateSerializer
     }
 
     private static byte[] ReadByteArray(BinaryReader reader) => reader.ReadBytes(reader.ReadInt32());
+    private static byte[] ReadRegisterWindow(byte[] registers, int start)
+    {
+        byte[] window = new byte[16];
+        if (registers.Length > start)
+        {
+            Array.Copy(registers, start, window, 0, Math.Min(window.Length, registers.Length - start));
+        }
+
+        return window;
+    }
+
     private static ushort[] ReadUShortArray(BinaryReader reader) => ReadArray(reader, r => r.ReadUInt16());
     private static uint[] ReadUIntArray(BinaryReader reader) => ReadArray(reader, r => r.ReadUInt32());
     private static int[] ReadIntArray(BinaryReader reader) => ReadArray(reader, r => r.ReadInt32());

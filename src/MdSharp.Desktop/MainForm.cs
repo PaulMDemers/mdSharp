@@ -2,6 +2,7 @@ using MdSharp.Core;
 using MdSharp.Core.Cartridge;
 using MdSharp.Core.Cpu.M68k;
 using MdSharp.Core.Input;
+using MdSharp.Core.SegaCd;
 using MdSharp.Core.State;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -43,10 +44,12 @@ internal sealed class MainForm : Form
     private ToolStripMenuItem _budget300Menu = null!;
     private ToolStripMenuItem _budget500Menu = null!;
     private ToolStripMenuItem _enable32XMenu = null!;
+    private ToolStripMenuItem _enableSegaCdMenu = null!;
     private MegaDrive? _machine;
     private CartridgeImage? _cartridge;
     private WaveOutAudio? _audio;
     private string? _romPath;
+    private bool _segaCdMediaLoaded;
     private string? _recordingPath;
     private InputMovie? _recordingMovie;
     private InputMovie? _playbackMovie;
@@ -175,10 +178,12 @@ internal sealed class MainForm : Form
         _budget300Menu = new ToolStripMenuItem("Frame safety budget: &300k", null, (_, _) => SetInstructionBudget(300_000));
         _budget500Menu = new ToolStripMenuItem("Frame safety budget: &500k", null, (_, _) => SetInstructionBudget(500_000));
         _enable32XMenu = new ToolStripMenuItem("Enable experimental &32X ROMs", null, (_, _) => Toggle32XLoading());
+        _enableSegaCdMenu = new ToolStripMenuItem("Enable experimental Sega &CD images", null, (_, _) => ToggleSegaCdLoading());
         emulation.DropDownItems.Add(_budget200Menu);
         emulation.DropDownItems.Add(_budget300Menu);
         emulation.DropDownItems.Add(_budget500Menu);
         emulation.DropDownItems.Add(_enable32XMenu);
+        emulation.DropDownItems.Add(_enableSegaCdMenu);
 
         ToolStripMenuItem view = new("&View");
         _developerOptionsMenu = new ToolStripMenuItem("&Developer Options", null, (_, _) => ToggleDeveloperOptions());
@@ -205,7 +210,7 @@ internal sealed class MainForm : Form
         using OpenFileDialog dialog = new()
         {
             Filter = BuildRomFileFilter(),
-            Title = _settings.Enable32X ? "Open Genesis/Mega Drive/32X ROM" : "Open Genesis/Mega Drive ROM",
+            Title = BuildOpenDialogTitle(),
         };
         ApplyRomInitialDirectory(dialog);
 
@@ -217,9 +222,37 @@ internal sealed class MainForm : Form
 
     private string BuildRomFileFilter()
     {
-        return _settings.Enable32X
-            ? "Genesis/32X ROMs|*.bin;*.md;*.gen;*.smd;*.rom;*.32x|Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|32X ROMs|*.32x;*.bin;*.md|All files|*.*"
-            : "Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|All files|*.*";
+        if (_settings.Enable32X && _settings.EnableSegaCd)
+        {
+            return "Genesis/32X/Sega CD media|*.bin;*.md;*.gen;*.smd;*.rom;*.32x;*.cue;*.iso;*.chd|Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|32X ROMs|*.32x;*.bin;*.md|Sega CD images|*.cue;*.iso;*.chd|All files|*.*";
+        }
+
+        if (_settings.Enable32X)
+        {
+            return "Genesis/32X ROMs|*.bin;*.md;*.gen;*.smd;*.rom;*.32x|Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|32X ROMs|*.32x;*.bin;*.md|All files|*.*";
+        }
+
+        if (_settings.EnableSegaCd)
+        {
+            return "Genesis/Sega CD media|*.bin;*.md;*.gen;*.smd;*.rom;*.cue;*.iso;*.chd|Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|Sega CD images|*.cue;*.iso;*.chd|All files|*.*";
+        }
+
+        return "Genesis/Mega Drive ROMs|*.bin;*.md;*.gen;*.smd;*.rom|All files|*.*";
+    }
+
+    private string BuildOpenDialogTitle()
+    {
+        if (_settings.Enable32X && _settings.EnableSegaCd)
+        {
+            return "Open Genesis/Mega Drive/32X/Sega CD Media";
+        }
+
+        if (_settings.Enable32X)
+        {
+            return "Open Genesis/Mega Drive/32X ROM";
+        }
+
+        return _settings.EnableSegaCd ? "Open Genesis/Mega Drive/Sega CD Media" : "Open Genesis/Mega Drive ROM";
     }
 
     private void LoadRom(string path)
@@ -235,7 +268,9 @@ internal sealed class MainForm : Form
             _settings.Save();
             _paused = false;
             Text = $"{AppTitle} - {Path.GetFileName(path)}";
-            SetStatus($"Loaded {Path.GetFileName(path)} | {DisplayName(_cartridge!)}");
+            SetStatus(_segaCdMediaLoaded
+                ? $"Loaded {Path.GetFileName(path)} | Sega CD"
+                : $"Loaded {Path.GetFileName(path)} | {DisplayName(_cartridge!)}");
             UpdateMenus();
         }
         catch (Exception ex)
@@ -302,6 +337,14 @@ internal sealed class MainForm : Form
         _settings.Save();
         UpdateMenus();
         SetStatus(_settings.Enable32X ? "Experimental 32X ROM loading enabled." : "Experimental 32X ROM loading disabled.");
+    }
+
+    private void ToggleSegaCdLoading()
+    {
+        _settings.EnableSegaCd = !_settings.EnableSegaCd;
+        _settings.Save();
+        UpdateMenus();
+        SetStatus(_settings.EnableSegaCd ? "Experimental Sega CD image loading enabled." : "Experimental Sega CD image loading disabled.");
     }
 
     private void ToggleDeveloperOptions()
@@ -757,6 +800,13 @@ internal sealed class MainForm : Form
     {
         _audio?.Dispose();
         _audio = null;
+        _segaCdMediaLoaded = false;
+
+        if (IsSegaCdMediaPath(path))
+        {
+            LoadFreshSegaCdMachine(path);
+            return;
+        }
 
         CartridgeImage cartridge = CartridgeImage.FromFile(path);
         if (HasBlockedUnsupportedHardware(cartridge))
@@ -787,6 +837,54 @@ internal sealed class MainForm : Form
         ApplyControllerSettings();
         ResetTiming();
         TryStartAudio();
+    }
+
+    private void LoadFreshSegaCdMachine(string path)
+    {
+        if (!_settings.EnableSegaCd)
+        {
+            throw new NotSupportedException("Sega CD image loading is experimental. Enable Developer Options, then enable experimental Sega CD images.");
+        }
+
+        SegaCdRegion region = InferSegaCdRegion(path);
+        SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, AppContext.BaseDirectory) ??
+            SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
+            throw new FileNotFoundException($"No {region} Sega CD BIOS found. Place a matching BIOS near mdSharp or set MDSHARP_SEGACD_BIOS_US, MDSHARP_SEGACD_BIOS_EU, or MDSHARP_SEGACD_BIOS_JP.");
+        DiscImage disc = DiscImage.FromFile(path);
+        SegaCdDevice segaCd = new(File.ReadAllBytes(bios.Path), region, disc);
+        MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+        machine.Reset();
+        _cartridge = null;
+        _machine = machine;
+        _romPath = path;
+        _segaCdMediaLoaded = true;
+        ApplyControllerSettings();
+        ResetTiming();
+        TryStartAudio();
+    }
+
+    private static bool IsSegaCdMediaPath(string path)
+    {
+        string extension = Path.GetExtension(path).ToLowerInvariant();
+        return extension is ".cue" or ".iso" or ".chd";
+    }
+
+    private static SegaCdRegion InferSegaCdRegion(string path)
+    {
+        string name = Path.GetFileName(path);
+        if (name.Contains("(Japan)", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("(J)", StringComparison.OrdinalIgnoreCase))
+        {
+            return SegaCdRegion.Japan;
+        }
+
+        if (name.Contains("(Europe)", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("(E)", StringComparison.OrdinalIgnoreCase))
+        {
+            return SegaCdRegion.Europe;
+        }
+
+        return SegaCdRegion.Usa;
     }
 
     private static ReadOnlyMemory<byte>? TryLoadThirtyTwoXM68kBios()
@@ -999,6 +1097,7 @@ internal sealed class MainForm : Form
         {
             AppendLine(builder, "Frame safety budget", _instructionsPerFrame.ToString("N0"));
             AppendLine(builder, "Experimental 32X ROM loading", _settings.Enable32X ? "enabled" : "disabled");
+            AppendLine(builder, "Experimental Sega CD image loading", _settings.EnableSegaCd ? "enabled" : "disabled");
         }
 
         builder.AppendLine();
@@ -1020,6 +1119,15 @@ internal sealed class MainForm : Form
 
     private void AppendRomDiagnostics(StringBuilder builder)
     {
+        if (_segaCdMediaLoaded && _romPath is not null)
+        {
+            AppendLine(builder, "Media path", _romPath);
+            AppendLine(builder, "Media type", "Sega CD");
+            AppendLine(builder, $"Quick state slot {_settings.CurrentStateSlot}", QuickStatePath(_settings.CurrentStateSlot));
+            builder.AppendLine();
+            return;
+        }
+
         if (_cartridge is null || _romPath is null)
         {
             AppendLine(builder, "ROM", "(none loaded)");
@@ -1373,21 +1481,24 @@ internal sealed class MainForm : Form
         _muteMenu.Checked = _muted;
         _fullscreenMenu.Checked = _fullscreen;
         _developerOptionsMenu.Checked = _settings.ShowDeveloperOptions;
-        _startRecordingMenu.Enabled = _machine is not null && _recordingMovie is null && _playbackMovie is null;
+        _startRecordingMenu.Enabled = _machine is not null && !_segaCdMediaLoaded && _recordingMovie is null && _playbackMovie is null;
         _stopRecordingMenu.Enabled = _recordingMovie is not null;
-        _playMovieMenu.Enabled = _recordingMovie is null && _playbackMovie is null;
+        _playMovieMenu.Enabled = !_segaCdMediaLoaded && _recordingMovie is null && _playbackMovie is null;
         _stopMovieMenu.Enabled = _playbackMovie is not null;
         _openLastMenu.Enabled = TryGetLastRomPath(out _);
         _recentMenu.Enabled = _settings.RecentRoms.Count > 0;
         _quickSaveMenu.Enabled = _machine is not null;
         _quickLoadMenu.Enabled = _machine is not null && File.Exists(QuickStatePathOrEmpty(_settings.CurrentStateSlot));
         _stateSlotMenu.Text = $"State S&lot: {_settings.CurrentStateSlot}";
+        _stateSlotMenu.Enabled = true;
         _developerSeparator.Visible = _settings.ShowDeveloperOptions;
         _budget200Menu.Visible = _settings.ShowDeveloperOptions;
         _budget300Menu.Visible = _settings.ShowDeveloperOptions;
         _budget500Menu.Visible = _settings.ShowDeveloperOptions;
         _enable32XMenu.Visible = _settings.ShowDeveloperOptions;
+        _enableSegaCdMenu.Visible = _settings.ShowDeveloperOptions;
         _enable32XMenu.Checked = _settings.Enable32X;
+        _enableSegaCdMenu.Checked = _settings.EnableSegaCd;
         _budget200Menu.Checked = _instructionsPerFrame == 200_000;
         _budget300Menu.Checked = _instructionsPerFrame == 300_000;
         _budget500Menu.Checked = _instructionsPerFrame == 500_000;

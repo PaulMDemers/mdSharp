@@ -51,7 +51,7 @@ public static class SegaCdBiosFinder
         return results
             .OrderBy(candidate => candidate.Region)
             .ThenByDescending(candidate => candidate.FromEnvironment)
-            .ThenBy(candidate => CandidateScore(candidate.Path))
+            .ThenBy(candidate => CandidateScore(candidate.Region, candidate.Path))
             .ThenBy(candidate => candidate.FileName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -61,7 +61,7 @@ public static class SegaCdBiosFinder
         return FindAll(baseDirectory)
             .Where(candidate => candidate.Region == region)
             .OrderByDescending(candidate => candidate.FromEnvironment)
-            .ThenBy(candidate => CandidateScore(candidate.Path))
+            .ThenBy(candidate => CandidateScore(candidate.Region, candidate.Path))
             .ThenBy(candidate => candidate.FileName, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
     }
@@ -121,7 +121,7 @@ public static class SegaCdBiosFinder
         return true;
     }
 
-    private static int CandidateScore(string path)
+    private static int CandidateScore(SegaCdRegion region, string path)
     {
         string name = Path.GetFileName(path).ToUpperInvariant();
         int score = 0;
@@ -130,19 +130,37 @@ public static class SegaCdBiosFinder
             score += 1000;
         }
 
-        if (name.Contains("M2", StringComparison.Ordinal))
+        if (name.Contains("M1", StringComparison.Ordinal))
+        {
+            score -= 30;
+        }
+
+        if (name.Contains("V1.", StringComparison.Ordinal))
         {
             score -= 20;
         }
 
-        if (name.Contains("V2.00", StringComparison.Ordinal))
+        if (name.Contains("M2", StringComparison.Ordinal))
         {
-            score -= 10;
+            score += 20;
         }
 
-        if (name.Contains("V2.21", StringComparison.Ordinal))
+        if (name.Contains("V2.", StringComparison.Ordinal))
         {
-            score -= 8;
+            score += 10;
+        }
+
+        if (region == SegaCdRegion.Japan)
+        {
+            if (name.Contains("J(UE)", StringComparison.Ordinal) || name.Contains("J(E)", StringComparison.Ordinal) || name.Contains("X'EYE", StringComparison.Ordinal))
+            {
+                score += 50;
+            }
+
+            if (name.Contains("MEGA CD (J)", StringComparison.Ordinal) || name.Contains("BIOS_CD_J", StringComparison.Ordinal))
+            {
+                score -= 40;
+            }
         }
 
         return score;

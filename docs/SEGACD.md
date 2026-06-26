@@ -190,10 +190,11 @@ Persist internal backup RAM through the desktop save folder:
 
 Deliverables:
 
-- `DiscImage` parser for `.cue` and simple `.iso`
+- `DiscImage` parser for `.cue`, simple `.iso`, and `.chd` via optional `chdman` extraction cache
+- CUE audio tracks backed by raw binary or 44.1 kHz stereo 16-bit PCM WAV files
 - BIOS file discovery helpers
 - cartridge/media diagnostics report Sega CD requirements
-- CLI `--segacd-info <cue-or-iso>`
+- CLI `--segacd-info <cue-iso-or-chd>`
 - tests for CUE parsing, track offsets, and BIOS discovery
 
 Exit criteria:
