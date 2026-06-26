@@ -50,6 +50,7 @@ Run("Sega CD boot header stages sub system program", SegaCdBootHeaderStagesSubSy
 Run("Sega CD generic boot IRQ2 bridge", SegaCdGenericBootIrq2Bridge);
 Run("Sega CD Sonic CD post-boot MMD handoff", SegaCdSonicCdPostBootMmdHandoff);
 Run("Sega CD Sonic CD system LoadFile bridge", SegaCdSonicCdSystemLoadFileBridge);
+Run("Sega CD Sonic CD SPX CDDA command bridge", SegaCdSonicCdSpxCddaCommandBridge);
 Run("Sega CD Sonic CD title quad fill fast-forward", SegaCdSonicCdTitleQuadFillFastForward);
 Run("Sega CD main BIOS helper shadow survives sliced program copy", SegaCdMainBiosHelperShadowSurvivesSlicedProgramCopy);
 Run("Sega CD sub BIOS overlay reads program RAM data", SegaCdSubBiosOverlayReadsProgramRamData);
@@ -2242,6 +2243,73 @@ void SegaCdSonicCdSystemLoadFileBridge()
 
         AssertEqual(1, device.DebugSonicCdLoadFileHleSuccesses);
         AssertEqual(1, device.DebugSonicCdLoadFileHleAttempts);
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdSonicCdSpxCddaCommandBridge()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        string fillerAudioPath = Path.Combine(folder, "track02.bin");
+        string palmtreeAudioPath = Path.Combine(folder, "track03.bin");
+        File.WriteAllBytes(dataPath, new byte[2352 * 2]);
+        File.WriteAllBytes(fillerAudioPath, new byte[2352]);
+
+        byte[] palmtreeAudio = new byte[2352 * 2];
+        WriteLittleEndianInt16(palmtreeAudio, 0, 0x1357);
+        WriteLittleEndianInt16(palmtreeAudio, 2, unchecked((short)0xECA9));
+        File.WriteAllBytes(palmtreeAudioPath, palmtreeAudio);
+
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            FILE "track02.bin" BINARY
+              TRACK 02 AUDIO
+                INDEX 01 00:00:00
+            FILE "track03.bin" BINARY
+              TRACK 03 AUDIO
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        DiscTrack palmtreeTrack = disc.Tracks.Single(track => track.Number == 3);
+        SegaCdDevice device = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        device.Reset();
+        device.WriteMainRegisterByte(0x01, 0x01);
+        SetSegaCdPrivateField(device, "_sonicCdMmdHandoffStageSuccesses", 1);
+        device.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0000_C026, 0x2000, false, 0, 0));
+
+        device.WriteMainRegisterByte(0x10, 0x00);
+        device.WriteMainRegisterByte(0x11, 0x0F);
+        int cycles = device.RunSubCpuCycles(512);
+
+        AssertTrue(cycles > 0, "SPX CDDA command bridge should consume sub CPU cycles.");
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x0F, device.ReadMainRegisterByte(0x21));
+        AssertTrue(device.DebugCddaPlaying, "SPX command $000F should start Palmtree Panic CD-DA playback.");
+        AssertEqual(palmtreeTrack.StartLba, device.DebugCddaLba);
+        AssertEqual((byte)0x01, device.DebugCddStatusCode);
+
+        short[] output = new short[2];
+        device.RenderCddaStereoSamplesInto(output, 1);
+        AssertEqual((short)0x1357, output[0]);
+        AssertEqual(unchecked((short)0xECA9), output[1]);
+
+        device.WriteMainRegisterByte(0x11, 0x00);
+        cycles = device.RunSubCpuCycles(512);
+        AssertTrue(cycles > 0, "SPX command bridge should clear status when the main command clears.");
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x21));
     }
     finally
     {

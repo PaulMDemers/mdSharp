@@ -79,6 +79,7 @@ public sealed class SegaCdDevice
     private const uint SonicCdBramSubDoneWait = 0x0001_0094;
     private const uint SonicCdTitleSubMainLoop = 0x0001_01CE;
     private const uint SonicCdSpxCommandWait = 0x0000_C026;
+    private const uint SonicCdSpxCommandWaitSecondRead = 0x0000_C02A;
     private const uint SonicCdSubIrq2VectorOffset = 0x0000_0068;
     private const uint SonicCdSubLevel2Stub = 0x0000_5F7C;
     private const uint SonicCdSubUserCall2Stub = 0x0000_5F34;
@@ -91,6 +92,13 @@ public sealed class SegaCdDevice
     private const ushort SonicCdFileFuncLoadFile = 4;
     private const ushort SonicCdFileFuncFindFile = 5;
     private const ushort SonicCdFileFuncReset = 7;
+    private const ushort SonicCdSubCommandFadeCdda = 0x000E;
+    private const ushort SonicCdSubCommandPlayR1AMusic = 0x000F;
+    private const ushort SonicCdSubCommandPlayR8DMusic = 0x0021;
+    private const ushort SonicCdSubCommandPlayTitleMusic = 0x0029;
+    private const ushort SonicCdSubCommandPlayGameOverMusic = 0x002D;
+    private const ushort SonicCdSubCommandTestR1AMusic = 0x002E;
+    private const ushort SonicCdSubCommandTestEndingMusic = 0x0052;
     private const double CddInterruptHz = 75.0;
     private const int CddLeadInFrames = 150;
     private const byte CddStatusIdle = 0x00;
@@ -1120,6 +1128,13 @@ public sealed class SegaCdDevice
             {
                 executed += fileFuncCycles;
                 AdvanceSubFlag7BootClear(fileFuncCycles);
+                continue;
+            }
+
+            if (TryHandleSonicCdSpxCommandWaitHle(out int spxCommandCycles))
+            {
+                executed += spxCommandCycles;
+                AdvanceSubFlag7BootClear(spxCommandCycles);
                 continue;
             }
 
@@ -3640,6 +3655,105 @@ public sealed class SegaCdDevice
             state.Cycles,
             state.USP));
         cycles = 24 + extraCycles;
+        return true;
+    }
+
+    private bool TryHandleSonicCdSpxCommandWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (SubCpu.PC is not (SonicCdSpxCommandWait or SonicCdSpxCommandWaitSecondRead) ||
+            Disc is null ||
+            !PostBootMmdHandoffStaged())
+        {
+            return false;
+        }
+
+        ushort command = CurrentMainToSubCommandWord();
+        ushort status = (ushort)((_subToMainStatus[0] << 8) | _subToMainStatus[1]);
+        if (command == 0)
+        {
+            if (status != 0)
+            {
+                _subToMainStatus[0] = 0;
+                _subToMainStatus[1] = 0;
+                UpdateCommunicationWindowRegisters();
+                cycles = 24;
+                return true;
+            }
+
+            cycles = 256;
+            SubCpu.AddWaitCycles(cycles);
+            return true;
+        }
+
+        if (!TryHandleSonicCdSpxAudioCommand(command))
+        {
+            return false;
+        }
+
+        _subToMainStatus[0] = _mainToSubCommand[0];
+        _subToMainStatus[1] = _mainToSubCommand[1];
+        UpdateCommunicationWindowRegisters();
+        cycles = 96;
+        return true;
+    }
+
+    private bool TryHandleSonicCdSpxAudioCommand(ushort command)
+    {
+        if (command == SonicCdSubCommandFadeCdda)
+        {
+            StopCddaPlayback(CddStatusReady);
+            RefreshCddStatusRegisters(CddStatusReady);
+            RaiseSubToMainFlag(0x01);
+            QueueCddInterruptIfEnabled();
+            return true;
+        }
+
+        if (!TryResolveSonicCdSpxCddaTrack(command, out int trackNumber) ||
+            !TryStartCddaTrack(trackNumber))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryResolveSonicCdSpxCddaTrack(ushort command, out int trackNumber)
+    {
+        trackNumber = command switch
+        {
+            >= SonicCdSubCommandPlayR1AMusic and <= SonicCdSubCommandPlayR8DMusic =>
+                command - SonicCdSubCommandPlayR1AMusic + 3,
+            >= SonicCdSubCommandPlayTitleMusic and <= SonicCdSubCommandPlayGameOverMusic =>
+                command - SonicCdSubCommandPlayTitleMusic + 0x1D,
+            >= SonicCdSubCommandTestR1AMusic and <= SonicCdSubCommandTestEndingMusic =>
+                command - SonicCdSubCommandTestR1AMusic + 3,
+            _ => 0,
+        };
+        return trackNumber > 0;
+    }
+
+    private bool TryStartCddaTrack(int trackNumber)
+    {
+        if (Disc is null)
+        {
+            return false;
+        }
+
+        DiscTrack? track = Disc.Tracks.FirstOrDefault(candidate => candidate.Number == trackNumber);
+        if (track is null || track.Kind != DiscTrackKind.Audio)
+        {
+            return false;
+        }
+
+        _cddStatusCode = CddStatusPlay;
+        _cddSeekTicksRemaining = 0;
+        _currentCdcLba = track.StartLba;
+        _cdcRunning = false;
+        StartCddaPlayback(track.StartLba);
+        RefreshCddStatusRegisters(CddStatusPlay);
+        RaiseSubToMainFlag(0x01);
+        QueueCddInterruptIfEnabled();
         return true;
     }
 

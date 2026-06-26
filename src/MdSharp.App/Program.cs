@@ -4105,7 +4105,18 @@ SegaCdAudioSweepResult RunSegaCdAudioSweepCase(
         stopwatch.Stop();
     }
 
-    if (status == "ok" && disc?.HasAudioTracks == true && playCommands > 0 && audioPlayCommands == 0)
+    if (status == "ok" && cddaPlayingFrames > 0 && audibleFrames == 0)
+    {
+        status = "silent-cdda";
+        detail = "CD-DA playback was active, but no audible samples were mixed";
+    }
+    else if (status == "ok" && cddaPlayingFrames > 0)
+    {
+        detail = playCommands > 0 && audioPlayCommands == 0
+            ? "CD-DA playback was active through a high-level disc audio bridge"
+            : "CD-DA playback was active and audible";
+    }
+    else if (status == "ok" && disc?.HasAudioTracks == true && playCommands > 0 && audioPlayCommands == 0)
     {
         status = audibleFrames > 0 ? "data-play-audible" : "no-cdda-play";
         detail = audibleFrames > 0
