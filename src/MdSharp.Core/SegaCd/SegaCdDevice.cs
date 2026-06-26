@@ -3213,7 +3213,7 @@ public sealed class SegaCdDevice
             !DiscTypeCommPacketPresent() ||
             _mainToSubCommand[0] != 0 ||
             _mainToSubCommand[1] != 0 ||
-            mainPc is < 0x0000_1288u or > 0x0000_1290u)
+            !IsGenericBootDiscTypeReadyClearPc(mainPc))
         {
             return value;
         }
@@ -3223,6 +3223,12 @@ public sealed class SegaCdDevice
         _discTypeCommPacketClearReadsUntilReady = 0;
         SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~0x02)));
         return (byte)(value & unchecked((byte)~0x02));
+    }
+
+    private static bool IsGenericBootDiscTypeReadyClearPc(uint mainPc)
+    {
+        return mainPc is >= 0x0000_1288u and <= 0x0000_1290u or
+            >= 0x0000_10ECu and <= 0x0000_10F0u;
     }
 
     private byte ForceGenericBootDiscTypeSecondReadyEdgeIfNeeded(uint offset, byte value, uint mainPc)
