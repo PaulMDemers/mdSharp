@@ -9,6 +9,7 @@ using MdSharp.Core.SegaCd;
 using MdSharp.Core.State;
 using MdSharp.Core.ThirtyTwoX;
 using MdSharp.Core.Video;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -38,7 +39,10 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
     Console.WriteLine("  mdsharp --segacd-info <cue-iso-or-chd> [us|eu|jp]");
     Console.WriteLine("  mdsharp --segacd-read-file <cue-iso-or-chd> <iso-file-id>");
+    Console.WriteLine("  mdsharp --segacd-cdda-dump <cue-iso-or-chd> <output.wav> <track-number> [seconds]");
     Console.WriteLine("  mdsharp --segacd-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit] [--screenshots]");
+    Console.WriteLine("  mdsharp --segacd-audio-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
+    Console.WriteLine("  mdsharp --segacd-scripted-audio-sweep <disc-folder> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
     Console.WriteLine("  mdsharp --segacd-render <cue-iso-or-chd> <output.ppm> [us|eu|jp] [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --segacd-scripted-render <cue-iso-or-chd> <output.ppm> <script> [us|eu|jp] [frames] [instructions-per-frame]");
     Console.WriteLine("  mdsharp --segacd-cdd-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines]");
@@ -220,6 +224,20 @@ if (args[0].Equals("--segacd-read-file", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--segacd-cdda-dump", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-cdda-dump <cue-iso-or-chd> <output.wav> <track-number> [seconds]");
+        return;
+    }
+
+    int trackNumber = int.Parse(args[3], CultureInfo.InvariantCulture);
+    double seconds = args.Length > 4 ? double.Parse(args[4], CultureInfo.InvariantCulture) : 15.0;
+    DumpSegaCdCdda(args[1], args[2], trackNumber, seconds);
+    return;
+}
+
 if (args[0].Equals("--segacd-sweep", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 3)
@@ -252,6 +270,40 @@ if (args[0].Equals("--segacd-sweep", StringComparison.OrdinalIgnoreCase))
     }
 
     SweepSegaCdDiscs(args[1], args[2], region, frames, instructionsPerFrame, filter, limit, writeScreenshots);
+    return;
+}
+
+if (args[0].Equals("--segacd-audio-sweep", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-audio-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
+        return;
+    }
+
+    SegaCdRegion region = args.Length > 3 ? ParseSegaCdRegion(args[3]) : SegaCdRegion.Usa;
+    int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 2_400;
+    int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 500_000;
+    string filter = args.Length > 6 ? args[6] : string.Empty;
+    int limit = args.Length > 7 && int.TryParse(args[7], out int parsedLimit) ? Math.Max(0, parsedLimit) : 0;
+    SweepSegaCdAudio(args[1], args[2], region, frames, instructionsPerFrame, filter, limit);
+    return;
+}
+
+if (args[0].Equals("--segacd-scripted-audio-sweep", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-scripted-audio-sweep <disc-folder> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
+        return;
+    }
+
+    SegaCdRegion region = args.Length > 4 ? ParseSegaCdRegion(args[4]) : SegaCdRegion.Usa;
+    int frames = args.Length > 5 && int.TryParse(args[5], out int parsedFrames) ? parsedFrames : 7_200;
+    int instructionsPerFrame = args.Length > 6 && int.TryParse(args[6], out int parsedInstructions) ? parsedInstructions : 500_000;
+    string filter = args.Length > 7 ? args[7] : string.Empty;
+    int limit = args.Length > 8 && int.TryParse(args[8], out int parsedLimit) ? Math.Max(0, parsedLimit) : 0;
+    SweepSegaCdAudio(args[1], args[2], region, frames, instructionsPerFrame, filter, limit, ResolveInputScript(args[3]), args[3]);
     return;
 }
 
@@ -3353,6 +3405,46 @@ void PrintSegaCdIsoFileInfo(string imagePath, string fileIdentifier)
     Console.WriteLine($"First {previewLength:N0}: {Convert.ToHexString(data.AsSpan(0, previewLength))}");
 }
 
+void DumpSegaCdCdda(string imagePath, string outputPath, int trackNumber, double seconds)
+{
+    DiscImage disc = DiscImage.FromFile(imagePath);
+    DiscTrack? track = disc.Tracks.FirstOrDefault(candidate => candidate.Number == trackNumber);
+    if (track is null)
+    {
+        throw new ArgumentException($"Track {trackNumber} was not found.");
+    }
+
+    if (track.Kind != DiscTrackKind.Audio)
+    {
+        throw new ArgumentException($"Track {trackNumber} is {track.Kind}, not an audio track.");
+    }
+
+    int sectorsToRead = seconds <= 0
+        ? track.LengthFrames
+        : Math.Min(track.LengthFrames, Math.Max(1, (int)Math.Ceiling(seconds * 75.0)));
+    short[] samples = new short[sectorsToRead * 588 * 2];
+    byte[] sector = new byte[2352];
+    int sampleOffset = 0;
+    for (int sectorIndex = 0; sectorIndex < sectorsToRead; sectorIndex++)
+    {
+        int lba = track.StartLba + sectorIndex;
+        if (!disc.TryReadAudioSector2352(lba, sector))
+        {
+            throw new InvalidOperationException($"Could not read audio sector at LBA {lba}.");
+        }
+
+        for (int byteOffset = 0; byteOffset < sector.Length; byteOffset += 2)
+        {
+            samples[sampleOffset++] = BinaryPrimitives.ReadInt16LittleEndian(sector.AsSpan(byteOffset, 2));
+        }
+    }
+
+    WriteWav(outputPath, samples, sampleRate: 44_100, channels: 2);
+    Console.WriteLine($"Sega CD CD-DA dump: track {track.Number}, LBA {track.StartLba:N0}, sectors {sectorsToRead:N0}/{track.LengthFrames:N0}");
+    Console.WriteLine($"Disc: {Path.GetFullPath(imagePath)}");
+    Console.WriteLine($"Output: {Path.GetFullPath(outputPath)}");
+}
+
 SegaCdRegion ParseSegaCdRegion(string value)
 {
     return value.Trim().ToLowerInvariant() switch
@@ -3846,6 +3938,231 @@ SegaCdSweepResult RunSegaCdSweepCase(string discPath, string discRoot, SegaCdBio
         detail);
 }
 
+void SweepSegaCdAudio(
+    string discFolder,
+    string outputCsv,
+    SegaCdRegion region,
+    int frames,
+    int instructionsPerFrame,
+    string filter,
+    int limit,
+    Func<int, GenesisButton>? input = null,
+    string inputName = "none")
+{
+    string fullFolder = Path.GetFullPath(discFolder);
+    string fullOutput = Path.GetFullPath(outputCsv);
+    Directory.CreateDirectory(Path.GetDirectoryName(fullOutput) ?? ".");
+
+    string[] files = EnumerateSegaCdDiscImages(fullFolder)
+        .Where(path => SegaCdSweepFilterMatches(fullFolder, path, filter))
+        .OrderBy(path => Path.GetRelativePath(fullFolder, path), StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    if (limit > 0)
+    {
+        files = files.Take(limit).ToArray();
+    }
+
+    SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
+        throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
+
+    using StreamWriter writer = new(fullOutput, false, Encoding.UTF8);
+    writer.WriteLine("disc,status,frames,elapsedMs,fps,tracks,audioTracks,leadOutLba,audioPeak,audibleFrames,firstAudibleFrame,lastAudibleFrame,cddaPlayingFrames,firstCddaFrame,lastCddaFrame,playCommands,audioPlayCommands,dataPlayCommands,seekCommands,stopCommands,tocCommands,statusCommands,resetCommands,openCommands,lastPlayLba,lastAudioPlayLba,lastDataPlayLba,finalCddStatus,finalCddaLba,maxCddaLba,pc,subPc,detail");
+
+    Console.WriteLine($"Sega CD audio sweep: {files.Length:N0} disc(s), region={region}, frames={frames:N0}, instructions/frame={instructionsPerFrame:N0}, input={inputName}");
+    Console.WriteLine($"BIOS: {bios.FileName} ({bios.Size:N0} bytes, sha1 {bios.Sha1})");
+    for (int i = 0; i < files.Length; i++)
+    {
+        SegaCdAudioSweepResult result = RunSegaCdAudioSweepCase(files[i], fullFolder, bios, region, frames, instructionsPerFrame, input);
+        writer.WriteLine(result.ToCsv());
+        Console.WriteLine($"{i + 1,4}/{files.Length}: {result.Status,-18} {result.RelativeDisc} peak={result.AudioPeak:N0} audible={result.AudibleFrames:N0} play={result.PlayCommands:N0}/{result.AudioPlayCommands:N0} cddaFrames={result.CddaPlayingFrames:N0}");
+    }
+
+    Console.WriteLine($"Wrote {Path.GetFullPath(outputCsv)}");
+}
+
+SegaCdAudioSweepResult RunSegaCdAudioSweepCase(
+    string discPath,
+    string discRoot,
+    SegaCdBiosImage bios,
+    SegaCdRegion region,
+    int frames,
+    int instructionsPerFrame,
+    Func<int, GenesisButton>? input = null)
+{
+    string relative = Path.GetRelativePath(discRoot, discPath);
+    string status = "ok";
+    string detail = string.Empty;
+    int completedFrames = 0;
+    long audioPeak = 0;
+    int audibleFrames = 0;
+    int firstAudibleFrame = -1;
+    int lastAudibleFrame = -1;
+    int cddaPlayingFrames = 0;
+    int firstCddaFrame = -1;
+    int lastCddaFrame = -1;
+    int playCommands = 0;
+    int audioPlayCommands = 0;
+    int dataPlayCommands = 0;
+    int seekCommands = 0;
+    int stopCommands = 0;
+    int tocCommands = 0;
+    int statusCommands = 0;
+    int resetCommands = 0;
+    int openCommands = 0;
+    int lastPlayLba = -1;
+    int lastAudioPlayLba = -1;
+    int lastDataPlayLba = -1;
+    int maxCddaLba = 0;
+    MegaDrive? machine = null;
+    SegaCdDevice? segaCd = null;
+    DiscImage? disc = null;
+    System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+    try
+    {
+        disc = DiscImage.FromFile(discPath);
+        segaCd = new SegaCdDevice(File.ReadAllBytes(bios.Path), region, disc);
+        machine = new MegaDrive(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+        segaCd.CddCommandObserver = trace =>
+        {
+            switch (trace.Command)
+            {
+                case 0x00:
+                    statusCommands++;
+                    break;
+                case 0x01:
+                case 0x0C:
+                    resetCommands++;
+                    break;
+                case 0x02:
+                    tocCommands++;
+                    break;
+                case 0x03:
+                    playCommands++;
+                    lastPlayLba = trace.CommandLba;
+                    if (trace.CommandLbaIsAudio || segaCd.DebugCddaPlaying)
+                    {
+                        audioPlayCommands++;
+                        lastAudioPlayLba = trace.CommandLba;
+                    }
+                    else
+                    {
+                        dataPlayCommands++;
+                        lastDataPlayLba = trace.CommandLba;
+                    }
+
+                    break;
+                case 0x04:
+                    seekCommands++;
+                    break;
+                case 0x06:
+                    stopCommands++;
+                    break;
+                case 0x0D:
+                    openCommands++;
+                    break;
+            }
+        };
+
+        machine.Reset();
+        for (; completedFrames < frames; completedFrames++)
+        {
+            GenesisButton pressed = input?.Invoke(completedFrames) ?? GenesisButton.None;
+            machine.Bus.Controller1.Pressed = pressed;
+            machine.Bus.Controller2.Pressed = pressed;
+            machine.RunFrameCycles(instructionsPerFrame);
+            if (segaCd.DebugCddaPlaying)
+            {
+                cddaPlayingFrames++;
+                firstCddaFrame = firstCddaFrame < 0 ? completedFrames : firstCddaFrame;
+                lastCddaFrame = completedFrames;
+                maxCddaLba = Math.Max(maxCddaLba, segaCd.DebugCddaLba);
+            }
+
+            short[] samples = machine.RenderFrameStereoAudioSamples();
+            long framePeak = PeakAbs(samples);
+            audioPeak = Math.Max(audioPeak, framePeak);
+            if (framePeak > 32)
+            {
+                audibleFrames++;
+                firstAudibleFrame = firstAudibleFrame < 0 ? completedFrames : firstAudibleFrame;
+                lastAudibleFrame = completedFrames;
+            }
+        }
+    }
+    catch (M68kException ex)
+    {
+        status = "m68k";
+        detail = ex.Message;
+    }
+    catch (Exception ex)
+    {
+        status = "error";
+        detail = $"{ex.GetType().Name}: {ex.Message}";
+    }
+    finally
+    {
+        stopwatch.Stop();
+    }
+
+    if (status == "ok" && disc?.HasAudioTracks == true && playCommands > 0 && audioPlayCommands == 0)
+    {
+        status = audibleFrames > 0 ? "data-play-audible" : "no-cdda-play";
+        detail = audibleFrames > 0
+            ? "play command targeted data, while non-CDDA audio was audible"
+            : "disc has audio tracks and play commands, but none started an audio track";
+    }
+    else if (status == "ok" && audioPlayCommands > 0 && audibleFrames == 0)
+    {
+        status = "silent-cdda";
+        detail = "audio track playback started, but no audible samples were mixed";
+    }
+    else if (status == "ok" && disc?.HasAudioTracks == true && playCommands == 0)
+    {
+        status = audibleFrames > 0 ? "pcm-only-window" : "no-audio-window";
+        detail = audibleFrames > 0
+            ? "non-CDDA audio was audible; no CDDA play command occurred within the frame window"
+            : "disc has audio tracks but did not issue a play command within the frame window";
+    }
+
+    double elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
+    double fps = elapsedMs <= 0 ? 0 : completedFrames / (elapsedMs / 1000.0);
+    return new SegaCdAudioSweepResult(
+        relative,
+        status,
+        completedFrames,
+        elapsedMs,
+        fps,
+        disc?.Tracks.Count ?? 0,
+        disc?.HasAudioTracks == true,
+        disc?.LeadOutLba ?? 0,
+        audioPeak,
+        audibleFrames,
+        firstAudibleFrame,
+        lastAudibleFrame,
+        cddaPlayingFrames,
+        firstCddaFrame,
+        lastCddaFrame,
+        playCommands,
+        audioPlayCommands,
+        dataPlayCommands,
+        seekCommands,
+        stopCommands,
+        tocCommands,
+        statusCommands,
+        resetCommands,
+        openCommands,
+        lastPlayLba,
+        lastAudioPlayLba,
+        lastDataPlayLba,
+        segaCd?.DebugCddStatusCode ?? 0,
+        segaCd?.DebugCddaLba ?? 0,
+        maxCddaLba,
+        machine?.MainCpu.PC ?? 0,
+        segaCd?.SubCpu.PC ?? 0,
+        detail);
+}
+
 void RenderSegaCdDisc(string discPath, string outputPath, SegaCdRegion region, int frames, int instructionsPerFrame, Func<int, GenesisButton>? input = null, string inputName = "none")
 {
     DiscImage disc = DiscImage.FromFile(discPath);
@@ -3907,7 +4224,7 @@ void TraceSegaCdCdd(string discPath, string outputPath, SegaCdRegion region, int
     int currentFrame = 0;
     int lines = 0;
     using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
-    writer.WriteLine("frame,sequence,command,request,track,status,report,rs2,rs3,rs4,rs5,rs6,rs7,rs8,checksum,subPc,mainPc");
+    writer.WriteLine("frame,sequence,command,request,track,status,report,rs2,rs3,rs4,rs5,rs6,rs7,rs8,checksum,commandLba,commandLbaIsAudio,cddaPlaying,cddaLba,currentCdcLba,subPc,mainPc");
     segaCd.CddCommandObserver = trace =>
     {
         if (lines >= maxLines)
@@ -3932,6 +4249,11 @@ void TraceSegaCdCdd(string discPath, string outputPath, SegaCdRegion region, int
             trace.Rs7.ToString("X1", CultureInfo.InvariantCulture),
             trace.Rs8.ToString("X1", CultureInfo.InvariantCulture),
             trace.Checksum.ToString("X1", CultureInfo.InvariantCulture),
+            trace.CommandLba.ToString(CultureInfo.InvariantCulture),
+            trace.CommandLbaIsAudio ? "true" : "false",
+            trace.CddaPlaying ? "true" : "false",
+            trace.CddaLba.ToString(CultureInfo.InvariantCulture),
+            trace.CurrentCdcLba.ToString(CultureInfo.InvariantCulture),
             segaCd.SubCpu.PC.ToString("X6", CultureInfo.InvariantCulture),
             machine.MainCpu.PC.ToString("X6", CultureInfo.InvariantCulture)));
         lines++;
@@ -18062,6 +18384,86 @@ file sealed record SegaCdSweepResult(
             CdcLba.ToString(CultureInfo.InvariantCulture),
             $"\"{Escape(CdcPacket)}\"",
             $"\"{Escape(Screenshot)}\"",
+            $"\"{Escape(Detail)}\"");
+    }
+
+    private static string Escape(string value)
+    {
+        return value.Replace("\"", "\"\"", StringComparison.Ordinal);
+    }
+}
+
+file sealed record SegaCdAudioSweepResult(
+    string RelativeDisc,
+    string Status,
+    int Frames,
+    double ElapsedMs,
+    double Fps,
+    int Tracks,
+    bool AudioTracks,
+    int LeadOutLba,
+    long AudioPeak,
+    int AudibleFrames,
+    int FirstAudibleFrame,
+    int LastAudibleFrame,
+    int CddaPlayingFrames,
+    int FirstCddaFrame,
+    int LastCddaFrame,
+    int PlayCommands,
+    int AudioPlayCommands,
+    int DataPlayCommands,
+    int SeekCommands,
+    int StopCommands,
+    int TocCommands,
+    int StatusCommands,
+    int ResetCommands,
+    int OpenCommands,
+    int LastPlayLba,
+    int LastAudioPlayLba,
+    int LastDataPlayLba,
+    byte FinalCddStatus,
+    int FinalCddaLba,
+    int MaxCddaLba,
+    uint Pc,
+    uint SubPc,
+    string Detail)
+{
+    public string ToCsv()
+    {
+        return string.Join(
+            ',',
+            $"\"{Escape(RelativeDisc)}\"",
+            Status,
+            Frames.ToString(CultureInfo.InvariantCulture),
+            ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture),
+            Fps.ToString("0.###", CultureInfo.InvariantCulture),
+            Tracks.ToString(CultureInfo.InvariantCulture),
+            AudioTracks ? "true" : "false",
+            LeadOutLba.ToString(CultureInfo.InvariantCulture),
+            AudioPeak.ToString(CultureInfo.InvariantCulture),
+            AudibleFrames.ToString(CultureInfo.InvariantCulture),
+            FirstAudibleFrame.ToString(CultureInfo.InvariantCulture),
+            LastAudibleFrame.ToString(CultureInfo.InvariantCulture),
+            CddaPlayingFrames.ToString(CultureInfo.InvariantCulture),
+            FirstCddaFrame.ToString(CultureInfo.InvariantCulture),
+            LastCddaFrame.ToString(CultureInfo.InvariantCulture),
+            PlayCommands.ToString(CultureInfo.InvariantCulture),
+            AudioPlayCommands.ToString(CultureInfo.InvariantCulture),
+            DataPlayCommands.ToString(CultureInfo.InvariantCulture),
+            SeekCommands.ToString(CultureInfo.InvariantCulture),
+            StopCommands.ToString(CultureInfo.InvariantCulture),
+            TocCommands.ToString(CultureInfo.InvariantCulture),
+            StatusCommands.ToString(CultureInfo.InvariantCulture),
+            ResetCommands.ToString(CultureInfo.InvariantCulture),
+            OpenCommands.ToString(CultureInfo.InvariantCulture),
+            LastPlayLba.ToString(CultureInfo.InvariantCulture),
+            LastAudioPlayLba.ToString(CultureInfo.InvariantCulture),
+            LastDataPlayLba.ToString(CultureInfo.InvariantCulture),
+            FinalCddStatus.ToString("X1", CultureInfo.InvariantCulture),
+            FinalCddaLba.ToString(CultureInfo.InvariantCulture),
+            MaxCddaLba.ToString(CultureInfo.InvariantCulture),
+            $"${Pc:X8}",
+            $"${SubPc:X8}",
             $"\"{Escape(Detail)}\"");
     }
 

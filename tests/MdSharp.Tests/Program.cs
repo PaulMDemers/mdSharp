@@ -1194,6 +1194,10 @@ void SegaCdCddaPlaybackRender()
         device.Reset();
 
         WriteCddPlayCommand(device, 0, 2, 2);
+        AssertTrue(device.DebugCddaPlaying, "Expected CD-DA debug state to report active audio playback");
+        AssertEqual(2, device.DebugCddaLba);
+        AssertEqual((byte)0x01, device.DebugCddStatusCode);
+
         short[] output = new short[4];
         device.RenderCddaStereoSamplesInto(output, 2);
 
@@ -1201,11 +1205,14 @@ void SegaCdCddaPlaybackRender()
         AssertEqual(unchecked((short)0xFEDC), output[1]);
         AssertEqual((short)0x2345, output[2]);
         AssertEqual(unchecked((short)0xEDCB), output[3]);
+        AssertEqual(2, device.DebugCddaLba);
+        AssertEqual(2, device.DebugCddaSectorSampleIndex);
 
         output = new short[587 * 2];
         device.RenderCddaStereoSamplesInto(output, 587);
         AssertEqual((short)0x3456, output[1172]);
         AssertEqual(unchecked((short)0xDCBA), output[1173]);
+        AssertEqual(3, device.DebugCddaLba);
     }
     finally
     {

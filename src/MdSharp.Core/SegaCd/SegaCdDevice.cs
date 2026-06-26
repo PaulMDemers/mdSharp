@@ -213,6 +213,11 @@ public sealed class SegaCdDevice
     public int DebugCurrentCdcLba => _currentCdcLba;
     public int DebugCdcPacketOffset => _cdcPacketOffset;
     public int DebugCdcPacketLength => _cdcPacketLength;
+    public byte DebugCddStatusCode => _cddStatusCode;
+    public bool DebugCddaPlaying => _cddaPlaying;
+    public int DebugCddaLba => _cddaLba;
+    public int DebugCddaSectorLba => _cddaSectorLba;
+    public int DebugCddaSectorSampleIndex => _cddaSectorSampleIndex;
     public int DebugBootReadStartLba => _bootReadStartLba;
     public int DebugBootReadSectorCount => _bootReadSectorCount;
     public bool DebugBootReadStreamActive => _bootReadStreamActive;
@@ -4246,6 +4251,7 @@ public sealed class SegaCdDevice
 
     private void QueueCddInterruptIfEnabled()
     {
+        int commandLba = CddCommandMsfFrames() - CddLeadInFrames;
         CddCommandObserver?.Invoke(new CddCommandTrace(
             _mainRegisters[CddCommandStart] & 0x0F,
             _mainRegisters[CddCommandStart + 3] & 0x0F,
@@ -4259,7 +4265,12 @@ public sealed class SegaCdDevice
             _mainRegisters[CddStatusStart + 6] & 0x0F,
             _mainRegisters[CddStatusStart + 7] & 0x0F,
             _mainRegisters[CddStatusStart + 8] & 0x0F,
-            _mainRegisters[CddStatusStart + 9] & 0x0F));
+            _mainRegisters[CddStatusStart + 9] & 0x0F,
+            commandLba,
+            IsAudioLba(commandLba),
+            _cddaPlaying,
+            _cddaLba,
+            _currentCdcLba));
     }
 
     private void RaiseSubToMainFlag(byte mask)
@@ -4712,7 +4723,12 @@ public sealed class SegaCdDevice
         int Rs6,
         int Rs7,
         int Rs8,
-        int Checksum);
+        int Checksum,
+        int CommandLba,
+        bool CommandLbaIsAudio,
+        bool CddaPlaying,
+        int CddaLba,
+        int CurrentCdcLba);
 
     public sealed record SegaCdRegisterTrace(
         string Operation,
