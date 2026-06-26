@@ -93,12 +93,14 @@ public sealed class SegaCdDevice
     private const ushort SonicCdFileFuncFindFile = 5;
     private const ushort SonicCdFileFuncReset = 7;
     private const ushort SonicCdSubCommandFadeCdda = 0x000E;
+    private const ushort SonicCdSubCommandStopCdda = 0x0074;
+    private const ushort SonicCdSubCommandResetCddaVolume = 0x008F;
+    private const ushort SonicCdSubCommandPauseCdda = 0x00D5;
+    private const ushort SonicCdSubCommandUnpauseCdda = 0x00D6;
     private const ushort SonicCdSubCommandPlayR1AMusic = 0x000F;
-    private const ushort SonicCdSubCommandPlayR8DMusic = 0x0021;
-    private const ushort SonicCdSubCommandPlayTitleMusic = 0x0029;
-    private const ushort SonicCdSubCommandPlayGameOverMusic = 0x002D;
-    private const ushort SonicCdSubCommandTestR1AMusic = 0x002E;
-    private const ushort SonicCdSubCommandTestEndingMusic = 0x0052;
+    private const ushort SonicCdSubCommandPlayR8CMusic = 0x0022;
+    private const ushort SonicCdSubCommandTestR1AMusic = 0x0095;
+    private const ushort SonicCdSubCommandTestEndingMusic = 0x00B6;
     private const double CddInterruptHz = 75.0;
     private const int CddLeadInFrames = 150;
     private const byte CddStatusIdle = 0x00;
@@ -151,6 +153,8 @@ public sealed class SegaCdDevice
     private int _cddaSectorLba;
     private int _cddaSectorSampleIndex;
     private bool _cddaPlaying;
+    private bool _cddaLoop;
+    private bool _cddaPaused;
     private byte _pcmControlChannel;
     private ushort _pcmWriteBank;
     private bool _pcmEnabled;
@@ -223,6 +227,8 @@ public sealed class SegaCdDevice
     public int DebugCdcPacketLength => _cdcPacketLength;
     public byte DebugCddStatusCode => _cddStatusCode;
     public bool DebugCddaPlaying => _cddaPlaying;
+    public bool DebugCddaPaused => _cddaPaused;
+    public bool DebugCddaLoop => _cddaLoop;
     public int DebugCddaLba => _cddaLba;
     public int DebugCddaSectorLba => _cddaSectorLba;
     public int DebugCddaSectorSampleIndex => _cddaSectorSampleIndex;
@@ -316,6 +322,8 @@ public sealed class SegaCdDevice
         _cddaSectorLba = int.MinValue;
         _cddaSectorSampleIndex = 0;
         _cddaPlaying = false;
+        _cddaLoop = false;
+        _cddaPaused = false;
         Array.Clear(_cddaSector);
         _pcmControlChannel = 0;
         _pcmWriteBank = 0;
@@ -1002,6 +1010,8 @@ public sealed class SegaCdDevice
             _cddaSectorLba,
             _cddaSectorSampleIndex,
             _cddaPlaying,
+            _cddaLoop,
+            _cddaPaused,
             (byte[])_cddaSector.Clone(),
             CapturePcmChannels(),
             _pcmControlChannel,
@@ -1062,6 +1072,8 @@ public sealed class SegaCdDevice
         _cddaSectorLba = state.CddaSectorLba;
         _cddaSectorSampleIndex = state.CddaSectorSampleIndex;
         _cddaPlaying = state.CddaPlaying;
+        _cddaLoop = state.CddaLoop;
+        _cddaPaused = state.CddaPaused;
         CopyInto(state.CddaSector, _cddaSector);
         RestorePcmChannels(state.PcmChannels);
         _pcmControlChannel = state.PcmControlChannel;
@@ -1256,7 +1268,7 @@ public sealed class SegaCdDevice
             throw new ArgumentException("CD-DA output buffer is too small.", nameof(output));
         }
 
-        if (!_cddaPlaying || Disc is null || _cddStatusCode != CddStatusPlay)
+        if (!_cddaPlaying || _cddaPaused || Disc is null || _cddStatusCode != CddStatusPlay)
         {
             return;
         }
@@ -1844,7 +1856,7 @@ public sealed class SegaCdDevice
                 _cddSeekTicksRemaining = 0;
                 int playLba = CddCommandMsfFrames() - CddLeadInFrames;
                 _currentCdcLba = playLba;
-                StartCddaPlayback(playLba);
+                StartCddaPlayback(playLba, loop: false);
                 _cdcRunning = Disc is not null && !IsAudioLba(playLba);
                 break;
             case 0x04:
@@ -1984,11 +1996,13 @@ public sealed class SegaCdDevice
         return Disc!.Tracks[0];
     }
 
-    private void StartCddaPlayback(int lba)
+    private void StartCddaPlayback(int lba, bool loop)
     {
         _cddaLba = Math.Max(0, lba);
         _cddaSectorLba = int.MinValue;
         _cddaSectorSampleIndex = 0;
+        _cddaLoop = loop;
+        _cddaPaused = false;
         _cddaPlaying = Disc is not null &&
             Disc.TryGetTrackForLba(_cddaLba, out DiscTrack track) &&
             track.Kind == DiscTrackKind.Audio;
@@ -1997,6 +2011,8 @@ public sealed class SegaCdDevice
     private void StopCddaPlayback(byte status)
     {
         _cddaPlaying = false;
+        _cddaLoop = false;
+        _cddaPaused = false;
         _cddaSectorLba = int.MinValue;
         _cddaSectorSampleIndex = 0;
         _cddStatusCode = status;
@@ -2035,6 +2051,9 @@ public sealed class SegaCdDevice
 
     private void AdvanceCddaSample()
     {
+        DiscTrack currentTrack = default!;
+        bool hasCurrentTrack = Disc is not null && Disc.TryGetTrackForLba(_cddaLba, out currentTrack);
+
         _cddaSectorSampleIndex++;
         if (_cddaSectorSampleIndex < CdAudioSamplesPerSector)
         {
@@ -2044,6 +2063,18 @@ public sealed class SegaCdDevice
         _cddaSectorSampleIndex = 0;
         _cddaLba++;
         _cddaSectorLba = int.MinValue;
+        if (!hasCurrentTrack || _cddaLba < currentTrack.EndLbaExclusive)
+        {
+            return;
+        }
+
+        if (_cddaLoop)
+        {
+            _cddaLba = currentTrack.StartLba;
+            return;
+        }
+
+        StopCddaPlayback(CddStatusReady);
     }
 
     private static short ReadLittleEndianInt16(byte[] data, int offset)
@@ -3700,7 +3731,7 @@ public sealed class SegaCdDevice
 
     private bool TryHandleSonicCdSpxAudioCommand(ushort command)
     {
-        if (command == SonicCdSubCommandFadeCdda)
+        if (command is SonicCdSubCommandFadeCdda or SonicCdSubCommandStopCdda)
         {
             StopCddaPlayback(CddStatusReady);
             RefreshCddStatusRegisters(CddStatusReady);
@@ -3709,8 +3740,29 @@ public sealed class SegaCdDevice
             return true;
         }
 
-        if (!TryResolveSonicCdSpxCddaTrack(command, out int trackNumber) ||
-            !TryStartCddaTrack(trackNumber))
+        if (command == SonicCdSubCommandResetCddaVolume)
+        {
+            return true;
+        }
+
+        if (command == SonicCdSubCommandPauseCdda)
+        {
+            _cddaPaused = _cddaPlaying;
+            return true;
+        }
+
+        if (command == SonicCdSubCommandUnpauseCdda)
+        {
+            if (_cddaPlaying)
+            {
+                _cddaPaused = false;
+            }
+
+            return true;
+        }
+
+        if (!TryResolveSonicCdSpxCddaTrack(command, out int trackNumber, out bool loop) ||
+            !TryStartCddaTrack(trackNumber, loop))
         {
             return false;
         }
@@ -3718,22 +3770,41 @@ public sealed class SegaCdDevice
         return true;
     }
 
-    private static bool TryResolveSonicCdSpxCddaTrack(ushort command, out int trackNumber)
+    private static bool TryResolveSonicCdSpxCddaTrack(ushort command, out int trackNumber, out bool loop)
     {
+        loop = true;
         trackNumber = command switch
         {
-            >= SonicCdSubCommandPlayR1AMusic and <= SonicCdSubCommandPlayR8DMusic =>
+            >= SonicCdSubCommandPlayR1AMusic and <= SonicCdSubCommandPlayR8CMusic =>
                 command - SonicCdSubCommandPlayR1AMusic + 3,
-            >= SonicCdSubCommandPlayTitleMusic and <= SonicCdSubCommandPlayGameOverMusic =>
-                command - SonicCdSubCommandPlayTitleMusic + 0x1D,
+            0x0066 => 23,
+            0x0067 => 24,
+            0x0068 => 25,
+            0x0069 => 26,
+            0x006A => 27,
+            0x006B => 28,
+            0x006C => 29,
+            0x006D => 30,
+            0x006E => 31,
+            0x006F => 32,
+            0x0070 => 33,
+            0x0071 => 2,
+            0x0072 => 34,
+            0x0073 => 35,
             >= SonicCdSubCommandTestR1AMusic and <= SonicCdSubCommandTestEndingMusic =>
                 command - SonicCdSubCommandTestR1AMusic + 3,
             _ => 0,
         };
+        loop = command switch
+        {
+            0x0069 or 0x006B or 0x006C or 0x006D or 0x006E => false,
+            >= SonicCdSubCommandTestR1AMusic and <= SonicCdSubCommandTestEndingMusic => false,
+            _ => true,
+        };
         return trackNumber > 0;
     }
 
-    private bool TryStartCddaTrack(int trackNumber)
+    private bool TryStartCddaTrack(int trackNumber, bool loop)
     {
         if (Disc is null)
         {
@@ -3750,7 +3821,7 @@ public sealed class SegaCdDevice
         _cddSeekTicksRemaining = 0;
         _currentCdcLba = track.StartLba;
         _cdcRunning = false;
-        StartCddaPlayback(track.StartLba);
+        StartCddaPlayback(track.StartLba, loop);
         RefreshCddStatusRegisters(CddStatusPlay);
         RaiseSubToMainFlag(0x01);
         QueueCddInterruptIfEnabled();
@@ -4797,6 +4868,8 @@ public sealed class SegaCdDevice
         int CddaSectorLba,
         int CddaSectorSampleIndex,
         bool CddaPlaying,
+        bool CddaLoop,
+        bool CddaPaused,
         byte[] CddaSector,
         PcmChannelState[] PcmChannels,
         byte PcmControlChannel,

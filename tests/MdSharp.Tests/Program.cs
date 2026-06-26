@@ -2256,30 +2256,25 @@ void SegaCdSonicCdSpxCddaCommandBridge()
     try
     {
         string dataPath = Path.Combine(folder, "track01.bin");
-        string fillerAudioPath = Path.Combine(folder, "track02.bin");
-        string palmtreeAudioPath = Path.Combine(folder, "track03.bin");
         File.WriteAllBytes(dataPath, new byte[2352 * 2]);
-        File.WriteAllBytes(fillerAudioPath, new byte[2352]);
-
-        byte[] palmtreeAudio = new byte[2352 * 2];
-        WriteLittleEndianInt16(palmtreeAudio, 0, 0x1357);
-        WriteLittleEndianInt16(palmtreeAudio, 2, unchecked((short)0xECA9));
-        File.WriteAllBytes(palmtreeAudioPath, palmtreeAudio);
+        System.Text.StringBuilder cue = new();
+        cue.AppendLine("FILE \"track01.bin\" BINARY");
+        cue.AppendLine("  TRACK 01 MODE1/2352");
+        cue.AppendLine("    INDEX 01 00:00:00");
+        for (int track = 2; track <= 35; track++)
+        {
+            string audioName = $"track{track:00}.bin";
+            byte[] audio = new byte[2352];
+            WriteLittleEndianInt16(audio, 0, (short)(0x1000 + track));
+            WriteLittleEndianInt16(audio, 2, unchecked((short)(0xE000 + track)));
+            File.WriteAllBytes(Path.Combine(folder, audioName), audio);
+            cue.AppendLine($"FILE \"{audioName}\" BINARY");
+            cue.AppendLine($"  TRACK {track:00} AUDIO");
+            cue.AppendLine("    INDEX 01 00:00:00");
+        }
 
         string cuePath = Path.Combine(folder, "disc.cue");
-        File.WriteAllText(
-            cuePath,
-            """
-            FILE "track01.bin" BINARY
-              TRACK 01 MODE1/2352
-                INDEX 01 00:00:00
-            FILE "track02.bin" BINARY
-              TRACK 02 AUDIO
-                INDEX 01 00:00:00
-            FILE "track03.bin" BINARY
-              TRACK 03 AUDIO
-                INDEX 01 00:00:00
-            """);
+        File.WriteAllText(cuePath, cue.ToString());
 
         DiscImage disc = DiscImage.FromFile(cuePath);
         DiscTrack palmtreeTrack = disc.Tracks.Single(track => track.Number == 3);
@@ -2302,12 +2297,64 @@ void SegaCdSonicCdSpxCddaCommandBridge()
 
         short[] output = new short[2];
         device.RenderCddaStereoSamplesInto(output, 1);
-        AssertEqual((short)0x1357, output[0]);
-        AssertEqual(unchecked((short)0xECA9), output[1]);
+        AssertEqual((short)0x1003, output[0]);
+        AssertEqual(unchecked((short)0xE003), output[1]);
+
+        output = new short[588 * 2];
+        device.RenderCddaStereoSamplesInto(output, 588);
+        AssertTrue(device.DebugCddaPlaying, "Looped SPX music should keep CD-DA playback active at the track boundary.");
+        AssertEqual(palmtreeTrack.StartLba, device.DebugCddaLba);
+        AssertTrue(device.DebugCddaLoop, "Level music commands should request looping CD-DA playback.");
 
         device.WriteMainRegisterByte(0x11, 0x00);
         cycles = device.RunSubCpuCycles(512);
         AssertTrue(cycles > 0, "SPX command bridge should clear status when the main command clears.");
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x21));
+
+        DiscTrack titleTrack = disc.Tracks.Single(track => track.Number == 26);
+        device.WriteMainRegisterByte(0x11, 0x69);
+        cycles = device.RunSubCpuCycles(512);
+        AssertTrue(cycles > 0, "SPX title command should consume sub CPU cycles.");
+        AssertEqual(titleTrack.StartLba, device.DebugCddaLba);
+        AssertTrue(!device.DebugCddaLoop, "Title music uses one-shot CD-DA playback.");
+        output = new short[588 * 2];
+        device.RenderCddaStereoSamplesInto(output, 588);
+        AssertTrue(!device.DebugCddaPlaying, "One-shot SPX music should stop at the track boundary.");
+
+        device.WriteMainRegisterByte(0x11, 0x00);
+        device.RunSubCpuCycles(512);
+
+        device.WriteMainRegisterByte(0x11, 0x66);
+        device.RunSubCpuCycles(512);
+        AssertEqual(disc.Tracks.Single(track => track.Number == 23).StartLba, device.DebugCddaLba);
+        AssertTrue(device.DebugCddaLoop, "Metallic Madness Bad Future command should loop.");
+
+        device.WriteMainRegisterByte(0x11, 0x00);
+        device.RunSubCpuCycles(512);
+
+        device.WriteMainRegisterByte(0x11, 0xD5);
+        device.RunSubCpuCycles(512);
+        AssertTrue(device.DebugCddaPaused, "Pause CDDA command should pause active playback.");
+        output = new short[2];
+        device.RenderCddaStereoSamplesInto(output, 1);
+        AssertEqual((short)0, output[0]);
+        AssertEqual((short)0, output[1]);
+
+        device.WriteMainRegisterByte(0x11, 0x00);
+        device.RunSubCpuCycles(512);
+
+        device.WriteMainRegisterByte(0x11, 0xD6);
+        device.RunSubCpuCycles(512);
+        AssertTrue(!device.DebugCddaPaused, "Unpause CDDA command should resume active playback.");
+        output = new short[2];
+        device.RenderCddaStereoSamplesInto(output, 1);
+        AssertEqual((short)0x1017, output[0]);
+        AssertEqual(unchecked((short)0xE017), output[1]);
+
+        device.WriteMainRegisterByte(0x11, 0x00);
+        cycles = device.RunSubCpuCycles(512);
+        AssertTrue(cycles > 0, "SPX command bridge should clear status after pause/unpause.");
         AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x20));
         AssertEqual((byte)0x00, device.ReadMainRegisterByte(0x21));
     }

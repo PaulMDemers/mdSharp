@@ -14,7 +14,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 86;
+    private const int Version = 87;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -350,6 +350,8 @@ public static class SaveStateSerializer
         writer.Write(state.CddaSectorLba);
         writer.Write(state.CddaSectorSampleIndex);
         writer.Write(state.CddaPlaying);
+        writer.Write(state.CddaLoop);
+        writer.Write(state.CddaPaused);
         WriteArray(writer, state.CddaSector);
         WriteSegaCdPcmChannels(writer, state.PcmChannels);
         writer.Write(state.PcmControlChannel);
@@ -411,6 +413,8 @@ public static class SaveStateSerializer
         int cddaSectorLba = reader.ReadInt32();
         int cddaSectorSampleIndex = reader.ReadInt32();
         bool cddaPlaying = reader.ReadBoolean();
+        bool cddaLoop = version >= 87 && reader.ReadBoolean();
+        bool cddaPaused = version >= 87 && reader.ReadBoolean();
         byte[] cddaSector = ReadByteArray(reader);
         SegaCdDevice.PcmChannelState[] pcmChannels = ReadSegaCdPcmChannels(reader);
         byte pcmControlChannel = reader.ReadByte();
@@ -481,6 +485,8 @@ public static class SaveStateSerializer
             cddaSectorLba,
             cddaSectorSampleIndex,
             cddaPlaying,
+            cddaLoop,
+            cddaPaused,
             cddaSector,
             pcmChannels,
             pcmControlChannel,
