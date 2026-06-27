@@ -3888,9 +3888,9 @@ SegaCdSweepResult RunSegaCdSweepCase(string discPath, string discRoot, SegaCdBio
         gameDisplayActive)
     {
         status = segaCd?.DebugCdcRunning == true || (segaCd?.DebugCurrentCdcLba ?? -1) >= 0
-            ? "game-display"
-            : "game-display-no-cdc";
-        detail = "game display active; main BIOS helper loop";
+            ? "bios-helper-cdc-display"
+            : "bios-helper-display";
+        detail = "BIOS helper loop with active display; game handoff not observed";
     }
     else if (status == "ok" &&
         noDiscProgramLoad &&

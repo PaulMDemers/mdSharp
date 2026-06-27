@@ -1540,6 +1540,12 @@ void SegaCdGenericBootCdcServiceRaisesReadyEdge()
         AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05C6) & 0x80));
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
 
+        device.WriteSubRegisterByte(0x0F, 0x01);
+        device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0003_1478, SR = 0x2000 });
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_0600) & 0x80));
+        AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05C6) & 0x80));
+        AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
+
         device.WriteSubRegisterByte(0x03, 0x06);
         device.WriteWordRamByte(0, 0x43);
         device.WriteWordRamByte(1, 0xFA);

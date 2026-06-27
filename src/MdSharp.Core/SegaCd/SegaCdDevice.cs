@@ -4644,7 +4644,10 @@ public sealed class SegaCdDevice
         }
 
         uint subPc = SubCpu.PC & 0x00FF_FFFFu;
-        if (subPc is < 0x0001_8C04u or > 0x0001_8C08u)
+        bool subBiosCdcLoop = subPc is >= 0x0001_8C04u and <= 0x0001_8C08u;
+        bool loadedSubProgramRunning = !SubBiosMapped &&
+            subPc is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes;
+        if (!subBiosCdcLoop && !loadedSubProgramRunning)
         {
             return value;
         }
@@ -4790,6 +4793,12 @@ public sealed class SegaCdDevice
                 continue;
             }
 
+            if (ShouldDropGenericBootSubInterruptDuringCdcCopy(level))
+            {
+                _pendingSubInterruptLevels &= (byte)~bit;
+                continue;
+            }
+
             if (level == 2 && ShouldRefreshSonicCdIrq2Bridge())
             {
                 SeedSonicCdSpxInterruptStubs();
@@ -4806,6 +4815,21 @@ public sealed class SegaCdDevice
 
             return;
         }
+    }
+
+    private bool ShouldDropGenericBootSubInterruptDuringCdcCopy(int level)
+    {
+        if (level <= 2 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_bootReadStreamActive ||
+            _bootReadSectorCount <= 0)
+        {
+            return false;
+        }
+
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        return subPc is >= 0x0001_8C04u and <= 0x0001_8C08u;
     }
 
     private bool ShouldRefreshSonicCdIrq2Bridge()
