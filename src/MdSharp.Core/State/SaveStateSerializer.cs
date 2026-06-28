@@ -14,7 +14,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 87;
+    private const int Version = 89;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -363,6 +363,7 @@ public static class SaveStateSerializer
         writer.Write(state.BootReadyFlagClearReadsUntilReady);
         writer.Write(state.GenericBootReadyFollowUpFlagPending);
         writer.Write(state.GenericBootReadyEdgeReadPending);
+        writer.Write(state.GenericBootCdcCompletionReadyPending);
         writer.Write(state.GenericBootMainFlag7PulseYieldPending);
         writer.Write(state.GenericBootMainFlag7SubReadEdgePending);
         writer.Write(state.PendingSubInterruptLevels);
@@ -376,6 +377,7 @@ public static class SaveStateSerializer
         writer.Write(state.DiscTypeCommPacketClearReadsUntilReady);
         writer.Write(state.DiscTypeCommPacketSyntheticEdgeUsed);
         writer.Write(state.MainBootIpOverrideAllowed);
+        writer.Write(state.GenericBootIrq2Callback);
         writer.Write(state.SyntheticCommand23AckCount);
         WriteCpu(writer, state.SubCpu);
     }
@@ -426,6 +428,7 @@ public static class SaveStateSerializer
         byte bootReadyFlagClearReadsUntilReady = version >= 80 ? reader.ReadByte() : (byte)0;
         bool genericBootReadyFollowUpFlagPending = version >= 83 && reader.ReadBoolean();
         bool genericBootReadyEdgeReadPending = version >= 84 && reader.ReadBoolean();
+        bool genericBootCdcCompletionReadyPending = version >= 89 && reader.ReadBoolean();
         bool genericBootMainFlag7PulseYieldPending = version >= 85 && reader.ReadBoolean();
         bool genericBootMainFlag7SubReadEdgePending = version >= 86 && reader.ReadBoolean();
         byte pendingSubInterruptLevels = reader.ReadByte();
@@ -452,6 +455,7 @@ public static class SaveStateSerializer
             : discTypeCommPacketReadyAfterClearObserved ? (byte)1 : (byte)0;
         bool discTypeCommPacketSyntheticEdgeUsed = version >= 78 && reader.ReadBoolean();
         bool mainBootIpOverrideAllowed = version < 81 || reader.ReadBoolean();
+        uint genericBootIrq2Callback = version >= 88 ? reader.ReadUInt32() : 0;
         byte syntheticCommand23AckCount = version >= 82 ? reader.ReadByte() : (byte)0;
 
         return new SegaCdDevice.SegaCdState(
@@ -498,6 +502,7 @@ public static class SaveStateSerializer
             bootReadyFlagClearReadsUntilReady,
             genericBootReadyFollowUpFlagPending,
             genericBootReadyEdgeReadPending,
+            genericBootCdcCompletionReadyPending,
             genericBootMainFlag7PulseYieldPending,
             genericBootMainFlag7SubReadEdgePending,
             pendingSubInterruptLevels,
@@ -511,6 +516,7 @@ public static class SaveStateSerializer
             discTypeCommPacketClearReadsUntilReady,
             discTypeCommPacketSyntheticEdgeUsed,
             mainBootIpOverrideAllowed,
+            genericBootIrq2Callback,
             syntheticCommand23AckCount,
             ReadCpu(reader));
     }

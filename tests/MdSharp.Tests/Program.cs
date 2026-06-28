@@ -1537,13 +1537,17 @@ void SegaCdGenericBootCdcServiceRaisesReadyEdge()
         device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0001_8C04, SR = 0x2000 });
 
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_0600) & 0x80));
-        AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05C6) & 0x80));
+        AssertEqual((byte)0x81, device.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
+        InvokeSegaCdPrivate(device, "PrepareCdcPacket", false, true);
+        int cdcLbaBeforeAck = device.DebugCurrentCdcLba;
+        device.WriteMainRegisterByte(0x0E, 0x80);
+        AssertEqual(cdcLbaBeforeAck + 1, device.DebugCurrentCdcLba);
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
 
         device.WriteSubRegisterByte(0x0F, 0x01);
         device.SubCpu.RestoreState(device.SubCpu.CaptureState() with { PC = 0x0003_1478, SR = 0x2000 });
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_0600) & 0x80));
-        AssertEqual((byte)0x80, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05C6) & 0x80));
+        AssertEqual((byte)0x81, device.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
 
         device.WriteSubRegisterByte(0x03, 0x06);
