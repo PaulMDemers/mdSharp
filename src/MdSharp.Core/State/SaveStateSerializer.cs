@@ -14,7 +14,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 89;
+    private const int Version = 90;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -364,6 +364,7 @@ public static class SaveStateSerializer
         writer.Write(state.GenericBootReadyFollowUpFlagPending);
         writer.Write(state.GenericBootReadyEdgeReadPending);
         writer.Write(state.GenericBootCdcCompletionReadyPending);
+        writer.Write(state.GenericBootCdcCompletionAcknowledged);
         writer.Write(state.GenericBootMainFlag7PulseYieldPending);
         writer.Write(state.GenericBootMainFlag7SubReadEdgePending);
         writer.Write(state.PendingSubInterruptLevels);
@@ -429,6 +430,7 @@ public static class SaveStateSerializer
         bool genericBootReadyFollowUpFlagPending = version >= 83 && reader.ReadBoolean();
         bool genericBootReadyEdgeReadPending = version >= 84 && reader.ReadBoolean();
         bool genericBootCdcCompletionReadyPending = version >= 89 && reader.ReadBoolean();
+        bool genericBootCdcCompletionAcknowledged = version >= 90 && reader.ReadBoolean();
         bool genericBootMainFlag7PulseYieldPending = version >= 85 && reader.ReadBoolean();
         bool genericBootMainFlag7SubReadEdgePending = version >= 86 && reader.ReadBoolean();
         byte pendingSubInterruptLevels = reader.ReadByte();
@@ -503,6 +505,7 @@ public static class SaveStateSerializer
             genericBootReadyFollowUpFlagPending,
             genericBootReadyEdgeReadPending,
             genericBootCdcCompletionReadyPending,
+            genericBootCdcCompletionAcknowledged,
             genericBootMainFlag7PulseYieldPending,
             genericBootMainFlag7SubReadEdgePending,
             pendingSubInterruptLevels,

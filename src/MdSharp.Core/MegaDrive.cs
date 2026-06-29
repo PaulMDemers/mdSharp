@@ -23,6 +23,7 @@ public sealed class MegaDrive
     private const uint SegaCdMainBootGenericFlag7Clear = 0x00FF_05BE;
     private const uint SegaCdMainBootGenericReadyPollStart = 0x00FF_05C6;
     private const uint SegaCdMainBootGenericReadyPollBranch = 0x00FF_05CE;
+    private const uint SegaCdMainBootGenericLowWaitLoop = 0x0000_0210;
     private const uint SegaCdMainBootHelperStart = 0x00FF_1024;
     private const uint SegaCdMainBootHelperEndExclusive = 0x00FF_104E;
     private static readonly double PsgFilterAlpha = LowPassAlpha(AudioConstants.PsgLowPassCutoffHz, AudioConstants.DefaultSampleRate);
@@ -393,6 +394,19 @@ public sealed class MegaDrive
             }
 
             if (IsSegaCdMainBiosGenericReadyPollLoop())
+            {
+                int yieldCycles = Math.Min(cycleBudget - consumed, SegaCdMinimumCycleBatch);
+                MainCpu.AddWaitCycles(yieldCycles);
+                if (!RunAddOnHardwareForMasterCycles((long)yieldCycles * GenesisScheduler.M68kDivider, shouldAbort))
+                {
+                    return -1;
+                }
+
+                consumed += yieldCycles;
+                continue;
+            }
+
+            if (IsSegaCdMainGenericLowWaitLoop())
             {
                 int yieldCycles = Math.Min(cycleBudget - consumed, SegaCdMinimumCycleBatch);
                 MainCpu.AddWaitCycles(yieldCycles);
@@ -890,6 +904,21 @@ public sealed class MegaDrive
         }
 
         return segaCd.TryConsumeGenericBootMainFlag7PulseYield();
+    }
+
+    private bool IsSegaCdMainGenericLowWaitLoop()
+    {
+        SegaCdDevice? segaCd = Bus.SegaCd;
+        if (segaCd is null ||
+            !segaCd.ShouldYieldMainForGenericBootLowWaitLoop ||
+            HasServiceableM68kInterrupt())
+        {
+            return false;
+        }
+
+        uint pc = MainCpu.PC & 0x00FF_FFFFu;
+        return pc == SegaCdMainBootGenericLowWaitLoop &&
+            Bus.ReadWord(pc) == 0x60FE;
     }
 
     private bool IsSegaCdSonicCdIpxFileBufferClearLoop()

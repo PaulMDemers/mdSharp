@@ -151,7 +151,7 @@ public sealed class M68kCpu
             }
 
             _recentInstructionTrace.Enqueue(
-                $"pc=${opcodeAddress:X6} opcode=${opcode:X4} sr=${SR:X4} sp=${A[7]:X8} " +
+                $"pc=${opcodeAddress:X6} opcode=${opcode:X4} ext0=${_bus.ReadWord(opcodeAddress + 2):X4} ext1=${_bus.ReadWord(opcodeAddress + 4):X4} ext2=${_bus.ReadWord(opcodeAddress + 6):X4} sr=${SR:X4} sp=${A[7]:X8} " +
                 $"d0=${D[0]:X8} d1=${D[1]:X8} d2=${D[2]:X8} d3=${D[3]:X8} " +
                 $"a0=${A[0]:X8} a1=${A[1]:X8} a2=${A[2]:X8} a3=${A[3]:X8} " +
                 $"a4=${A[4]:X8} a5=${A[5]:X8} a6=${A[6]:X8}");
@@ -1291,7 +1291,7 @@ public sealed class M68kCpu
         if (_exceptionTrace.Count < 128)
         {
             _exceptionTrace.Add($"vector={vector} pc=${_currentOpcodeAddress:X6} opcode=${_currentOpcode:X4} framePc=${framePc:X8} sp=${frameSp:X8}");
-            if (TraceEnabled && count < 8 && _exceptionCounts.Count <= 4)
+            if ((TraceEnabled || HistoryEnabled) && count < 8 && _exceptionCounts.Count <= 4)
             {
                 foreach (string recent in _recentInstructionTrace.TakeLast(96))
                 {

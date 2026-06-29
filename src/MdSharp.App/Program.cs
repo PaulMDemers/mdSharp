@@ -4182,6 +4182,12 @@ void RenderSegaCdDisc(string discPath, string outputPath, SegaCdRegion region, i
     SegaCdDevice segaCd = new(File.ReadAllBytes(bios.Path), region, disc);
     MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
     machine.Reset();
+    bool printMainHistory = int.TryParse(Environment.GetEnvironmentVariable("MDSHARP_SEGACD_RENDER_HISTORY"), out int requestedHistoryLines) &&
+        requestedHistoryLines > 0;
+    if (printMainHistory)
+    {
+        machine.MainCpu.HistoryEnabled = true;
+    }
 
     int completedFrames = 0;
     string status = "ok";
@@ -4220,6 +4226,23 @@ void RenderSegaCdDisc(string discPath, string outputPath, SegaCdRegion region, i
     Console.WriteLine(FormatState(machine));
     Console.WriteLine(FormatVdpState(machine.Vdp));
     Console.WriteLine(FormatSegaCdState(segaCd, machine));
+    if (printMainHistory)
+    {
+        if (machine.MainCpu.ExceptionTrace.Count > 0)
+        {
+            Console.WriteLine("Main 68000 exceptions:");
+            foreach (string entry in machine.MainCpu.ExceptionTrace.TakeLast(Math.Min(requestedHistoryLines, 256)))
+            {
+                Console.WriteLine(entry);
+            }
+        }
+
+        Console.WriteLine("Recent main 68000 instructions:");
+        foreach (string entry in machine.MainCpu.RecentInstructionTrace.TakeLast(Math.Min(requestedHistoryLines, 256)))
+        {
+            Console.WriteLine(entry);
+        }
+    }
 }
 
 void TraceSegaCdCdd(string discPath, string outputPath, SegaCdRegion region, int frames, int instructionsPerFrame, int maxLines, Func<int, GenesisButton>? input = null, string inputName = "none")

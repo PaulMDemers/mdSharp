@@ -57,6 +57,7 @@ Run("Sega CD sub BIOS overlay reads program RAM data", SegaCdSubBiosOverlayReads
 Run("Sega CD CDC host sector transfer", SegaCdCdcHostSectorTransfer);
 Run("Sega CD sub BIOS boot read seeds CDC ring", SegaCdSubBiosBootReadSeedsCdcRing);
 Run("Sega CD generic boot CDC service raises ready edge", SegaCdGenericBootCdcServiceRaisesReadyEdge);
+Run("Sega CD generic boot exception tail preserves status selector", SegaCdGenericBootExceptionTailPreservesStatusSelector);
 Run("Sega CD graphics ASIC stamp render", SegaCdGraphicsAsicStampRender);
 Run("Sega CD main bus mapping", SegaCdMainBusMapping);
 Run("Sega CD main 1M Word RAM bank mapping", SegaCdMainOneMegWordRamBankMapping);
@@ -1550,6 +1551,143 @@ void SegaCdGenericBootCdcServiceRaisesReadyEdge()
         AssertEqual((byte)0x81, device.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F) & 0x80));
 
+        SegaCdDevice packetDevice = new(bios, SegaCdRegion.Usa, disc);
+        packetDevice.Reset();
+        WriteProgramRamLong(packetDevice, 0x5B34, 1);
+        WriteProgramRamLong(packetDevice, 0x5B38, 0x0003_0000);
+        SetSegaCdPrivateField(packetDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(packetDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(packetDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(packetDevice, "_currentCdcLba", 1);
+        SetSegaCdPrivateField(packetDevice, "_subCommunicationFlags", (byte)0xB4);
+        AssertEqual((byte)0x81, packetDevice.ReadMainRegisterByte(0x0F, 0x00FF_05D2));
+        packetDevice.WriteMainRegisterByte(0x10, 0xFF);
+        AssertEqual((byte)0x80, (byte)(packetDevice.ReadMainRegisterByte(0x0E) & 0x80));
+        packetDevice.WriteMainRegisterByte(0x11, 0x0C);
+        AssertEqual(2, packetDevice.DebugCurrentCdcLba);
+        AssertEqual((byte)0x00, (byte)(packetDevice.ReadMainRegisterByte(0x0E) & 0x80));
+        AssertEqual((byte)0x80, (byte)(packetDevice.ReadMainRegisterByte(0x0F) & 0x80));
+
+        SegaCdDevice delayedAckDevice = new(bios, SegaCdRegion.Usa, disc);
+        delayedAckDevice.Reset();
+        WriteProgramRamLong(delayedAckDevice, 0x5B34, 1);
+        WriteProgramRamLong(delayedAckDevice, 0x5B38, 0x0003_0000);
+        SetSegaCdPrivateField(delayedAckDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(delayedAckDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(delayedAckDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(delayedAckDevice, "_currentCdcLba", 1);
+        uint[] delayedD = new uint[8];
+        delayedD[4] = 1;
+        delayedAckDevice.SubCpu.RestoreState(new M68kCpu.M68kState(delayedD, new uint[8], 0x0001_8C04, 0x2000, false, 0, 0));
+        delayedAckDevice.WriteMainRegisterByte(0x10, 0xFF);
+        delayedAckDevice.WriteMainRegisterByte(0x11, 0x0C);
+        AssertEqual(1, delayedAckDevice.DebugCurrentCdcLba);
+        InvokeSegaCdPrivate(delayedAckDevice, "SeedBootCdcRingFromSubBiosLoopIfNeeded");
+        AssertEqual(1, delayedAckDevice.DebugCurrentCdcLba);
+
+        delayedD[4] = 0xFFFF;
+        delayedAckDevice.SubCpu.RestoreState(new M68kCpu.M68kState(delayedD, new uint[8], 0x0001_8C04, 0x2000, false, 0, 0));
+        delayedAckDevice.WriteMainRegisterByte(0x11, 0x0C);
+        AssertEqual(2, delayedAckDevice.DebugCurrentCdcLba);
+
+        SegaCdDevice cddTickDevice = new(bios, SegaCdRegion.Usa, disc);
+        cddTickDevice.Reset();
+        SetSegaCdPrivateField(cddTickDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(cddTickDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(cddTickDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(cddTickDevice, "_currentCdcLba", 1);
+        SetSegaCdPrivateField(cddTickDevice, "_cddStatusCode", (byte)0x01);
+        cddTickDevice.WriteSubRegisterByte(0x37, 0x04);
+        InvokeSegaCdPrivate(cddTickDevice, "AdvanceCddInterrupts", SegaCdHardwareProfile.SubCpuClockHz / 75);
+        AssertEqual(1, cddTickDevice.DebugCurrentCdcLba);
+
+        SetSegaCdPrivateField(cddTickDevice, "_bootReadStreamActive", false);
+        SetSegaCdPrivateField(cddTickDevice, "_genericBootCdcCompletionReadyPending", false);
+        SetSegaCdPrivateField(cddTickDevice, "_bootReadStartLba", -1);
+        InvokeSegaCdPrivate(cddTickDevice, "AdvanceCddInterrupts", SegaCdHardwareProfile.SubCpuClockHz / 75);
+        AssertEqual(2, cddTickDevice.DebugCurrentCdcLba);
+
+        SegaCdDevice interruptDropDevice = new(bios, SegaCdRegion.Usa, disc);
+        interruptDropDevice.Reset();
+        SetSegaCdPrivateField(interruptDropDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(interruptDropDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(interruptDropDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(interruptDropDevice, "_currentCdcLba", 1);
+        interruptDropDevice.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0001_9000, 0x2000, false, 0, 0));
+        InvokeSegaCdPrivate(interruptDropDevice, "QueueSubInterrupt", 4);
+        InvokeSegaCdPrivate(interruptDropDevice, "ServicePendingSubInterrupts");
+        AssertEqual(0x0001_9000u, interruptDropDevice.SubCpu.PC);
+
+        SegaCdDevice oddInterruptDropDevice = new(bios, SegaCdRegion.Usa, disc);
+        oddInterruptDropDevice.Reset();
+        SetSegaCdPrivateField(oddInterruptDropDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(oddInterruptDropDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(oddInterruptDropDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(oddInterruptDropDevice, "_currentCdcLba", 1);
+        WriteProgramRamLong(oddInterruptDropDevice, (uint)((24 + 4) * 4), 0x0001_9001);
+        oddInterruptDropDevice.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0001_9000, 0x2000, false, 0, 0));
+        InvokeSegaCdPrivate(oddInterruptDropDevice, "QueueSubInterrupt", 4);
+        InvokeSegaCdPrivate(oddInterruptDropDevice, "ServicePendingSubInterrupts");
+        AssertEqual(0x0001_9000u, oddInterruptDropDevice.SubCpu.PC);
+
+        SegaCdDevice completionDevice = new(bios, SegaCdRegion.Usa, disc);
+        completionDevice.Reset();
+        SetSegaCdPrivateField(completionDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(completionDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(completionDevice, "_bootReadStreamActive", false);
+        SetSegaCdPrivateField(completionDevice, "_currentCdcLba", 4);
+        SetSegaCdPrivateField(completionDevice, "_genericBootCdcCompletionReadyPending", true);
+        AssertEqual((byte)0x81, completionDevice.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
+        AssertEqual((byte)0x81, completionDevice.ReadMainRegisterByte(0x0F, 0x00FF_05D2));
+        AssertEqual((byte)0x00, completionDevice.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x01, completionDevice.ReadMainRegisterByte(0x21));
+        completionDevice.WriteSubRegisterByte(0x20, 0x00);
+        completionDevice.WriteSubRegisterByte(0x21, 0x01);
+        completionDevice.WriteSubRegisterByte(0x22, 0x00);
+        completionDevice.WriteSubRegisterByte(0x23, 0x00);
+
+        completionDevice.WriteMainRegisterByte(0x10, 0xFF);
+        AssertEqual((byte)0x80, (byte)(completionDevice.ReadMainRegisterByte(0x0E) & 0x80));
+        completionDevice.WriteMainRegisterByte(0x11, 0x0C);
+        AssertEqual((byte)0x00, (byte)(completionDevice.ReadMainRegisterByte(0x0E) & 0x80));
+        AssertEqual((byte)0x80, (byte)(completionDevice.ReadMainRegisterByte(0x0F) & 0x80));
+        AssertEqual((byte)0xFF, completionDevice.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x0C, completionDevice.ReadMainRegisterByte(0x21));
+        AssertEqual((byte)0x81, completionDevice.ReadMainRegisterByte(0x0F, 0x00FF_05D2));
+
+        completionDevice.WriteMainRegisterByte(0x10, 0x00);
+        AssertEqual((byte)0x00, (byte)(completionDevice.ReadMainRegisterByte(0x0F) & 0x80));
+        AssertEqual((byte)0x00, completionDevice.ReadMainRegisterByte(0x20));
+        AssertEqual((byte)0x00, completionDevice.ReadMainRegisterByte(0x21));
+
+        SegaCdDevice finalPacketDevice = new(bios, SegaCdRegion.Usa, disc);
+        finalPacketDevice.Reset();
+        finalPacketDevice.UnmapSubBios();
+        SetSegaCdPrivateField(finalPacketDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(finalPacketDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(finalPacketDevice, "_bootReadStreamActive", false);
+        SetSegaCdPrivateField(finalPacketDevice, "_currentCdcLba", 4);
+        SetSegaCdPrivateField(finalPacketDevice, "_cdcPacketLength", 2052);
+        SetSegaCdPrivateField(finalPacketDevice, "_subCommunicationFlags", (byte)0xB4);
+        finalPacketDevice.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0000_0014, 0x2000, false, 0, 0));
+        AssertEqual((byte)0x81, finalPacketDevice.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
+        finalPacketDevice.WriteMainRegisterByte(0x0E, 0x80);
+        AssertEqual(0, finalPacketDevice.DebugCdcPacketLength);
+        AssertEqual((byte)0x81, finalPacketDevice.ReadMainRegisterByte(0x0F, 0x00FF_05D2));
+
+        SegaCdDevice invalidSubFetchDevice = new(bios, SegaCdRegion.Usa, disc);
+        invalidSubFetchDevice.Reset();
+        invalidSubFetchDevice.WriteMainRegisterByte(1, 0x01);
+        invalidSubFetchDevice.UnmapSubBios();
+        SetSegaCdPrivateField(invalidSubFetchDevice, "_bootReadStartLba", 1);
+        SetSegaCdPrivateField(invalidSubFetchDevice, "_bootReadSectorCount", 3);
+        SetSegaCdPrivateField(invalidSubFetchDevice, "_bootReadStreamActive", true);
+        SetSegaCdPrivateField(invalidSubFetchDevice, "_currentCdcLba", 1);
+        invalidSubFetchDevice.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0010_0002, 0x2400, false, 0, 0));
+        int invalidSubFetchCycles = invalidSubFetchDevice.RunSubCpuCycles(4096);
+        AssertEqual(4096, invalidSubFetchCycles);
+        AssertEqual(0x0010_0002u, invalidSubFetchDevice.SubCpu.PC);
+
         device.WriteSubRegisterByte(0x03, 0x06);
         device.WriteWordRamByte(0, 0x43);
         device.WriteWordRamByte(1, 0xFA);
@@ -1565,6 +1703,48 @@ void SegaCdGenericBootCdcServiceRaisesReadyEdge()
         AssertEqual((byte)0x0A, device.ReadMainWordRamByte(3));
         AssertEqual((byte)0x04, (byte)(device.ReadMainRegisterByte(0x0E) & 0x04));
         AssertEqual((byte)0x00, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05E8) & 0x40));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+}
+
+void SegaCdGenericBootExceptionTailPreservesStatusSelector()
+{
+    string folder = CreateTempDirectory();
+    try
+    {
+        string dataPath = Path.Combine(folder, "track01.bin");
+        File.WriteAllBytes(dataPath, new byte[2352]);
+        string cuePath = Path.Combine(folder, "disc.cue");
+        File.WriteAllText(
+            cuePath,
+            """
+            FILE "track01.bin" BINARY
+              TRACK 01 MODE1/2352
+                INDEX 01 00:00:00
+            """);
+
+        DiscImage disc = DiscImage.FromFile(cuePath);
+        byte[] bios = new byte[SegaCdHardwareProfile.BiosSize];
+        SegaCdDevice device = new(bios, SegaCdRegion.Usa, disc);
+        device.Reset();
+        device.WriteMainRegisterByte(1, 0x01);
+        device.UnmapSubBios();
+
+        WriteProgramRamLong(device, 0x0000, 0x0000_2C19);
+        WriteProgramRamWord(device, 0x2C17, 0x00C3);
+        WriteProgramRamWord(device, 0x2C19, 0x3345);
+        WriteProgramRamWord(device, 0x2C1B, 0x221C);
+        uint[] a = new uint[8];
+        a[7] = 0xFFFF_FFFC;
+        device.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], a, 0x0000_2C17, 0x2008, false, 0, 0));
+
+        _ = device.RunSubCpuCycles(64);
+
+        AssertEqual((byte)0x81, device.ReadMainRegisterByte(0x0F, 0x00FF_05C6));
+        AssertEqual((byte)0x01, (byte)(device.ReadMainRegisterByte(0x0F, 0x00FF_05D2) & 0x7F));
     }
     finally
     {
@@ -2139,6 +2319,25 @@ void SegaCdGenericBootIrq2Bridge()
         AssertEqual((byte)0x4E, device.ProgramRam[0x5F82]);
         AssertEqual((byte)0x73, device.ProgramRam[0x5F83]);
         AssertEqual(0x0000_5F7Cu, device.SubCpu.PC);
+
+        SegaCdDevice aliasedCallbackDevice = new(new byte[SegaCdHardwareProfile.BiosSize], SegaCdRegion.Usa, disc);
+        aliasedCallbackDevice.Reset();
+        SetSegaCdPrivateField(aliasedCallbackDevice, "_wordRamModeBits", (byte)0xC0);
+        WriteProgramRamWord(aliasedCallbackDevice, 0x5F34, 0x4EF9);
+        WriteProgramRamLong(aliasedCallbackDevice, 0x5F36, 0x005F_6108);
+        aliasedCallbackDevice.SubCpu.RestoreState(new M68kCpu.M68kState(new uint[8], new uint[8], 0x0000_6000, 0x2000, false, 0, 0));
+
+        InvokeSegaCdPrivate(aliasedCallbackDevice, "QueueSubInterrupt", 2);
+        InvokeSegaCdPrivate(aliasedCallbackDevice, "ServicePendingSubInterrupts");
+
+        AssertEqual((byte)0x00, aliasedCallbackDevice.ProgramRam[0x5F36]);
+        AssertEqual((byte)0x07, aliasedCallbackDevice.ProgramRam[0x5F37]);
+        AssertEqual((byte)0x61, aliasedCallbackDevice.ProgramRam[0x5F38]);
+        AssertEqual((byte)0x08, aliasedCallbackDevice.ProgramRam[0x5F39]);
+        AssertEqual((byte)0x00, aliasedCallbackDevice.ProgramRam[0x68]);
+        AssertEqual((byte)0x00, aliasedCallbackDevice.ProgramRam[0x69]);
+        AssertEqual((byte)0x5F, aliasedCallbackDevice.ProgramRam[0x6A]);
+        AssertEqual((byte)0x7C, aliasedCallbackDevice.ProgramRam[0x6B]);
     }
     finally
     {
