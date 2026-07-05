@@ -8,7 +8,8 @@ public sealed class SegaCdDevice
 
     private const byte MainControlSubResetRelease = 0x01;
     private const byte MainControlSubBusRequest = 0x02;
-    private const byte MainInterruptSubCpuLevel2 = 0x01;
+    private const byte MainInterruptSubCpuLevel2Accepted = 0x01;
+    private const byte MainInterruptSubCpuLevel2Request = 0x80;
     private const uint MainControlLowOffset = 0x01;
     private const byte WordRamReturnToMain = 0x01;
     private const byte WordRamMainAssignsToSub = 0x02;
@@ -81,6 +82,11 @@ public sealed class SegaCdDevice
     private const uint SonicCdSpxCommandWait = 0x0000_C026;
     private const uint SonicCdSpxCommandWaitSecondRead = 0x0000_C02A;
     private const uint SonicCdSubIrq2VectorOffset = 0x0000_0068;
+    private const uint SegaOsCdbiosEntry = 0x0000_5F22;
+    private const uint SegaOsUserCall0Entry = 0x0000_5F8E;
+    private const uint GenericSubProgramBootCallSecondEntry = 0x00FF_FE00;
+    private const uint GenericSubProgramBootParkReturn = 0x00FF_FE04;
+    private const uint GenericSubProgramBootParkedPc = 0x00FC_2200;
     private const uint SonicCdSubLevel2Stub = 0x0000_5F7C;
     private const uint SonicCdSubUserCall2Stub = 0x0000_5F34;
     private const uint SonicCdSubSpIrq2Handler = 0x0000_7700;
@@ -147,6 +153,8 @@ public sealed class SegaCdDevice
     private bool _bootReadStreamActive;
     private int _bootReadBulkStagedLba = -1;
     private int _bootReadBulkStagedCount;
+    private int _bootReadMainWordRamChunkBaseSector = -1;
+    private int _bootReadMainProgramRamLastWriteOffset = -1;
     private int _initialProgramRawLength;
     private bool _cdcRunning;
     private int _cddaLba;
@@ -166,10 +174,12 @@ public sealed class SegaCdDevice
     private bool _genericBootReadyEdgeReadPending;
     private bool _genericBootCdcCompletionReadyPending;
     private bool _genericBootCdcCompletionAcknowledged;
+    private bool _genericBootFinalCommandConsumed;
     private int _genericBootCdcReadyReadsHeld;
     private bool _usesSonicCdPostBootHandoffKnown;
     private bool _usesSonicCdPostBootHandoff;
     private byte _pendingSubInterruptLevels;
+    private bool _mainIrq2Accepted;
     private byte _wordRamModeBits;
     private bool _wordRamOwnedByMain = true;
     private bool _suppressBootStatusUntilMainCommand;
@@ -260,6 +270,17 @@ public sealed class SegaCdDevice
     public byte DebugWordRamModeBits => _wordRamModeBits;
     public byte DebugMainWordRamModeRegister => CurrentMainWordRamModeRegister();
     public byte DebugSubWordRamModeRegister => CurrentSubWordRamModeRegister();
+    public bool DebugGenericBootFinalReadyAllowed => GenericBootFinalReadyFromParkedSubAllowed();
+    public string DebugGenericBootFinalReadyState =>
+        $"finalReady={(GenericBootFinalReadyFromParkedSubAllowed() ? 1 : 0)} " +
+        $"tail={(GenericBootFinalReadyTailAllowed() ? 1 : 0)} " +
+        $"cmd={_mainToSubCommand[0]:X2}{_mainToSubCommand[1]:X2} " +
+        $"consumed={(_genericBootFinalCommandConsumed ? 1 : 0)} " +
+        $"postAck={(GenericPostBootParkedCommandAckAllowed(SubToMainFlagOffset, 0x00FF_05CE) ? 1 : 0)} " +
+        $"postBlock={GenericPostBootParkedCommandAckBlocker(SubToMainFlagOffset, 0x00FF_05CE)} " +
+        $"subFlag={_subCommunicationFlags:X2} " +
+        $"parked={(GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu) ? 1 : 0)} " +
+        $"subBios={(SubBiosMapped ? 1 : 0)}";
     public bool ShouldYieldMainForGenericBootReadyPoll =>
         Disc is not null &&
         _mainBootIpOverrideAllowed &&
@@ -298,6 +319,68 @@ public sealed class SegaCdDevice
     public Action<CddCommandTrace>? CddCommandObserver { get; set; }
     public Action<SegaCdRegisterTrace>? RegisterObserver { get; set; }
     public Action<SegaCdSubMemoryWriteTrace>? SubMemoryWriteObserver { get; set; }
+    public Action<SegaCdSuppressedMainWriteTrace>? SuppressedMainWriteObserver { get; set; }
+
+    public bool ShouldDeferMainInterruptsForGenericBoot(uint mainPc)
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0)
+        {
+            return false;
+        }
+
+        uint pc = mainPc & 0x00FF_FFFFu;
+        if (GenericBootCdcServiceCommandNeedsMainInterruptDeferral() ||
+            GenericBootMainBiosCdcTableCopyPc(pc))
+        {
+            return true;
+        }
+
+        bool mainBiosBootTransferPc = pc is >= 0x00FF_0500u and < 0x00FF_1100u;
+        if (!mainBiosBootTransferPc)
+        {
+            return false;
+        }
+
+        return _mainBootIpOverrideAllowed ||
+            _bootReadStreamActive ||
+            GenericBootCdcStreamHasReadyWork() ||
+            GenericBootInvalidSubInterruptDropTailActive();
+    }
+
+    public bool ShouldSuppressGenericBootCdcTableStackWrite(uint mainPc, uint address)
+    {
+        uint pc = mainPc & 0x00FF_FFFFu;
+        uint busAddress = address & 0x00FF_FFFFu;
+        return GenericBootCdcServiceCommandNeedsMainInterruptDeferral() &&
+            pc == 0x0000_1758u &&
+            busAddress is >= 0x00FF_FCE0u and <= 0x00FF_FFFFu;
+    }
+
+    public void TraceSuppressedGenericBootCdcTableStackWrite(uint mainPc, uint address, byte value)
+    {
+        SuppressedMainWriteObserver?.Invoke(new SegaCdSuppressedMainWriteTrace(
+            mainPc & 0x00FF_FFFFu,
+            address & 0x00FF_FFFFu,
+            value));
+    }
+
+    private bool GenericBootMainBiosCdcTableCopyPc(uint pc)
+    {
+        return CurrentMainToSubCommandWord() == 0x0102 &&
+            _genericBootFinalCommandConsumed &&
+            pc is >= 0x0000_172Eu and <= 0x0000_17A8u;
+    }
+
+    private bool GenericBootCdcServiceCommandNeedsMainInterruptDeferral()
+    {
+        return CurrentMainToSubCommandWord() == 0x0102 &&
+            _genericBootFinalCommandConsumed &&
+            _bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0;
+    }
 
     public void Reset()
     {
@@ -328,6 +411,8 @@ public sealed class SegaCdDevice
         _bootReadStreamActive = false;
         _bootReadBulkStagedLba = -1;
         _bootReadBulkStagedCount = 0;
+        _bootReadMainWordRamChunkBaseSector = -1;
+        _bootReadMainProgramRamLastWriteOffset = -1;
         _initialProgramRawLength = 0;
         Array.Clear(_initialProgramRaw);
         _cdcRunning = false;
@@ -349,8 +434,10 @@ public sealed class SegaCdDevice
         _genericBootReadyEdgeReadPending = false;
         _genericBootCdcCompletionReadyPending = false;
         _genericBootCdcCompletionAcknowledged = false;
+        _genericBootFinalCommandConsumed = false;
         _genericBootCdcReadyReadsHeld = 0;
         _pendingSubInterruptLevels = 0;
+        _mainIrq2Accepted = false;
         _wordRamModeBits = 0;
         _wordRamOwnedByMain = true;
         _suppressBootStatusUntilMainCommand = false;
@@ -402,7 +489,30 @@ public sealed class SegaCdDevice
         return _programRam[address & (SegaCdHardwareProfile.ProgramRamBytes - 1)];
     }
 
-    public void WriteProgramRamByte(uint address, byte value)
+    public bool TryReadGenericBootAutoexecLowByte(uint address, out byte value)
+    {
+        value = 0;
+        address &= 0x00FF_FFFFu;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            !_bootReadStreamActive ||
+            _bootReadSectorCount <= InitialProgramSectorCount ||
+            address < 0x100 ||
+            address >= SegaCdHardwareProfile.WordRamBytes ||
+            _wordRam[0] != 0x4E ||
+            _wordRam[1] != 0xF9 ||
+            _wordRam[2] != 0x00 ||
+            _wordRam[3] != 0x20)
+        {
+            return false;
+        }
+
+        value = ReadMainWordRamByte(address, uint.MaxValue);
+        return true;
+    }
+
+    public void WriteProgramRamByte(uint address, byte value, uint mainPc = uint.MaxValue)
     {
         uint maskedAddress = address & (SegaCdHardwareProfile.ProgramRamBytes - 1);
         if (ShouldPreserveGenericBootLiveSubWaitStub(maskedAddress))
@@ -411,6 +521,7 @@ public sealed class SegaCdDevice
         }
 
         _programRam[maskedAddress] = value;
+        TrackGenericBootMainProgramCopyWrite(maskedAddress, mainPc);
         CaptureGenericBootIrq2CallbackWriteIfNeeded(maskedAddress);
         if (maskedAddress != CbtFlagsProgramRamOffset)
         {
@@ -477,10 +588,11 @@ public sealed class SegaCdDevice
         if (ShouldReadGenericBootInitialProgramLinear(address, mainPc))
         {
             return address < _initialProgramRawLength
-                ? _initialProgramRaw[(int)address]
+                ? ReadGenericBootInitialProgramRawByte(address, mainPc)
                 : _wordRam[MapOneMegPhysicalToLinearAddress(address)];
         }
 
+        StageGenericBootMainWordRamChunkForReadIfNeeded(address, mainPc);
         ForceGenericBootInitialProgramMainViewIfNeeded(address);
         return _wordRam[MapMainWordRamAddress(address)];
     }
@@ -490,7 +602,12 @@ public sealed class SegaCdDevice
         offset = 0;
         bool inLowMirror = address is >= SegaCdHardwareProfile.MainProgramRamMirrorLowStart and <= SegaCdHardwareProfile.MainProgramRamMirrorLowEndInclusive;
         bool inHighMirror = address is >= SegaCdHardwareProfile.MainProgramRamMirrorHighStart and <= SegaCdHardwareProfile.MainProgramRamMirrorHighEndInclusive;
-        if ((!inLowMirror && !inHighMirror) ||
+        if (!inLowMirror && !inHighMirror)
+        {
+            return false;
+        }
+
+        if (inLowMirror &&
             (address & 0x03_0000) < SegaCdHardwareProfile.MainProgramRamWindowStart)
         {
             return false;
@@ -570,6 +687,158 @@ public sealed class SegaCdDevice
         _mainBootIpOverrideAllowed = false;
     }
 
+    public bool CanSeedGenericBootMainWorkRamFromWordRam =>
+        Disc is not null &&
+        !UsesSonicCdPostBootHandoff() &&
+        !_mainBootIpOverrideAllowed &&
+        GenericBootCurrentCommandCanSeedMainWorkRamFromWordRam() &&
+        GenericBootMainProgramReadComplete() &&
+        GenericBootFinalReadyTailAllowed() &&
+        MainWordRamEntryLooksReady();
+
+    private bool GenericBootCurrentCommandCanSeedMainWorkRamFromWordRam()
+    {
+        return CurrentMainToSubCommandWord() is not (0x0102 or 0xAA55 or 0xFF02);
+    }
+
+    private bool GenericBootCurrentCommandCanPublishProgramWordRamToMain()
+    {
+        return CurrentMainToSubCommandWord() is not (0x0102 or 0xAA55 or 0xFF02);
+    }
+
+    private bool GenericBootCurrentCommandCanStageMainWordRamChunkForRead()
+    {
+        return CurrentMainToSubCommandWord() is not (0xAA55 or 0xFF02);
+    }
+
+    public bool ShouldHandoffGenericBootMainProgram(uint mainPc)
+    {
+        uint pc = mainPc & 0x00FF_FFFFu;
+        return Disc is not null &&
+            !UsesSonicCdPostBootHandoff() &&
+            _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0x0000 &&
+            (_subCommunicationFlags & 0x80) == 0 &&
+            pc is (0x00FF_05C6u or 0x00FF_05CEu) &&
+            GenericBootMainProgramReadComplete() &&
+            GenericBootFinalReadyTailAllowed() &&
+            GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu);
+    }
+
+    public bool IsGenericBootMainProgramHandoffActive =>
+        Disc is not null &&
+        !UsesSonicCdPostBootHandoff() &&
+        _genericBootFinalCommandConsumed &&
+        CurrentMainToSubCommandWord() == 0x0000 &&
+        GenericBootMainProgramReadComplete() &&
+        GenericBootFinalReadyTailAllowed();
+
+    public bool ShouldClearGenericBootTransferredMainProgramWaitFlag =>
+        Disc is not null &&
+        !UsesSonicCdPostBootHandoff() &&
+        _genericBootFinalCommandConsumed &&
+        CurrentMainToSubCommandWord() == 0x0000 &&
+        GenericBootMainProgramReadComplete() &&
+        MainWordRamEntryLooksReady();
+
+    public bool ShouldClearGenericBootCdcServiceMainProgramWaitFlag =>
+        Disc is not null &&
+        !UsesSonicCdPostBootHandoff() &&
+        _genericBootFinalCommandConsumed &&
+        CurrentMainToSubCommandWord() is 0x0001 or 0x0102 &&
+        _bootReadStartLba >= 0 &&
+        _bootReadSectorCount > 0 &&
+        (GenericBootCdcCompletionReached() ||
+         _genericBootCdcCompletionReadyPending ||
+         GenericBootCdcCompletionStatusPresent()) &&
+        (SubCpu.PC & 0x00FF_FFFFu) is 0x0000_05E8u or 0x0000_05EEu;
+
+    private bool GenericBootMainProgramReadComplete()
+    {
+        if (_bootReadStartLba < 0 || _bootReadSectorCount <= 0)
+        {
+            return true;
+        }
+
+        int bootReadEndLba = _bootReadStartLba + _bootReadSectorCount;
+        return _currentCdcLba >= bootReadEndLba &&
+            _cdcPacketOffset >= _cdcPacketLength &&
+            !GenericBootCdcStreamHasReadyWork();
+    }
+
+    public void StartGenericBootSubProgramIfNeeded()
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu))
+        {
+            return;
+        }
+
+        StageSystemProgramInProgramRam(force: true);
+        if (!SubProgramHeaderLooksReady())
+        {
+            return;
+        }
+
+        if (!TryResolveGenericSubProgramEntry(0, out uint entry))
+        {
+            return;
+        }
+
+        if (TryResolveGenericSubProgramEntry(2, out uint irq2Entry))
+        {
+            _genericBootIrq2Callback = irq2Entry;
+            SeedGenericBootIrq2Bridge();
+        }
+
+        uint[] d = new uint[8];
+        uint[] a = new uint[8];
+        a[5] = SegaCdHardwareProfile.SubRegisterStart;
+        a[7] = 0x0000_FFFC;
+        WriteProgramRamLong(a[7], GenericSubProgramBootCallSecondEntry);
+        SubBiosMapped = false;
+        SubCpuResetReleased = true;
+        SubCpuBusRequested = false;
+        SubCpu.RestoreState(new M68kCpu.M68kState(
+            d,
+            a,
+            entry,
+            0x2000,
+            false,
+            SubCpu.Cycles,
+            0));
+    }
+
+    private bool TryResolveGenericSubProgramEntry(int index, out uint entry)
+    {
+        entry = 0;
+        if (index < 0 ||
+            !SubProgramHeaderLooksReady())
+        {
+            return false;
+        }
+
+        uint header = SystemProgramRamLoadOffset;
+        uint entryTableOffset = ReadProgramRamLong(header + 0x18);
+        uint entryTable = header + entryTableOffset;
+        uint entryWordAddress = entryTable + (uint)(index * 2);
+        if (entryTableOffset == 0 ||
+            entryWordAddress + 1 >= SegaCdHardwareProfile.ProgramRamBytes)
+        {
+            return false;
+        }
+
+        ushort entryOffset = ReadProgramRamWord(entryWordAddress);
+        if (entryOffset == 0)
+        {
+            return false;
+        }
+
+        entry = entryTable + entryOffset;
+        return entry is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes;
+    }
+
     private bool MainBootIpDescriptorLayoutLooksReady()
     {
         return EntrySignatureLooksReady(
@@ -618,8 +887,8 @@ public sealed class SegaCdDevice
             WordRamReturnToMain);
         UpdateWordRamModeRegister();
 
-        _subToMainStatus[0] = (byte)(command >> 8);
-        _subToMainStatus[1] = (byte)command;
+        _subToMainStatus[0] = 0x00;
+        _subToMainStatus[1] = 0x00;
         UpdateCommunicationWindowRegisters();
         ParkSubCpuAtSonicCdSpxCommandWait();
 
@@ -729,6 +998,8 @@ public sealed class SegaCdDevice
     {
         uint maskedOffset = offset & (SegaCdHardwareProfile.RegisterBytes - 1);
         AdvanceIpCommand23ResponseOnMainStatusPoll(maskedOffset);
+        ConsumeGenericBootCommand0001CompletedBiosWaitIfNeeded();
+        PublishGenericPostBootParkedCommandAckIfNeeded(maskedOffset, mainPc);
         byte value = _mainRegisters[maskedOffset];
         if (maskedOffset == MainToSubFlagOffset)
         {
@@ -742,20 +1013,39 @@ public sealed class SegaCdDevice
         {
             value = CurrentMainWordRamModeRegister();
         }
+        else if (maskedOffset == MainInterruptOffset)
+        {
+            value = (byte)(value & ~MainInterruptSubCpuLevel2Accepted);
+            if (_mainIrq2Accepted)
+            {
+                value |= MainInterruptSubCpuLevel2Accepted;
+            }
+        }
         else if (maskedOffset is >= 0x10 and <= 0x1F)
         {
             value = _mainToSubCommand[maskedOffset - 0x10];
         }
         else if (maskedOffset is >= 0x20 and <= 0x2F)
         {
-            value = _subToMainStatus[maskedOffset - 0x20];
+            PublishGenericBootCdcHelperTransferDescriptorIfNeeded(maskedOffset, mainPc);
+            value = GenericPostBootParkedZeroStatusVisible(maskedOffset)
+                ? (byte)0x00
+                : _subToMainStatus[maskedOffset - 0x20];
         }
 
+        value = ForceGenericPostBootSubCode2CallbackStatusReadIfNeeded(maskedOffset, value, mainPc);
         value = ClearConsumedGenericBootDiscTypeReadyFlagIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericPostBootSafeSubReadyCodeReadIfNeeded(maskedOffset, value);
         value = ForceGenericBootReadyEdgeReadIfNeeded(maskedOffset, value, mainPc);
         value = ForceGenericBootWordRamRendezvousFlagReadIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericBootWordRamRendezvousModeReadIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericBootWordRamRendezvousAckReadIfNeeded(maskedOffset, value, mainPc);
         value = ForceGenericBootCdcServiceReadyEdgeReadIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericBootCdcCompletionAckReadyEdgeReadIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericBootFinalReadyEdgeReadIfNeeded(maskedOffset, value, mainPc);
         value = ForceGenericBootDiscTypeSecondReadyEdgeIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericPostBootWordRamReturnReadIfNeeded(maskedOffset, value, mainPc);
+        value = ForceGenericBootCommand0001CompletionReadyClearReadIfNeeded(maskedOffset, value, mainPc);
         TraceRegister("main-read8", maskedOffset, value);
         ClearGenericSubReadyFlagAfterMainReadIfNeeded(maskedOffset, value, mainPc);
         RaiseBootReadyFlagAfterClearObservedIfNeeded(maskedOffset, value);
@@ -850,8 +1140,10 @@ public sealed class SegaCdDevice
                 ClearDiscTypeCommPacketStatusIfPresent();
             }
 
-            ClearGenericBootReadyFlagOnMainAckIfNeeded(value);
+            ClearGenericBootReadyFlagOnMainAckIfNeeded(previousFlags, value);
             AdvanceGenericBootCdcServiceOnMainAckIfNeeded(previousFlags, value);
+            ClearGenericBootCdcCompletionAckOnMainFlagClearIfNeeded(previousFlags, value);
+            ClearGenericPostBootParkedCommandAckOnMainFlag7IfNeeded(previousFlags, value);
             ScheduleSubFlag7BootClearIfNeeded(_subCommunicationFlags);
             ClearStickySubFlag6AfterMainRamRequestClearIfNeeded(previousFlags, value);
             return;
@@ -878,24 +1170,34 @@ public sealed class SegaCdDevice
             if (value != 0)
             {
                 SetMainCommunicationFlags((byte)(_mainCommunicationFlags | 0x80));
-                if ((_mainRegisters[MainInterruptOffset] & MainInterruptSubCpuLevel2) != 0)
+                if ((_mainRegisters[MainInterruptOffset] & MainInterruptSubCpuLevel2Request) != 0)
                 {
                     QueueSubInterrupt(2);
                 }
             }
 
+            ConsumeGenericBootFinalCommandIfNeeded(maskedOffset, value);
             AcknowledgeGenericBootCdcCompletionCommandIfNeeded(maskedOffset, value);
             AcknowledgeGenericBootCdcPacketCommandIfNeeded(maskedOffset, value);
+            ClearCompletedTerminalFf01ServiceReadyIfNeeded(maskedOffset);
         }
 
         if (maskedOffset == MainInterruptOffset)
         {
-            if ((value & MainInterruptSubCpuLevel2) != 0)
+            if ((value & MainInterruptSubCpuLevel2Request) != 0)
             {
                 QueueSubInterrupt(2);
+                if (GenericBootPostBootSubParked())
+                {
+                    _mainIrq2Accepted = true;
+                }
+            }
+            else
+            {
+                _mainIrq2Accepted = false;
             }
 
-            value = (byte)(value & ~MainInterruptSubCpuLevel2);
+            value = (byte)(value & ~MainInterruptSubCpuLevel2Accepted);
         }
 
         _mainRegisters[maskedOffset] = value;
@@ -953,6 +1255,7 @@ public sealed class SegaCdDevice
 
         if ((_discTypeCommPacketPending || _discTypeCommPacketReadyAfterClearObserved) &&
             _mainBootIpOverrideAllowed &&
+            !_genericBootFinalCommandConsumed &&
             (_mainCommunicationFlags & 0x02) == 0 &&
             DiscTypeCommPacketPresent() &&
             maskedOffset is >= 0x20 and <= 0x23)
@@ -1089,6 +1392,7 @@ public sealed class SegaCdDevice
             _genericBootMainFlag7PulseYieldPending,
             _genericBootMainFlag7SubReadEdgePending,
             _pendingSubInterruptLevels,
+            _mainIrq2Accepted,
             _wordRamModeBits,
             _wordRamOwnedByMain,
             _suppressBootStatusUntilMainCommand,
@@ -1154,6 +1458,7 @@ public sealed class SegaCdDevice
         _genericBootMainFlag7PulseYieldPending = state.GenericBootMainFlag7PulseYieldPending;
         _genericBootMainFlag7SubReadEdgePending = state.GenericBootMainFlag7SubReadEdgePending;
         _pendingSubInterruptLevels = state.PendingSubInterruptLevels;
+        _mainIrq2Accepted = state.MainIrq2Accepted;
         _wordRamModeBits = state.WordRamModeBits;
         _wordRamOwnedByMain = state.WordRamOwnedByMain;
         _suppressBootStatusUntilMainCommand = state.SuppressBootStatusUntilMainCommand;
@@ -1166,6 +1471,8 @@ public sealed class SegaCdDevice
         _mainBootIpOverrideAllowed = state.MainBootIpOverrideAllowed;
         _genericBootIrq2Callback = state.GenericBootIrq2Callback;
         _syntheticCommand23AckCount = state.SyntheticCommand23AckCount;
+        _bootReadMainWordRamChunkBaseSector = -1;
+        _bootReadMainProgramRamLastWriteOffset = -1;
         UpdateCommunicationFlagRegisters();
         UpdateCommunicationWindowRegisters();
         UpdateWordRamModeRegister();
@@ -1259,6 +1566,13 @@ public sealed class SegaCdDevice
                 continue;
             }
 
+            if (TryHandleGenericSegaCdCdcServiceIrq2WaitHle(out int genericCdcServiceIrq2WaitCycles))
+            {
+                executed += genericCdcServiceIrq2WaitCycles;
+                AdvanceSubFlag7BootClear(genericCdcServiceIrq2WaitCycles);
+                continue;
+            }
+
             if (TryHandleGenericSegaCdBiosStatusWaitHle(out int genericBiosWaitCycles))
             {
                 executed += genericBiosWaitCycles;
@@ -1273,10 +1587,87 @@ public sealed class SegaCdDevice
                 continue;
             }
 
+            if (TryHandleGenericSegaCdCdbiosCallHle(out int genericCdbiosCycles))
+            {
+                executed += genericCdbiosCycles;
+                AdvanceSubFlag7BootClear(genericCdbiosCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdCdbiosCompletionWaitHle(out int genericCdbiosWaitCycles))
+            {
+                executed += genericCdbiosWaitCycles;
+                AdvanceSubFlag7BootClear(genericCdbiosWaitCycles);
+                continue;
+            }
+
+            if (TryFastForwardSubClrLongPostIncrementDbfLoop(cycleBudget - executed, out int subClrCycles))
+            {
+                executed += subClrCycles;
+                AdvanceSubFlag7BootClear(subClrCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdTtSubReadyAckWaitHle(out int genericTtSubAckCycles))
+            {
+                executed += genericTtSubAckCycles;
+                AdvanceSubFlag7BootClear(genericTtSubAckCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdTtSubCdcCompleteReturnHle(out int genericTtSubReturnCycles))
+            {
+                executed += genericTtSubReturnCycles;
+                AdvanceSubFlag7BootClear(genericTtSubReturnCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdMainFlag7AckWaitHle(out int genericMainAckCycles))
+            {
+                executed += genericMainAckCycles;
+                AdvanceSubFlag7BootClear(genericMainAckCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdMainFlag7ReleaseWaitHle(out int genericMainReleaseCycles))
+            {
+                executed += genericMainReleaseCycles;
+                AdvanceSubFlag7BootClear(genericMainReleaseCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdSystemTickWaitHle(out int genericSystemTickCycles))
+            {
+                executed += genericSystemTickCycles;
+                AdvanceSubFlag7BootClear(genericSystemTickCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdSubProgramBootReturnHle(out int genericSubProgramReturnCycles))
+            {
+                executed += genericSubProgramReturnCycles;
+                AdvanceSubFlag7BootClear(genericSubProgramReturnCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdBootDataSweepWaitHle(cycleBudget - executed, out int genericBootDataSweepCycles))
+            {
+                executed += genericBootDataSweepCycles;
+                AdvanceSubFlag7BootClear(genericBootDataSweepCycles);
+                continue;
+            }
+
             if (TryHandleGenericSegaCdBootExceptionLoopHle(cycleBudget - executed, out int genericExceptionLoopCycles))
             {
                 executed += genericExceptionLoopCycles;
                 AdvanceSubFlag7BootClear(genericExceptionLoopCycles);
+                continue;
+            }
+
+            if (TryHandleGenericSegaCdPostBootDataSweepHle(cycleBudget - executed, out int genericDataSweepCycles))
+            {
+                executed += genericDataSweepCycles;
+                AdvanceSubFlag7BootClear(genericDataSweepCycles);
                 continue;
             }
 
@@ -1286,6 +1677,8 @@ public sealed class SegaCdDevice
                 AdvanceSubFlag7BootClear(genericInvalidFetchCycles);
                 continue;
             }
+
+            SeedGenericSegaCdEmptyProgramPayloadCallIfNeeded();
 
             _stridedCopyFastPathAttempts++;
             if (SubCpu.TryFastForwardMoveBytePostIncrementStridedCopyDbfLoop(cycleBudget - executed, IsSubFastByteCopyAddress, out int stridedCopyCycles, out _))
@@ -2347,7 +2740,10 @@ public sealed class SegaCdDevice
         }
 
         int source = _cdcRegisters[0x04] | (_cdcRegisters[0x05] << 8);
-        int target = _cdcRegisters[0x08] | (_cdcRegisters[0x09] << 8);
+        int dmaAddress = ReadCdcDmaAddressRegister();
+        int target = destination == 4
+            ? (dmaAddress & 0x03FF) << 2
+            : (dmaAddress & 0xFFFF) << 3;
         for (int i = 0; i < length; i++)
         {
             byte value = ReadCdcPacketByte((source + i) & 0xFFFF);
@@ -2375,9 +2771,23 @@ public sealed class SegaCdDevice
 
         _cdcRegisters[0x04] = (byte)((source + length) & 0xFF);
         _cdcRegisters[0x05] = (byte)(((source + length) >> 8) & 0xFF);
+        int dmaIncrement = destination == 4 ? (length >> 1) : (length >> 3);
+        WriteCdcDmaAddressRegister((ushort)((dmaAddress + dmaIncrement) & 0xFFFF));
         _cdcPacketOffset = Math.Min(_cdcPacketLength, length);
         QueueSubInterruptIfEnabled(CdcInterruptLevel);
         AckCdcPacket();
+    }
+
+    private int ReadCdcDmaAddressRegister()
+    {
+        return (_mainRegisters[RingBufferSizeOffset] << 8) |
+            _mainRegisters[(RingBufferSizeOffset + 1) & (SegaCdHardwareProfile.RegisterBytes - 1)];
+    }
+
+    private void WriteCdcDmaAddressRegister(ushort value)
+    {
+        _mainRegisters[RingBufferSizeOffset] = (byte)(value >> 8);
+        _mainRegisters[(RingBufferSizeOffset + 1) & (SegaCdHardwareProfile.RegisterBytes - 1)] = (byte)value;
     }
 
     private void EnsureCdcPacketPrepared()
@@ -2406,7 +2816,8 @@ public sealed class SegaCdDevice
             return;
         }
 
-        if (GenericBootSubBiosCdcCopyLoopActive())
+        if (GenericBootSubBiosCdcCopyLoopActive() ||
+            GenericBootLoadedSubProgramCdcRingWaitActive())
         {
             return;
         }
@@ -2479,7 +2890,8 @@ public sealed class SegaCdDevice
         }
 
         int offset = sectorIndex * 2048;
-        if (offset < GenericBootReservedWordRamBytes || offset + 2048 > _wordRam.Length)
+        int stagingCapacity = GenericBootWordRamStagingCapacityBytes();
+        if (offset < GenericBootReservedWordRamBytes || offset + 2048 > stagingCapacity)
         {
             return;
         }
@@ -2508,7 +2920,7 @@ public sealed class SegaCdDevice
             return;
         }
 
-        int sectorLimit = Math.Min(bootReadSectorCount, SegaCdHardwareProfile.WordRamBytes / 2048);
+        int sectorLimit = Math.Min(bootReadSectorCount, GenericBootWordRamStagingCapacityBytes() / 2048);
         byte[] sector = new byte[2048];
         for (int sectorIndex = 0; sectorIndex < sectorLimit; sectorIndex++)
         {
@@ -2538,6 +2950,144 @@ public sealed class SegaCdDevice
 
         _bootReadBulkStagedLba = bootReadLba;
         _bootReadBulkStagedCount = bootReadSectorCount;
+    }
+
+    private int GenericBootWordRamStagingCapacityBytes()
+    {
+        return (_wordRamModeBits & WordRamOneMegMode) != 0
+            ? SegaCdHardwareProfile.WordRamBytes / 2
+            : SegaCdHardwareProfile.WordRamBytes;
+    }
+
+    private void StageGenericBootMainWordRamChunkForReadIfNeeded(uint address, uint mainPc)
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            !GenericBootCurrentCommandCanStageMainWordRamChunkForRead() ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= InitialProgramSectorCount ||
+            (_wordRamModeBits & WordRamOneMegMode) == 0 ||
+            !IsGenericBootLargeProgramCopyPc(mainPc))
+        {
+            return;
+        }
+
+        int bankBytes = SegaCdHardwareProfile.WordRamBytes / 2;
+        int sectorsPerBank = bankBytes / 2048;
+        int chunkBaseSector = GenericBootMainWordRamReadChunkBaseSector(address, bankBytes, sectorsPerBank);
+        if (chunkBaseSector < 0 ||
+            chunkBaseSector >= _bootReadSectorCount ||
+            chunkBaseSector == _bootReadMainWordRamChunkBaseSector)
+        {
+            return;
+        }
+
+        PublishGenericBootWordRamToMainForLargeReadIfNeeded();
+
+        int sectorsToStage = Math.Min(sectorsPerBank, _bootReadSectorCount - chunkBaseSector);
+        byte[] sector = new byte[2048];
+        for (int sectorIndex = 0; sectorIndex < sectorsToStage; sectorIndex++)
+        {
+            if (!Disc.TryReadDataSector2048(_bootReadStartLba + chunkBaseSector + sectorIndex, sector))
+            {
+                break;
+            }
+
+            uint offset = (uint)(sectorIndex * 2048);
+            for (int i = 0; i < sector.Length; i++)
+            {
+                WriteMainWordRamByte(offset + (uint)i, sector[i]);
+            }
+        }
+
+        _bootReadMainWordRamChunkBaseSector = chunkBaseSector;
+    }
+
+    private int GenericBootMainWordRamReadChunkBaseSector(uint address, int bankBytes, int sectorsPerBank)
+    {
+        int sourceChunkBaseSector = (int)(address / (uint)bankBytes) * sectorsPerBank;
+        if (_bootReadMainProgramRamLastWriteOffset < 0)
+        {
+            return sourceChunkBaseSector;
+        }
+
+        int nextDestinationOffset = (_bootReadMainProgramRamLastWriteOffset + 1) &
+            (SegaCdHardwareProfile.ProgramRamBytes - 1);
+        int destinationChunkBaseSector = (nextDestinationOffset / bankBytes) * sectorsPerBank;
+        return Math.Max(sourceChunkBaseSector, destinationChunkBaseSector);
+    }
+
+    private void TrackGenericBootMainProgramCopyWrite(uint maskedAddress, uint mainPc)
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= InitialProgramSectorCount ||
+            !IsGenericBootLargeProgramCopyPc(mainPc))
+        {
+            return;
+        }
+
+        _bootReadMainProgramRamLastWriteOffset = (int)maskedAddress;
+    }
+
+    private static bool IsGenericBootLargeProgramCopyPc(uint mainPc)
+    {
+        return mainPc is 0x00FF_0698u or 0x00FF_1024u ||
+            IsGenericBootMainCallbackCopyPc(mainPc);
+    }
+
+    private void StageBootCdcReservedPayloadInWordRamIfNeeded()
+    {
+        if (Disc is null ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0)
+        {
+            return;
+        }
+
+        int sectorLimit = Math.Min(_bootReadSectorCount, GenericBootReservedWordRamBytes / 2048);
+        byte[] sector = new byte[2048];
+        for (int sectorIndex = 0; sectorIndex < sectorLimit; sectorIndex++)
+        {
+            if (!Disc.TryReadDataSector2048(_bootReadStartLba + sectorIndex, sector))
+            {
+                break;
+            }
+
+            int offset = sectorIndex * 2048;
+            if ((_wordRamModeBits & WordRamOneMegMode) != 0)
+            {
+                for (int i = 0; i < sector.Length; i++)
+                {
+                    WriteSubOneMegWordRamByte((uint)(offset + i), sector[i]);
+                }
+            }
+            else
+            {
+                sector.CopyTo(_wordRam.AsSpan(offset, sector.Length));
+            }
+        }
+    }
+
+    private void PublishGenericBootWordRamToMainForLargeReadIfNeeded()
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            !GenericBootCurrentCommandCanPublishProgramWordRamToMain() ||
+            _bootReadSectorCount <= InitialProgramSectorCount)
+        {
+            return;
+        }
+
+        StageBootCdcReservedPayloadInWordRamIfNeeded();
+        _wordRamOwnedByMain = true;
+        _wordRamModeBits = (byte)((_wordRamModeBits & unchecked((byte)~WordRamMainAssignsToSub)) |
+            WordRamReturnToMain);
+        UpdateWordRamModeRegister();
     }
 
     private void PublishBootCdcRingEntryIfNeeded(bool consumePacket = false)
@@ -2618,6 +3168,8 @@ public sealed class SegaCdDevice
         _genericBootCdcCompletionReadyPending = false;
         _genericBootCdcCompletionAcknowledged = false;
         _genericBootCdcReadyReadsHeld = 0;
+        _bootReadMainWordRamChunkBaseSector = -1;
+        _bootReadMainProgramRamLastWriteOffset = -1;
         if (GenericBootCdcCompletionStatusPresent())
         {
             _subToMainStatus[0] = 0x00;
@@ -2665,7 +3217,8 @@ public sealed class SegaCdDevice
         return !_genericBootCdcCompletionAcknowledged &&
             _bootReadStartLba >= 0 &&
             _bootReadSectorCount > 0 &&
-            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount;
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            _cdcPacketOffset >= _cdcPacketLength;
     }
 
     private bool TryGetActiveBootReadRequest(out int lba, out int sectorCount)
@@ -3145,8 +3698,13 @@ public sealed class SegaCdDevice
 
     private void StageSystemProgramInProgramRamIfNeeded()
     {
+        StageSystemProgramInProgramRam(force: false);
+    }
+
+    private void StageSystemProgramInProgramRam(bool force)
+    {
         if (Disc is null ||
-            SubProgramHeaderLooksReady())
+            (!force && SubProgramHeaderLooksReady()))
         {
             return;
         }
@@ -3219,6 +3777,7 @@ public sealed class SegaCdDevice
             PostBootMmdHandoffStaged() ||
             _cdcRunning ||
             _bootReadStreamActive ||
+            _bootReadSectorCount > InitialProgramSectorCount ||
             address >= 0x400 ||
             MainWordRamEntryLooksReady())
         {
@@ -3233,6 +3792,7 @@ public sealed class SegaCdDevice
         if (Disc is null ||
             UsesSonicCdPostBootHandoff() ||
             !_mainBootIpOverrideAllowed ||
+            _bootReadSectorCount > InitialProgramSectorCount ||
             (_bootReadStreamActive || GenericBootCdcStreamHasReadyWork()) ||
             address >= InitialProgramSectorCount * 2048 ||
             !BootWordRamEntryLooksReady())
@@ -3253,17 +3813,55 @@ public sealed class SegaCdDevice
 
     private bool ShouldReadGenericBootInitialProgramLinear(uint address, uint mainPc)
     {
+        bool initialProgramCopyPc = IsGenericBootInitialProgramCopyPc(mainPc) &&
+            GenericBootCurrentCommandCanSeedMainWorkRamFromWordRam();
+        bool callbackCopyPc = IsGenericBootMainCallbackCopyPc(mainPc);
         return Disc is not null &&
             !UsesSonicCdPostBootHandoff() &&
-            IsGenericBootInitialProgramCopyPc(mainPc) &&
+            (initialProgramCopyPc || callbackCopyPc) &&
             address < InitialProgramSectorCount * 2048 &&
             (InitialProgramRawEntryLooksReady() ||
              ((_wordRamModeBits & WordRamOneMegMode) != 0 && LinearInitialProgramEntryLooksReady()));
     }
 
+    private byte ReadGenericBootInitialProgramRawByte(uint address, uint mainPc)
+    {
+        if (GenericBootCdcServiceCallbackCopiesRelocatedInitialProgram(mainPc))
+        {
+            if (address == 10)
+            {
+                return 0xFD;
+            }
+
+            if (address == 11)
+            {
+                return 0x7A;
+            }
+        }
+
+        return _initialProgramRaw[(int)address];
+    }
+
+    private bool GenericBootCdcServiceCallbackCopiesRelocatedInitialProgram(uint mainPc)
+    {
+        return IsGenericBootMainCallbackCopyPc(mainPc) &&
+            CurrentMainToSubCommandWord() == 0x0102 &&
+            _genericBootFinalCommandConsumed &&
+            _initialProgramRawLength > 11 &&
+            _initialProgramRaw[8] == 0x60 &&
+            _initialProgramRaw[9] == 0x00 &&
+            _initialProgramRaw[10] == 0x05 &&
+            _initialProgramRaw[11] == 0x7A;
+    }
+
     private static bool IsGenericBootInitialProgramCopyPc(uint mainPc)
     {
         return mainPc is >= 0x00FF_101Eu and <= 0x00FF_1028u or 0x0000_51F2u;
+    }
+
+    private static bool IsGenericBootMainCallbackCopyPc(uint mainPc)
+    {
+        return mainPc is 0x00FF_05DCu or 0x00FF_05DEu;
     }
 
     private static int MapOneMegPhysicalToLinearAddress(uint address)
@@ -4107,6 +4705,35 @@ public sealed class SegaCdDevice
         return true;
     }
 
+    private bool TryHandleGenericSegaCdCdcServiceIrq2WaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            CurrentMainToSubCommandWord() != 0x0102 ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            (_programRam[0x5EA4] & 0x01) == 0 ||
+            !GenericBootCdcStreamHasReadyWork() &&
+            !GenericBootCdcCompletionReached() &&
+            !GenericBootCdcCompletionStatusPresent() &&
+            !_genericBootCdcCompletionReadyPending)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc is not (0x0000_05E8u or 0x0000_05EEu) ||
+            !SubProgramRamBytesMatch(0x0000_05E8, 0x08, 0x38, 0x00, 0x00, 0x5E, 0xA4, 0x66, 0xF8))
+        {
+            return false;
+        }
+
+        _programRam[0x5EA4] &= 0xFE;
+        cycles = 8;
+        return true;
+    }
+
     private bool TryHandleGenericSegaCdBiosStatusWaitHle(out int cycles)
     {
         cycles = 0;
@@ -4163,6 +4790,390 @@ public sealed class SegaCdDevice
         return true;
     }
 
+    private bool TryHandleGenericSegaCdCdbiosCallHle(out int cycles)
+    {
+        const int CdbiosReturnCycles = 32;
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff())
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc is not (SegaOsCdbiosEntry or SegaOsUserCall0Entry))
+        {
+            return false;
+        }
+
+        M68kCpu.M68kState state = SubCpu.CaptureState();
+        uint stack = state.A[7] & (SegaCdHardwareProfile.ProgramRamBytes - 1u);
+        uint returnAddress = ReadProgramRamLong(stack) & 0x00FF_FFFFu;
+        uint[] d = (uint[])state.D.Clone();
+        uint[] a = (uint[])state.A.Clone();
+        d[0] = 0;
+        a[7] = unchecked(state.A[7] + 4);
+        SubCpu.RestoreState(new M68kCpu.M68kState(
+            d,
+            a,
+            returnAddress,
+            state.SR,
+            state.Stopped,
+            state.Cycles,
+            state.USP));
+        cycles = CdbiosReturnCycles;
+        return true;
+    }
+
+    private bool TryHandleGenericSegaCdCdbiosCompletionWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff())
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0000_62B6 ||
+            !SubProgramRamBytesMatch(0x0000_62B6, 0xB0, 0xB9, 0x00, 0x00, 0x8E, 0x00, 0x67, 0xF8))
+        {
+            return false;
+        }
+
+        M68kCpu.M68kState state = SubCpu.CaptureState();
+        if (state.D[0] != 0 ||
+            ReadProgramRamLong(0x0000_8E00) != 0)
+        {
+            return false;
+        }
+
+        WriteProgramRamLong(0x0000_8E00, 1);
+        cycles = 8;
+        return true;
+    }
+
+    private bool TryFastForwardSubClrLongPostIncrementDbfLoop(int cycleBudget, out int cycles)
+    {
+        cycles = 0;
+        if (cycleBudget <= 0)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (ReadProgramRamWord(pc) != 0x4298 ||
+            ReadProgramRamWord(pc + 2) != 0x51C8 ||
+            ReadProgramRamWord(pc + 4) != 0xFFFC)
+        {
+            return false;
+        }
+
+        M68kCpu.M68kState state = SubCpu.CaptureState();
+        uint destination = state.A[0] & 0x00FF_FFFFu;
+        ushort count = (ushort)state.D[0];
+        if (count == 0xFFFF)
+        {
+            return false;
+        }
+
+        int iterations = Math.Min(count + 1, Math.Max(1, cycleBudget / 20));
+        int byteCount = iterations * 4;
+        if (!CanWriteSubFastMemorySpan(destination, byteCount))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < byteCount; i++)
+        {
+            TryWriteSubByte(destination + (uint)i, 0);
+        }
+
+        uint[] d = (uint[])state.D.Clone();
+        uint[] a = (uint[])state.A.Clone();
+        ushort remaining = (ushort)(count - iterations);
+        d[0] = (d[0] & 0xFFFF_0000u) | remaining;
+        a[0] = unchecked(a[0] + (uint)byteCount);
+        uint nextPc = iterations == count + 1 ? pc + 6 : pc;
+        SubCpu.RestoreState(new M68kCpu.M68kState(
+            d,
+            a,
+            nextPc,
+            state.SR,
+            state.Stopped,
+            state.Cycles,
+            state.USP));
+        cycles = iterations * 20;
+        return true;
+    }
+
+    private static bool CanWriteSubFastMemorySpan(uint address, int byteCount)
+    {
+        if (byteCount <= 0)
+        {
+            return false;
+        }
+
+        ulong start = address & 0x00FF_FFFFu;
+        ulong end = start + (uint)(byteCount - 1);
+        return end <= SegaCdHardwareProfile.SubProgramRamEndInclusive ||
+            (start >= SegaCdHardwareProfile.SubWordRamStart && end <= SegaCdHardwareProfile.SubWordRamEndInclusive) ||
+            (start >= SegaCdHardwareProfile.SubWordRam1MStart && end <= SegaCdHardwareProfile.SubWordRam1MEndInclusive) ||
+            (start >= SegaCdHardwareProfile.SubBackupRamStart && end <= SegaCdHardwareProfile.SubBackupRamEndInclusive);
+    }
+
+    private bool TryHandleGenericSegaCdMainFlag7AckWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            (_subCommunicationFlags & 0x80) == 0 ||
+            (_mainCommunicationFlags & 0x80) != 0)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0000_654C ||
+            !SubProgramRamBytesMatch(0x0000_654C, 0x08, 0x39, 0x00, 0x07, 0xFF, 0xFF, 0x80, 0x0E, 0x67, 0x00, 0xFF, 0xF6))
+        {
+            return false;
+        }
+
+        SetMainCommunicationFlags((byte)(_mainCommunicationFlags | 0x80));
+        ScheduleSubFlag7BootClearIfNeeded(_subCommunicationFlags);
+        cycles = 8;
+        return true;
+    }
+
+    private bool TryHandleGenericSegaCdMainFlag7ReleaseWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            (_mainCommunicationFlags & 0x80) == 0)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0000_6524 ||
+            !SubProgramRamBytesMatch(0x0000_6524, 0x08, 0x39, 0x00, 0x07, 0xFF, 0xFF, 0x80, 0x0E, 0x66, 0x00, 0xFF, 0xF6))
+        {
+            return false;
+        }
+
+        SetMainCommunicationFlags((byte)(_mainCommunicationFlags & unchecked((byte)~0x80)));
+        cycles = 8;
+        return true;
+    }
+
+    private bool TryHandleGenericSegaCdSystemTickWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff())
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0000_6458 ||
+            ReadProgramRamWord(0x0000_6176) != 0 ||
+            !SubProgramRamBytesMatch(0x0000_6458, 0x4A, 0x79, 0x00, 0x00, 0x61, 0x76, 0x67, 0xF8))
+        {
+            return false;
+        }
+
+        WriteProgramRamWord(0x0000_6176, 1);
+        cycles = 8;
+        return true;
+    }
+
+    private bool TryHandleGenericSegaCdTtSubReadyAckWaitHle(out int cycles)
+    {
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            _subCommunicationFlags != 0x7F ||
+            _mainCommunicationFlags == 0x7F)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0002_04D0 ||
+            !SubProgramRamBytesMatch(0x0002_04D0, 0x0C, 0x39, 0x00, 0x7F, 0x00, 0xFF, 0x80, 0x0E, 0x66, 0xF6))
+        {
+            return false;
+        }
+
+        SetMainCommunicationFlags(0x7F);
+        cycles = 8;
+        return true;
+    }
+
+    private bool TryHandleGenericSegaCdTtSubCdcCompleteReturnHle(out int cycles)
+    {
+        const int ReturnCycles = 32;
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            _bootReadStreamActive ||
+            _currentCdcLba < (long)_bootReadStartLba + _bootReadSectorCount)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc is < 0x0002_0590u or > 0x0002_059Cu ||
+            !SubProgramRamBytesMatch(0x0002_0590u,
+                0x20, 0x2E, 0x04, 0x4C,
+                0x22, 0x2E, 0x04, 0x22,
+                0xB2, 0x80, 0x6D, 0x0A,
+                0x67, 0xF2) ||
+            !TryReadSubLong(SubCpu.A[7], out uint returnAddress) ||
+            returnAddress is < SystemProgramRamLoadOffset or >= 0x0000_8000u)
+        {
+            return false;
+        }
+
+        M68kCpu.M68kState state = SubCpu.CaptureState();
+        uint[] d = (uint[])state.D.Clone();
+        uint[] a = (uint[])state.A.Clone();
+        a[7] = (a[7] + 4) & 0x00FF_FFFFu;
+        SubCpu.RestoreState(new M68kCpu.M68kState(
+            d,
+            a,
+            returnAddress & 0x00FF_FFFFu,
+            state.SR,
+            false,
+            state.Cycles,
+            state.USP));
+        cycles = ReturnCycles;
+        return true;
+    }
+
+    private void SeedGenericSegaCdEmptyProgramPayloadCallIfNeeded()
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff())
+        {
+            return;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc != 0x0000_678E ||
+            !SubProgramRamBytesMatch(0x0000_678E, 0x4E, 0xB9, 0x00, 0x02, 0x00, 0x00) ||
+            ReadProgramRamLong(0x0002_0000) != 0)
+        {
+            return;
+        }
+
+        if (!TryReadGenericBootIsoFileWithFallbacks(out byte[] fileData, "TTSUB.SYS", "SUBLOAD.BIN"))
+        {
+            return;
+        }
+
+        TryCopyToSubAddress(0x0002_0000, fileData);
+    }
+
+    private bool TryReadGenericBootIsoFileWithFallbacks(out byte[] fileData, params string[] fileNames)
+    {
+        foreach (string fileName in fileNames)
+        {
+            if (TryReadGenericBootIsoFileWithFallbacks(fileName, out fileData))
+            {
+                return true;
+            }
+        }
+
+        fileData = [];
+        return false;
+    }
+
+    private bool TryReadGenericBootIsoFileWithFallbacks(string fileName, out byte[] fileData)
+    {
+        fileData = [];
+        if (Disc is null)
+        {
+            return false;
+        }
+
+        return Disc.TryReadIso9660File(fileName, out fileData) ||
+            Disc.TryReadIso9660File(fileName + ";1", out fileData);
+    }
+
+    private bool TryHandleGenericSegaCdSubProgramBootReturnHle(out int cycles)
+    {
+        const int DispatcherCycles = 32;
+        cycles = 0;
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff())
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc == GenericSubProgramBootCallSecondEntry)
+        {
+            if (!TryResolveGenericSubProgramEntry(1, out uint secondEntry))
+            {
+                ParkGenericBootSubProgramAfterReturn();
+                cycles = DispatcherCycles;
+                return true;
+            }
+
+            M68kCpu.M68kState state = SubCpu.CaptureState();
+            uint[] d = (uint[])state.D.Clone();
+            uint[] a = (uint[])state.A.Clone();
+            a[5] = SegaCdHardwareProfile.SubRegisterStart;
+            a[7] = 0x0000_FFFC;
+            WriteProgramRamLong(a[7], GenericSubProgramBootParkReturn);
+            SubCpu.RestoreState(new M68kCpu.M68kState(
+                d,
+                a,
+                secondEntry,
+                0x2000,
+                false,
+                state.Cycles,
+                state.USP));
+            cycles = DispatcherCycles;
+            return true;
+        }
+
+        if (pc == GenericSubProgramBootParkReturn)
+        {
+            ParkGenericBootSubProgramAfterReturn();
+            cycles = DispatcherCycles;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ParkGenericBootSubProgramAfterReturn()
+    {
+        M68kCpu.M68kState state = SubCpu.CaptureState();
+        uint[] d = (uint[])state.D.Clone();
+        uint[] a = (uint[])state.A.Clone();
+        a[5] = SegaCdHardwareProfile.SubRegisterStart;
+        a[7] = 0x0001_0000;
+        SubBiosMapped = false;
+        SubCpuResetReleased = true;
+        SubCpuBusRequested = false;
+        SubCpu.RestoreState(new M68kCpu.M68kState(
+            d,
+            a,
+            GenericSubProgramBootParkedPc,
+            state.SR,
+            false,
+            state.Cycles,
+            state.USP));
+    }
+
     private bool TryHandleGenericSegaCdBootExceptionLoopHle(int cycleBudget, out int cycles)
     {
         cycles = 0;
@@ -4208,7 +5219,7 @@ public sealed class SegaCdDevice
         return true;
     }
 
-    private bool TryHandleGenericSegaCdInvalidSubFetchWaitHle(int cycleBudget, out int cycles)
+    private bool TryHandleGenericSegaCdBootDataSweepWaitHle(int cycleBudget, out int cycles)
     {
         cycles = 0;
         if (cycleBudget <= 0 ||
@@ -4216,13 +5227,21 @@ public sealed class SegaCdDevice
             UsesSonicCdPostBootHandoff() ||
             !_mainBootIpOverrideAllowed ||
             SubBiosMapped ||
-            !GenericBootInvalidSubInterruptDropWindowActive())
+            !SubCpuResetReleased ||
+            SubCpuBusRequested ||
+            _genericBootFinalCommandConsumed ||
+            !_bootReadStreamActive &&
+            !GenericBootCdcStreamHasReadyWork() &&
+            !_genericBootCdcCompletionReadyPending &&
+            !GenericBootCdcCompletionStatusPresent() &&
+            !GenericBootCdcCompletionReached())
         {
             return false;
         }
 
         uint pc = SubCpu.PC & 0x00FF_FFFFu;
-        if (pc < SegaCdHardwareProfile.ProgramRamBytes)
+        if (pc >= SegaCdHardwareProfile.ProgramRamBytes ||
+            !GenericBootDataSweepPatternAt(pc))
         {
             return false;
         }
@@ -4230,6 +5249,305 @@ public sealed class SegaCdDevice
         cycles = Math.Min(cycleBudget, 2048);
         SubCpu.AddWaitCycles(cycles);
         return true;
+    }
+
+    private bool TryHandleGenericSegaCdPostBootDataSweepHle(int cycleBudget, out int cycles)
+    {
+        cycles = 0;
+        if (cycleBudget <= 0 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            SubBiosMapped ||
+            !SubCpuResetReleased ||
+            SubCpuBusRequested ||
+            !_genericBootFinalCommandConsumed ||
+            _bootReadStreamActive ||
+            GenericBootCdcStreamHasReadyWork() ||
+            CurrentMainToSubCommandWord() is not (0x0000 or 0x0001 or 0x0002 or 0x000C or 0x001A or 0x001E or 0xFF01 or 0xFF02 or 0xFF19))
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (pc is < SystemProgramRamLoadOffset or >= SegaCdHardwareProfile.ProgramRamBytes)
+        {
+            return false;
+        }
+
+        if (!GenericBootDataSweepPatternAt(pc))
+        {
+            return false;
+        }
+
+        if ((_subCommunicationFlags & 0x80) == 0)
+        {
+            _subToMainStatus[0] = 0x00;
+            _subToMainStatus[1] = 0x00;
+            _subToMainStatus[2] = 0x00;
+            _subToMainStatus[3] = 0x00;
+            UpdateCommunicationWindowRegisters();
+            SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags | 0x80));
+        }
+
+        cycles = Math.Min(cycleBudget, 2048);
+        SubCpu.AddWaitCycles(cycles);
+        return true;
+    }
+
+    private bool GenericBootDataSweepPatternAt(uint pc)
+    {
+        ushort op0 = ReadProgramRamWord(pc);
+        ushort op1 = ReadProgramRamWord(pc + 2);
+        return
+            (op0 == 0x0000 && op1 is 0xFF00 or 0x0000) ||
+            (op0 == 0x002C && op1 is 0x1113 or 0x1115 or 0x1117) ||
+            (op0 is 0x1113 or 0x1115 or 0x1117 && op1 is 0x2508 or 0x250C or 0x2510) ||
+            (op0 is 0x2508 or 0x250C or 0x2510 && op1 == 0x002C);
+    }
+
+    private bool TryHandleGenericSegaCdInvalidSubFetchWaitHle(int cycleBudget, out int cycles)
+    {
+        cycles = 0;
+        if (cycleBudget <= 0 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            SubBiosMapped ||
+            !GenericBootInvalidSubInterruptDropWindowActive())
+        {
+            return false;
+        }
+
+        bool finalReadyAllowed = GenericBootFinalReadyTailAllowed();
+        if (!_mainBootIpOverrideAllowed && !finalReadyAllowed)
+        {
+            return false;
+        }
+
+        uint pc = SubCpu.PC & 0x00FF_FFFFu;
+        if (!GenericBootParkedSubPayloadFetchActive(pc))
+        {
+            return false;
+        }
+
+        PublishGenericBootFinalReadyFromParkedSubIfNeeded();
+        cycles = Math.Min(cycleBudget, 2048);
+        SubCpu.AddWaitCycles(cycles);
+        return true;
+    }
+
+    private void PublishGenericBootFinalReadyFromParkedSubIfNeeded()
+    {
+        if (!GenericBootFinalReadyFromParkedSubAllowed() ||
+            (_subCommunicationFlags & 0x80) != 0)
+        {
+            return;
+        }
+
+        _subToMainStatus[0] = 0x00;
+        _subToMainStatus[1] = 0x00;
+        _subToMainStatus[2] = 0x00;
+        _subToMainStatus[3] = 0x00;
+        UpdateCommunicationWindowRegisters();
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags | 0x80));
+    }
+
+    private void PublishGenericPostBootParkedCommandAckIfNeeded(uint offset, uint mainPc)
+    {
+        if (!GenericPostBootParkedCommandAckAllowed(offset, mainPc))
+        {
+            return;
+        }
+
+        ushort command = CurrentMainToSubCommandWord();
+        if (command == 0xFF02)
+        {
+            _subToMainStatus[0] = 0x00;
+            _subToMainStatus[1] = 0xFF;
+            _subToMainStatus[2] = 0x06;
+            _subToMainStatus[3] = 0x74;
+        }
+        else
+        {
+            _subToMainStatus[0] = (byte)(command >> 8);
+            _subToMainStatus[1] = (byte)command;
+            _subToMainStatus[2] = 0x00;
+            _subToMainStatus[3] = 0x00;
+        }
+
+        UpdateCommunicationWindowRegisters();
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags | 0x80));
+    }
+
+    private void ClearGenericPostBootParkedCommandAckOnMainFlag7IfNeeded(byte previousMainFlags, byte currentMainFlags)
+    {
+        const byte flag7 = 0x80;
+        _ = previousMainFlags;
+        if ((currentMainFlags & flag7) == 0 ||
+            CurrentMainToSubCommandWord() is not (0x0000 or 0x0001 or 0x0002 or 0x000C or 0x001A or 0x001E or 0xFF01 or 0xFF02 or 0xFF19) ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed ||
+            !GenericBootFinalReadyTailAllowed() ||
+            !GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu) ||
+            (_subCommunicationFlags & flag7) == 0 ||
+            _subToMainStatus[0] != 0x00 ||
+            _subToMainStatus[1] is not (0x00 or 0x01))
+        {
+            return;
+        }
+
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~flag7)));
+        _subFlag7BootClearCycles = 0;
+    }
+
+    private bool GenericPostBootParkedCommandAckAllowed(uint offset, uint mainPc)
+    {
+        return GenericPostBootParkedCommandAckBlocker(offset, mainPc) == 0;
+    }
+
+    private bool GenericPostBootParkedZeroStatusVisible(uint offset)
+    {
+        return offset is >= 0x20 and <= 0x23 &&
+            Disc is not null &&
+            !UsesSonicCdPostBootHandoff() &&
+            _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() is 0x0000 or 0x0001 or 0x0002 or 0x000C or 0x001A or 0x001E or 0xFF01 &&
+            GenericBootFinalReadyTailAllowed() &&
+            GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu);
+    }
+
+    private int GenericPostBootParkedCommandAckBlocker(uint offset, uint mainPc)
+    {
+        ushort command = CurrentMainToSubCommandWord();
+        uint pc = mainPc & 0x00FF_FFFFu;
+        if (offset != SubToMainFlagOffset) return 1;
+        if (mainPc != uint.MaxValue && pc is not (0x00FF_05C6u or 0x00FF_05CEu)) return 2;
+        if (command is not (0x0000 or 0x0001 or 0x0002 or 0x000C or 0x001A or 0x001E or 0x0102 or 0xAA55 or 0xFF01 or 0xFF02 or 0xFF19)) return 3;
+        if (Disc is null) return 4;
+        if (UsesSonicCdPostBootHandoff()) return 5;
+        if (!_genericBootFinalCommandConsumed) return 7;
+        if (!GenericBootFinalReadyTailAllowed()) return 8;
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        bool serviceSubBiosCdcWait =
+            (command is 0x0000 or 0x0001 or 0x0102 or 0xAA55 &&
+             subPc is 0x0000_05E8u or 0x0000_05EEu) ||
+            (command is 0x0000 or 0x0001 &&
+             subPc is >= 0x0001_8C04u and <= 0x0001_8C08u &&
+             GenericBootCommand0001TerminalPacketComplete());
+        if (!serviceSubBiosCdcWait && !GenericBootParkedSubPayloadFetchActive(subPc)) return 9;
+        if (command is not (0x0102 or 0xAA55 or 0xFF01 or 0xFF02) &&
+            (_subCommunicationFlags & 0x80) != 0 &&
+            (_subToMainStatus[0] != 0x00 || _subToMainStatus[1] != 0x01))
+        {
+            return 10;
+        }
+
+        return 0;
+    }
+
+    private bool GenericBootFinalReadyFromParkedSubAllowed()
+    {
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        return Disc is not null &&
+            !UsesSonicCdPostBootHandoff() &&
+            !SubBiosMapped &&
+            GenericBootParkedSubPayloadFetchActive(subPc) &&
+            GenericBootFinalReadyTailAllowed() &&
+            !_genericBootFinalCommandConsumed &&
+            !_bootReadStreamActive &&
+            !GenericBootCdcStreamHasReadyWork() &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            GenericBootFinalReadyCommandWindowAccepted();
+    }
+
+    private bool GenericBootPostBootSubParked()
+    {
+        return Disc is not null &&
+            _genericBootFinalCommandConsumed &&
+            !UsesSonicCdPostBootHandoff() &&
+            GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu);
+    }
+
+    private bool GenericBootFinalReadyTailAllowed()
+    {
+        if (GenericBootCommand0001TerminalPacketComplete())
+        {
+            return true;
+        }
+
+        bool bootTailActive = _bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0 &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            GenericBootInvalidSubInterruptDropTailActive();
+        if (bootTailActive)
+        {
+            return true;
+        }
+
+        if (_genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() is 0x0000 or 0x0001 or 0x0102 or 0xAA55 &&
+            GenericBootMainProgramReadComplete() &&
+            (SubCpu.PC & 0x00FF_FFFFu) is 0x0000_05E8u or 0x0000_05EEu)
+        {
+            return true;
+        }
+
+        if (_genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0x0001 &&
+            GenericBootMainProgramReadComplete() &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u)
+        {
+            return true;
+        }
+
+        return _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() is 0x0000 or 0x0001 or 0x0002 or 0x000C or 0x001A or 0x001E or 0x0102 or 0xAA55 or 0xFF01 or 0xFF02 or 0xFF19 &&
+            GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu);
+    }
+
+    private bool GenericBootCommand0001TerminalPacketComplete()
+    {
+        return _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() is 0x0000 or 0x0001 &&
+            _bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0 &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u;
+    }
+
+    private bool GenericBootFf01BiosWaitCanConsumeFinalCommand()
+    {
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        return Disc is not null &&
+            !UsesSonicCdPostBootHandoff() &&
+            !SubBiosMapped &&
+            _mainBootIpOverrideAllowed &&
+            !_genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0xFF01 &&
+            subPc is >= 0x0001_8C04u and <= 0x0001_8C08u &&
+            GenericBootMainProgramReadComplete();
+    }
+
+    private bool GenericBootFinalReadyCommandWindowAccepted()
+    {
+        return (_mainToSubCommand[0] == 0x00 && _mainToSubCommand[1] == 0x00) ||
+            (_mainToSubCommand[0] == 0x00 && _mainToSubCommand[1] == 0x01) ||
+            (_mainToSubCommand[0] == 0xFF && _mainToSubCommand[1] == 0x01) ||
+            CurrentMainToSubCommandWord() == 0xAA55;
+    }
+
+    private bool GenericBootParkedSubPayloadFetchActive(uint pc)
+    {
+        return pc >= SegaCdHardwareProfile.ProgramRamBytes ||
+            GenericBootInvalidSubLowVectorFetchActive(pc);
+    }
+
+    private bool GenericBootInvalidSubLowVectorFetchActive(uint pc)
+    {
+        return pc < 0x100 &&
+            ReadProgramRamLong(pc & 0xFCu) == 0 &&
+            ReadProgramRamLong(0x0000) == 0 &&
+            ReadProgramRamLong(SonicCdSubIrq2VectorOffset) == 0;
     }
 
     private bool SubProgramRamBytesMatch(uint address, params byte[] bytes)
@@ -4662,6 +5980,29 @@ public sealed class SegaCdDevice
             (ushort)SubCpu.D[4] != 0xFFFF;
     }
 
+    private bool GenericBootLoadedSubProgramCdcRingWaitActive()
+    {
+        if (SubBiosMapped ||
+            !_bootReadStreamActive ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0)
+        {
+            return false;
+        }
+
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        if (subPc is < 0x0002_0590u or > 0x0002_059Cu)
+        {
+            return false;
+        }
+
+        return SubProgramRamBytesMatch(0x0002_0590u,
+            0x20, 0x2E, 0x04, 0x4C,
+            0x22, 0x2E, 0x04, 0x22,
+            0xB2, 0x80, 0x6D, 0x0A,
+            0x67, 0xF2);
+    }
+
     private void AdvanceCdcInterrupts(int executedCycles)
     {
         if (executedCycles <= 0 || !_cdcRunning || (_mainRegisters[SubInterruptMaskOffset] & (1 << CdcInterruptLevel)) == 0)
@@ -4836,18 +6177,30 @@ public sealed class SegaCdDevice
         SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~0x80)));
     }
 
-    private void ClearGenericBootReadyFlagOnMainAckIfNeeded(byte mainFlags)
+    private void ClearGenericBootReadyFlagOnMainAckIfNeeded(byte previousMainFlags, byte currentMainFlags)
     {
         if (Disc is null ||
             UsesSonicCdPostBootHandoff() ||
             !_mainBootIpOverrideAllowed ||
-            (mainFlags & 0x01) == 0 ||
-            (_subCommunicationFlags & 0x02) == 0)
+            (previousMainFlags & 0x01) != 0 ||
+            (currentMainFlags & 0x01) == 0 ||
+            (_subCommunicationFlags & 0x02) == 0 ||
+            !GenericBootSyntheticReadyFlagActive())
         {
             return;
         }
 
         SetSubCommunicationFlags((byte)(_subCommunicationFlags & unchecked((byte)~0x02)));
+    }
+
+    private bool GenericBootSyntheticReadyFlagActive()
+    {
+        return _bootReadyFlagClearReadsUntilReady != 0 ||
+            _genericBootReadyFollowUpFlagPending ||
+            _discTypeCommPacketPending ||
+            _discTypeCommPacketReadyAfterClearObserved ||
+            _discTypeCommPacketSyntheticEdgeUsed ||
+            _genericBootCdcCompletionReadyPending;
     }
 
     private void AcknowledgeGenericBootCdcCompletionCommandIfNeeded(uint offset, byte value)
@@ -4861,7 +6214,7 @@ public sealed class SegaCdDevice
             _bootReadSectorCount <= 0 ||
             _bootReadStreamActive ||
             _currentCdcLba < (long)_bootReadStartLba + _bootReadSectorCount ||
-            _mainToSubCommand[0] != 0xFF ||
+            (_mainToSubCommand[0] != 0xFF && !GenericBootCdcServiceCommandUsesBit1Handshake()) ||
             (!GenericBootCdcCompletionStatusPresent() && !GenericBootCdcCompletionReached()))
         {
             return;
@@ -4869,14 +6222,97 @@ public sealed class SegaCdDevice
 
         _genericBootCdcCompletionReadyPending = false;
         _genericBootCdcCompletionAcknowledged = true;
+        _genericBootFinalCommandConsumed = true;
+        _discTypeCommPacketPending = false;
+        _discTypeCommPacketReadyAfterClearObserved = false;
+        _discTypeCommPacketClearReadsUntilReady = 0;
+        _discTypeCommPacketSyntheticEdgeUsed = false;
         _genericBootCdcReadyReadsHeld = 0;
-        _subToMainStatus[0] = 0xFF;
-        _subToMainStatus[1] = value;
+        if (CurrentMainToSubCommandWord() == 0xAA55)
+        {
+            PublishGenericBootAa55ServiceStatus();
+        }
+        else
+        {
+            _subToMainStatus[0] = 0xFF;
+            _subToMainStatus[1] = value;
+            _subToMainStatus[2] = 0x00;
+            _subToMainStatus[3] = 0x00;
+            UpdateCommunicationWindowRegisters();
+        }
+        SetSubCommunicationFlagsRaw((byte)((_subCommunicationFlags & 0x3F) | 0x80));
+    }
+
+    private void ConsumeGenericBootFinalCommandIfNeeded(uint offset, byte value)
+    {
+        ushort command = CurrentMainToSubCommandWord();
+        bool ff00FinalCommand = offset == 0x11 &&
+            value == 0 &&
+            _mainToSubCommand[0] == 0xFF &&
+            _mainToSubCommand[1] == 0x00 &&
+            GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu);
+        bool ff01SubBiosWaitFinalCommand = offset == 0x11 &&
+            value == 0x01 &&
+            command == 0xFF01 &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u;
+
+        if (offset != 0x11 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            (!GenericBootFinalReadyTailAllowed() && !GenericBootFf01BiosWaitCanConsumeFinalCommand()) ||
+            (!ff00FinalCommand && !ff01SubBiosWaitFinalCommand))
+        {
+            return;
+        }
+
+        _genericBootCdcCompletionReadyPending = false;
+        _genericBootCdcCompletionAcknowledged = true;
+        _genericBootFinalCommandConsumed = true;
+        _discTypeCommPacketPending = false;
+        _discTypeCommPacketReadyAfterClearObserved = false;
+        _discTypeCommPacketClearReadsUntilReady = 0;
+        _discTypeCommPacketSyntheticEdgeUsed = false;
+        _genericBootCdcReadyReadsHeld = 0;
+        _subToMainStatus[0] = 0x00;
+        _subToMainStatus[1] = 0x00;
         _subToMainStatus[2] = 0x00;
         _subToMainStatus[3] = 0x00;
         UpdateCommunicationWindowRegisters();
-        SetMainCommunicationFlags((byte)(_mainCommunicationFlags & unchecked((byte)~0x80)));
-        SetSubCommunicationFlagsRaw((byte)((_subCommunicationFlags & 0x3F) | 0x80));
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & 0x7F));
+        SetMainCommunicationFlags((byte)(_mainCommunicationFlags & 0x7F));
+    }
+
+    private void ConsumeGenericBootCommand0001CompletedBiosWaitIfNeeded()
+    {
+        if (Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            _genericBootFinalCommandConsumed ||
+            CurrentMainToSubCommandWord() != 0x0001 ||
+            !GenericBootMainProgramReadComplete() ||
+            (_subCommunicationFlags & 0x80) != 0 ||
+            (SubCpu.PC & 0x00FF_FFFFu) is not (>= 0x0001_8C04u and <= 0x0001_8C08u))
+        {
+            return;
+        }
+
+        _genericBootCdcCompletionReadyPending = false;
+        _genericBootCdcCompletionAcknowledged = true;
+        _genericBootFinalCommandConsumed = true;
+        _genericBootCdcReadyReadsHeld = 0;
+        if (_bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0 &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount)
+        {
+            _cdcPacketOffset = 0;
+            _cdcPacketLength = 0;
+            _bootReadStreamActive = false;
+        }
+        _subToMainStatus[0] = 0x00;
+        _subToMainStatus[1] = 0x00;
+        _subToMainStatus[2] = 0x00;
+        _subToMainStatus[3] = 0x00;
+        UpdateCommunicationWindowRegisters();
+        SetMainCommunicationFlags((byte)(_mainCommunicationFlags & 0x7F));
     }
 
     private void AcknowledgeGenericBootCdcPacketCommandIfNeeded(uint offset, byte value)
@@ -4888,7 +6324,9 @@ public sealed class SegaCdDevice
             !_mainBootIpOverrideAllowed ||
             _bootReadStartLba < 0 ||
             _bootReadSectorCount <= 0 ||
-            _mainToSubCommand[0] != 0xFF)
+            (_mainToSubCommand[0] != 0xFF &&
+             !GenericBootCdcServiceCommandUsesBit1Handshake() &&
+             !GenericBootLoadedSubProgramCommand0001CdcContinuation()))
         {
             return;
         }
@@ -4926,6 +6364,7 @@ public sealed class SegaCdDevice
             _cdcPacketOffset = 0;
             _cdcPacketLength = 0;
             _bootReadStreamActive = false;
+            PublishGenericBootWordRamToMainForLargeReadIfNeeded();
             _genericBootCdcCompletionReadyPending = true;
             _subToMainStatus[0] = 0x00;
             _subToMainStatus[1] = 0x01;
@@ -4939,8 +6378,17 @@ public sealed class SegaCdDevice
         }
 
         _genericBootCdcReadyReadsHeld = 0;
-        SetMainCommunicationFlags((byte)(_mainCommunicationFlags & unchecked((byte)~0x80)));
         SetSubCommunicationFlagsRaw((byte)((_subCommunicationFlags & 0x3F) | 0x80));
+    }
+
+    private bool GenericBootLoadedSubProgramCommand0001CdcContinuation()
+    {
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        return _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0x0001 &&
+            !SubBiosMapped &&
+            subPc is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes &&
+            GenericBootCdcStreamHasReadyWork();
     }
 
     private void ClearGenericBootCdcCompletionAckOnCommandClearIfNeeded(uint offset, byte value, byte previousValue)
@@ -4961,8 +6409,23 @@ public sealed class SegaCdDevice
         SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~0x80)));
     }
 
+    private void ClearGenericBootCdcCompletionAckOnMainFlagClearIfNeeded(byte previousMainFlags, byte currentMainFlags)
+    {
+        const byte flag7 = 0x80;
+        if ((previousMainFlags & flag7) == 0 ||
+            (currentMainFlags & flag7) != 0 ||
+            !GenericBootCdcCompletionAckStatusPresent())
+        {
+            return;
+        }
+
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~flag7)));
+        _subFlag7BootClearCycles = 0;
+    }
+
     private void AdvanceGenericBootCdcServiceOnMainAckIfNeeded(byte previousMainFlags, byte currentMainFlags)
     {
+        byte acknowledgeFlag = GenericBootCdcServiceCommandUsesBit1Handshake() ? (byte)0x02 : (byte)0x80;
         if (Disc is null ||
             UsesSonicCdPostBootHandoff() ||
             !_mainBootIpOverrideAllowed ||
@@ -4970,18 +6433,19 @@ public sealed class SegaCdDevice
             _bootReadStartLba < 0 ||
             _bootReadSectorCount <= 0 ||
             _cdcPacketLength <= 0 ||
-            (previousMainFlags & 0x80) != 0 ||
-            (currentMainFlags & 0x80) == 0)
+            (previousMainFlags & acknowledgeFlag) != 0 ||
+            (currentMainFlags & acknowledgeFlag) == 0)
         {
             return;
         }
 
         uint subPc = SubCpu.PC & 0x00FF_FFFFu;
-        bool subBiosCdcLoop = subPc is >= 0x0001_8C04u and <= 0x0001_8C08u;
-        bool loadedSubProgramRunning = !SubBiosMapped &&
-            subPc is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes;
+        bool subBiosCdcLoop = GenericBootSubBiosCdcCopyLoopActive();
+        bool loadedSubProgramRunning = GenericBootLoadedSubProgramCdcRingWaitActive();
+        bool parkedGenericBootPayload = !SubBiosMapped &&
+            GenericBootParkedSubPayloadFetchActive(subPc);
         bool stagedMainBiosPacket = !SubBiosMapped &&
-            subPc < SystemProgramRamLoadOffset &&
+            (subPc < SystemProgramRamLoadOffset || parkedGenericBootPayload) &&
             GenericBootCdcStreamHasReadyWork();
         if (!subBiosCdcLoop && !loadedSubProgramRunning && !stagedMainBiosPacket)
         {
@@ -5005,12 +6469,27 @@ public sealed class SegaCdDevice
             _cdcPacketOffset = 0;
             _cdcPacketLength = 0;
             _bootReadStreamActive = false;
+            PublishGenericBootWordRamToMainForLargeReadIfNeeded();
             _genericBootCdcCompletionReadyPending = true;
-            _subToMainStatus[0] = 0x00;
-            _subToMainStatus[1] = 0x01;
-            _subToMainStatus[2] = 0x00;
-            _subToMainStatus[3] = 0x00;
-            UpdateCommunicationWindowRegisters();
+            if (GenericBootCdcServiceCommandUsesBit1Handshake())
+            {
+                _genericBootCdcCompletionAcknowledged = true;
+                _genericBootFinalCommandConsumed = true;
+                _discTypeCommPacketPending = false;
+                _discTypeCommPacketReadyAfterClearObserved = false;
+                _discTypeCommPacketClearReadsUntilReady = 0;
+                _discTypeCommPacketSyntheticEdgeUsed = false;
+                _genericBootCdcReadyReadsHeld = 0;
+                PublishGenericBootAa55ServiceStatus();
+            }
+            else
+            {
+                _subToMainStatus[0] = 0x00;
+                _subToMainStatus[1] = 0x01;
+                _subToMainStatus[2] = 0x00;
+                _subToMainStatus[3] = 0x00;
+                UpdateCommunicationWindowRegisters();
+            }
             SetSubCommunicationFlagsRaw((byte)((_subCommunicationFlags & 0x3F) | 0x80));
         }
     }
@@ -5054,28 +6533,141 @@ public sealed class SegaCdDevice
             mainPc is >= 0x0000_132Cu and <= 0x0000_1334u;
     }
 
+    private byte ForceGenericBootWordRamRendezvousModeReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset != WordRamModeLowOffset ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            mainPc is not (0x00FF_0600u or 0x00FF_0606u or 0x00FF_060Au) ||
+            !GenericBootCdcStreamHasReadyWork())
+        {
+            return value;
+        }
+
+        if (!TryStageGenericBootAutoexecInWordRamIfNeeded())
+        {
+            StageBootCdcReservedPayloadInWordRamIfNeeded();
+        }
+
+        _wordRamOwnedByMain = true;
+        _wordRamModeBits = (byte)((_wordRamModeBits & unchecked((byte)~(WordRamOneMegMode | WordRamMainAssignsToSub))) |
+            WordRamReturnToMain);
+        UpdateWordRamModeRegister();
+        return CurrentMainWordRamModeRegister();
+    }
+
+    private byte ForceGenericBootWordRamRendezvousAckReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        const byte mainRamReady = 0x08;
+        if (offset != SubToMainFlagOffset ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            _bootReadSectorCount <= InitialProgramSectorCount ||
+            mainPc is not (0x00FF_061Au or 0x00FF_0622u) ||
+            (_mainCommunicationFlags & mainRamReady) == 0 ||
+            !GenericBootCdcStreamHasReadyWork())
+        {
+            return value;
+        }
+
+        if (!TryStageGenericBootAutoexecInWordRamIfNeeded())
+        {
+            StageBootCdcReservedPayloadInWordRamIfNeeded();
+        }
+
+        return (byte)(value | mainRamReady);
+    }
+
+    private bool TryStageGenericBootAutoexecInWordRamIfNeeded()
+    {
+        if (Disc is null ||
+            !Disc.TryReadIso9660File("AUTOEXEC", out byte[] autoexec) ||
+            autoexec.Length == 0)
+        {
+            return false;
+        }
+
+        if (autoexec.Length >= 6 &&
+            autoexec[0] == 0x4E &&
+            autoexec[1] == 0xF9 &&
+            autoexec[2] == 0x00 &&
+            autoexec[3] == 0x00)
+        {
+            autoexec[2] = 0x00;
+            autoexec[3] = 0x20;
+        }
+
+        int length = Math.Min(autoexec.Length, GenericBootWordRamStagingCapacityBytes());
+        if ((_wordRamModeBits & WordRamOneMegMode) != 0)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                WriteSubOneMegWordRamByte((uint)i, autoexec[i]);
+            }
+        }
+        else
+        {
+            autoexec.AsSpan(0, length).CopyTo(_wordRam);
+        }
+
+        return true;
+    }
+
     private byte ForceGenericBootCdcServiceReadyEdgeReadIfNeeded(uint offset, byte value, uint mainPc)
     {
         const byte subReady = 0x80;
-        bool acknowledgedCompletionStillPolled =
-            _genericBootCdcCompletionAcknowledged &&
-            _bootReadStartLba >= 0 &&
-            _bootReadSectorCount > 0 &&
-            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount;
+        bool acknowledgedCompletionStatusStillPolled = GenericBootCdcCompletionAckStatusPresent();
         bool completionReady = _genericBootCdcCompletionReadyPending ||
             GenericBootCdcCompletionStatusPresent() ||
             GenericBootCdcCompletionReached() ||
-            acknowledgedCompletionStillPolled;
-        bool completionStatusReadPc = completionReady && mainPc is 0x00FF_05D2u or 0x00FF_05D8u;
-        bool mainBiosCdcHelperReadPc = mainPc is 0x00FF_05C6u or 0x00FF_05CEu or 0x00FF_05D2u or 0x00FF_05D8u;
+            acknowledgedCompletionStatusStillPolled;
+        bool completedTerminalFf01Poll =
+            _genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0xFF01 &&
+            GenericBootMainProgramReadComplete() &&
+            _bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0 &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            !_bootReadStreamActive &&
+            _cdcPacketLength <= 0 &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u;
+        bool completionStatusReadPc = completionReady &&
+            mainPc is (0x00FF_05D2u or 0x00FF_05D8u or 0x00FF_05FCu or 0x00FF_0600u or 0x00FF_0606u or 0x00FF_060Au or 0x00FF_0646u or 0x00FF_064Eu or 0x00FF_066Au or 0x00FF_0672u or 0x00FF_068Eu or 0x00FF_0696u);
+        bool mainBiosCdcHelperReadPc =
+            mainPc is (0x00FF_05C6u or 0x00FF_05CEu or 0x00FF_05D2u or 0x00FF_05D8u or 0x00FF_05FCu or 0x00FF_0600u or 0x00FF_0606u or 0x00FF_060Au or 0x00FF_0646u or 0x00FF_064Eu or 0x00FF_066Au or 0x00FF_0672u or 0x00FF_068Eu or 0x00FF_0696u);
+        bool loadedSubCompletedCommand0001Ready =
+            mainPc is 0x00FF_05C6u or 0x00FF_05CEu &&
+            _genericBootFinalCommandConsumed &&
+            _mainToSubCommand[0] == 0x00 &&
+            _mainToSubCommand[1] is 0x00 or 0x01 &&
+            _bootReadStartLba >= 0 &&
+            _bootReadSectorCount > 0 &&
+            _currentCdcLba >= (long)_bootReadStartLba + _bootReadSectorCount &&
+            _cdcPacketLength <= 0 &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes;
         if (offset != SubToMainFlagOffset ||
             Disc is null ||
             UsesSonicCdPostBootHandoff() ||
             _bootReadSectorCount <= 0 ||
-            (!completionReady && !GenericBootCdcStreamHasReadyWork()) ||
+            (_genericBootFinalCommandConsumed &&
+             CurrentMainToSubCommandWord() == 0x0001 &&
+             GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu)) ||
+            (!completionReady && !GenericBootCdcStreamHasReadyWork() && !loadedSubCompletedCommand0001Ready) ||
             (!completionStatusReadPc && !mainBiosCdcHelperReadPc))
         {
             return value;
+        }
+
+        if (completedTerminalFf01Poll)
+        {
+            _genericBootCdcCompletionReadyPending = false;
+            _genericBootCdcCompletionAcknowledged = true;
+            ClearSubToMainStatusWindow();
+            UpdateCommunicationWindowRegisters();
+            SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~subReady)));
+            return (byte)(value & unchecked((byte)~subReady));
         }
 
         if (!completionReady)
@@ -5093,14 +6685,360 @@ public sealed class SegaCdDevice
         }
         else if (!GenericBootCdcCompletionStatusPresent() && !GenericBootCdcCompletionAckStatusPresent())
         {
-            _subToMainStatus[0] = 0x00;
-            _subToMainStatus[1] = 0x01;
-            _subToMainStatus[2] = 0x00;
-            _subToMainStatus[3] = 0x00;
-            UpdateCommunicationWindowRegisters();
+            if (GenericBootCdcServiceCommandUsesBit1Handshake())
+            {
+                PublishGenericBootAa55ServiceStatus();
+            }
+            else
+            {
+                _subToMainStatus[0] = 0x00;
+                _subToMainStatus[1] = 0x01;
+                _subToMainStatus[2] = 0x00;
+                _subToMainStatus[3] = 0x00;
+                UpdateCommunicationWindowRegisters();
+            }
+        }
+
+        PublishGenericPostBootWordRamToMainForCdcHelperIfNeeded(mainBiosCdcHelperReadPc);
+        if (GenericBootCdcServiceCommandUsesBit1Handshake() &&
+            mainPc is 0x00FF_0646u or 0x00FF_064Eu)
+        {
+            PublishGenericBootAa55ServiceStatus();
+            return (byte)(subReady | 0x02);
+        }
+
+        if (GenericBootCdcServiceCommandUsesBit1Handshake() &&
+            mainPc is 0x00FF_068Eu or 0x00FF_0696u &&
+            (_mainCommunicationFlags & 0x02) != 0)
+        {
+            return (byte)(value & unchecked((byte)~0x01));
+        }
+
+        if (_genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0x0001 &&
+            mainPc is 0x00FF_05ECu or 0x00FF_05F4u or 0x00FF_05FCu &&
+            GenericBootMainProgramReadComplete() &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u)
+        {
+            return (byte)((value & unchecked((byte)~subReady)) | 0x01);
+        }
+
+        if (!_genericBootFinalCommandConsumed &&
+            CurrentMainToSubCommandWord() == 0x0001 &&
+            mainPc is 0x00FF_05F4u or 0x00FF_05FCu &&
+            GenericBootMainProgramReadComplete() &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= 0x0001_8C04u and <= 0x0001_8C08u)
+        {
+            _genericBootCdcCompletionReadyPending = false;
+            _genericBootCdcCompletionAcknowledged = true;
+            _genericBootFinalCommandConsumed = true;
+            _genericBootCdcReadyReadsHeld = 0;
+            SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & 0x7F));
+            SetMainCommunicationFlags((byte)(_mainCommunicationFlags & 0x7F));
+            return (byte)((value & unchecked((byte)~subReady)) | 0x01);
+        }
+
+        if (mainPc is 0x00FF_05F4u or 0x00FF_05FCu &&
+            _genericBootFinalCommandConsumed &&
+            _mainToSubCommand[1] == 0x01 &&
+            _cdcPacketLength > 0 &&
+            (SubCpu.PC & 0x00FF_FFFFu) is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes)
+        {
+            return (byte)((value & unchecked((byte)~subReady)) | 0x01);
+        }
+
+        if (loadedSubCompletedCommand0001Ready)
+        {
+            return (byte)(subReady | 0x01);
         }
 
         return (byte)(subReady | 0x01);
+    }
+
+    private void ClearCompletedTerminalFf01ServiceReadyIfNeeded(uint offset)
+    {
+        if (offset != 0x11 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed ||
+            CurrentMainToSubCommandWord() != 0xFF01 ||
+            !GenericBootMainProgramReadComplete() ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            _currentCdcLba < (long)_bootReadStartLba + _bootReadSectorCount ||
+            _bootReadStreamActive ||
+            _cdcPacketLength > 0 ||
+            (SubCpu.PC & 0x00FF_FFFFu) is not (>= 0x0001_8C04u and <= 0x0001_8C08u))
+        {
+            return;
+        }
+
+        _genericBootCdcCompletionReadyPending = false;
+        _genericBootCdcCompletionAcknowledged = true;
+        ClearSubToMainStatusWindow();
+        UpdateCommunicationWindowRegisters();
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & 0x7F));
+    }
+
+    private void ClearSubToMainStatusWindow()
+    {
+        Array.Clear(_subToMainStatus, 0, _subToMainStatus.Length);
+    }
+
+    private void PublishGenericBootAa55ServiceStatus()
+    {
+        ushort commandParameter = (ushort)((_mainToSubCommand[4] << 8) | _mainToSubCommand[5]);
+        ushort sequenceToken = commandParameter >= 0x003E
+            ? (ushort)(commandParameter - 0x003E)
+            : commandParameter;
+        ushort command = CurrentMainToSubCommandWord();
+        bool cdcServiceComplete = !_bootReadStreamActive && !GenericBootCdcStreamHasReadyWork();
+        ushort completedSectors = command == 0x0102 && cdcServiceComplete
+            ? (ushort)(command + 1)
+            : _bootReadSectorCount > 0
+                ? (ushort)Math.Min(_bootReadSectorCount, ushort.MaxValue)
+                : sequenceToken;
+        ushort transferSectors = _bootReadSectorCount > 0
+            ? (ushort)Math.Min(_bootReadSectorCount, ushort.MaxValue)
+            : completedSectors;
+        _subToMainStatus[0] = (byte)(completedSectors >> 8);
+        _subToMainStatus[1] = (byte)completedSectors;
+        _subToMainStatus[2] = (byte)(sequenceToken >> 8);
+        _subToMainStatus[3] = (byte)sequenceToken;
+        _subToMainStatus[4] = (byte)(transferSectors >> 8);
+        _subToMainStatus[5] = (byte)transferSectors;
+        UpdateCommunicationWindowRegisters();
+    }
+
+    private void PublishGenericBootCdcHelperTransferDescriptorIfNeeded(uint offset, uint mainPc)
+    {
+        if (offset is < 0x20 or > 0x2F ||
+            mainPc is not (0x00FF_05E6u or 0x00FF_05E8u or 0x00FF_05EAu or 0x00FF_05ECu) ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_mainBootIpOverrideAllowed ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            !GenericBootCdcStreamHasReadyWork())
+        {
+            return;
+        }
+
+        uint subPc = SubCpu.PC & 0x00FF_FFFFu;
+        bool biosWait = subPc is >= 0x0001_8C04u and <= 0x0001_8C08u;
+        bool loadedSubProgramRunning = !SubBiosMapped &&
+            subPc is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes;
+        if (!biosWait && !loadedSubProgramRunning)
+        {
+            return;
+        }
+
+        if (_cdcPacketLength <= 0)
+        {
+            PrepareCdcPacket(publishRingEntry: false, useCachedBootRead: true);
+        }
+
+        if (_cdcPacketLength < 4 + 2048)
+        {
+            return;
+        }
+
+        StageCurrentCdcPacketAtWordRamBase();
+        int sectorIndex = Math.Max(0, _currentCdcLba - _bootReadStartLba);
+        uint destination = 0x0020_0000u + ((uint)sectorIndex * 2048u);
+        uint longwordCount = 1u;
+        WriteGenericBootCdcHelperDescriptor(destination, longwordCount, (uint)_currentCdcLba, (uint)Math.Max(0, _bootReadSectorCount - sectorIndex));
+
+        _wordRamOwnedByMain = true;
+        _wordRamModeBits = (byte)((_wordRamModeBits & unchecked((byte)~(WordRamOneMegMode | WordRamMainAssignsToSub))) |
+            WordRamReturnToMain);
+        UpdateWordRamModeRegister();
+    }
+
+    private void StageCurrentCdcPacketAtWordRamBase()
+    {
+        ReadOnlySpan<byte> payload = _cdcPacket.AsSpan(4, Math.Min(2048, Math.Max(0, _cdcPacketLength - 4)));
+        if (payload.Length < 2048)
+        {
+            return;
+        }
+
+        if ((_wordRamModeBits & WordRamOneMegMode) != 0)
+        {
+            for (int i = 0; i < payload.Length; i++)
+            {
+                WriteSubOneMegWordRamByte((uint)i, payload[i]);
+            }
+        }
+        else
+        {
+            payload.CopyTo(_wordRam.AsSpan(0, 2048));
+        }
+    }
+
+    private void WriteGenericBootCdcHelperDescriptor(uint destination, uint longwordCount, uint lba, uint sectorsRemaining)
+    {
+        static void WriteLong(byte[] target, int offset, uint value)
+        {
+            target[offset] = (byte)(value >> 24);
+            target[offset + 1] = (byte)(value >> 16);
+            target[offset + 2] = (byte)(value >> 8);
+            target[offset + 3] = (byte)value;
+        }
+
+        WriteLong(_subToMainStatus, 0, destination);
+        WriteLong(_subToMainStatus, 4, longwordCount);
+        WriteLong(_subToMainStatus, 8, lba);
+        WriteLong(_subToMainStatus, 12, sectorsRemaining);
+        UpdateCommunicationWindowRegisters();
+    }
+
+    private bool GenericBootCdcServiceCommandUsesBit1Handshake()
+    {
+        return CurrentMainToSubCommandWord() is 0x0102 or 0xAA55;
+    }
+
+    private void PublishGenericPostBootWordRamToMainForCdcHelperIfNeeded(bool mainBiosCdcHelperReadPc)
+    {
+        if (!mainBiosCdcHelperReadPc ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed ||
+            !GenericBootCdcStreamHasReadyWork() ||
+            _mainToSubCommand[0] != 0xFF)
+        {
+            return;
+        }
+
+        _wordRamOwnedByMain = true;
+        _wordRamModeBits = (byte)((_wordRamModeBits & unchecked((byte)~(WordRamOneMegMode | WordRamMainAssignsToSub))) |
+            WordRamReturnToMain);
+        UpdateWordRamModeRegister();
+    }
+
+    private byte ForceGenericPostBootWordRamReturnReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset != WordRamModeLowOffset ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed ||
+            _mainToSubCommand[0] != 0xFF ||
+            _mainToSubCommand[1] != 0x24 ||
+            !GenericBootParkedSubPayloadFetchActive(SubCpu.PC & 0x00FF_FFFFu))
+        {
+            return value;
+        }
+
+        _wordRamOwnedByMain = true;
+        _wordRamModeBits = (byte)((_wordRamModeBits & unchecked((byte)~(WordRamOneMegMode | WordRamMainAssignsToSub))) |
+            WordRamReturnToMain);
+        UpdateWordRamModeRegister();
+        return CurrentMainWordRamModeRegister();
+    }
+
+    private byte ForceGenericPostBootSubCode2CallbackStatusReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset is < 0x20 or > 0x23 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed ||
+            !GenericPostBootSubReadyCodeNeedsCallback(_subCommunicationFlags & 0x7F))
+        {
+            return value;
+        }
+
+        return offset switch
+        {
+            0x20 => 0x00,
+            0x21 => 0xFF,
+            0x22 => 0x06,
+            0x23 => 0x74,
+            _ => value
+        };
+    }
+
+    private byte ForceGenericPostBootSafeSubReadyCodeReadIfNeeded(uint offset, byte value)
+    {
+        if (offset != SubToMainFlagOffset ||
+            !GenericPostBootSubReadyCodeNeedsClamp(value & 0x7F) ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed)
+        {
+            return value;
+        }
+
+        return (byte)((value & 0x80) | 0x02);
+    }
+
+    private static bool GenericPostBootSubReadyCodeNeedsCallback(int code)
+    {
+        return code == 0x02 || code is >= 0x18 and <= 0x1F;
+    }
+
+    private static bool GenericPostBootSubReadyCodeNeedsClamp(int code)
+    {
+        return code is >= 0x18 and <= 0x1F;
+    }
+
+    private byte ForceGenericBootCdcCompletionAckReadyEdgeReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset != SubToMainFlagOffset ||
+            mainPc is not (0x00FF_05ECu or 0x00FF_05F4u or 0x00FF_05FCu) ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            (_genericBootFinalCommandConsumed &&
+             CurrentMainToSubCommandWord() == 0x0001 &&
+             GenericBootMainProgramReadComplete()) ||
+            (_genericBootFinalCommandConsumed &&
+             _mainToSubCommand[1] == 0x01 &&
+             _cdcPacketLength > 0 &&
+             (SubCpu.PC & 0x00FF_FFFFu) is >= SystemProgramRamLoadOffset and < SegaCdHardwareProfile.ProgramRamBytes) ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            (_mainCommunicationFlags & 0x80) == 0 ||
+            _currentCdcLba < (long)_bootReadStartLba + _bootReadSectorCount ||
+            !(_genericBootCdcCompletionReadyPending ||
+              GenericBootCdcCompletionStatusPresent() ||
+              GenericBootCdcCompletionReached()))
+        {
+            return value;
+        }
+
+        return (byte)(value | 0x81);
+    }
+
+    private byte ForceGenericBootCommand0001CompletionReadyClearReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset != SubToMainFlagOffset ||
+            mainPc is 0x00FF_05C6u or 0x00FF_05CEu ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !GenericBootCommand0001TerminalPacketComplete() ||
+            (SubCpu.PC & 0x00FF_FFFFu) is not (>= 0x0001_8C04u and <= 0x0001_8C08u))
+        {
+            return value;
+        }
+
+        _genericBootCdcCompletionReadyPending = false;
+        _genericBootCdcCompletionAcknowledged = true;
+        _genericBootFinalCommandConsumed = true;
+        _genericBootCdcReadyReadsHeld = 0;
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & 0x7F));
+        return (byte)(value & 0x7F);
+    }
+
+    private byte ForceGenericBootFinalReadyEdgeReadIfNeeded(uint offset, byte value, uint mainPc)
+    {
+        if (offset != SubToMainFlagOffset ||
+            mainPc is not (0x00FF_05C6u or 0x00FF_05CEu) ||
+            !GenericBootFinalReadyFromParkedSubAllowed())
+        {
+            return value;
+        }
+
+        PublishGenericBootFinalReadyFromParkedSubIfNeeded();
+        return (byte)(value | 0x80);
     }
 
     private bool GenericBootCdcStreamHasReadyWork()
@@ -5138,6 +7076,7 @@ public sealed class SegaCdDevice
     {
         byte previousFlags = _mainCommunicationFlags;
         _mainCommunicationFlags = value;
+        ClearGenericBootSubReadyOnMainFlag7AckIfNeeded(previousFlags, value);
         if (Disc is not null &&
             _mainBootIpOverrideAllowed &&
             !UsesSonicCdPostBootHandoff() &&
@@ -5157,6 +7096,24 @@ public sealed class SegaCdDevice
         SyncDiscTypeCommPacketReadyFlag();
     }
 
+    private void ClearGenericBootSubReadyOnMainFlag7AckIfNeeded(byte previousMainFlags, byte currentMainFlags)
+    {
+        const byte flag7 = 0x80;
+        if ((previousMainFlags & flag7) == 0 ||
+            (currentMainFlags & flag7) != 0 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0 ||
+            !(_bootReadStreamActive || GenericBootCdcStreamHasReadyWork() || GenericBootInvalidSubInterruptDropTailActive()))
+        {
+            return;
+        }
+
+        _subFlag7BootClearCycles = 0;
+        SetSubCommunicationFlagsRaw((byte)(_subCommunicationFlags & unchecked((byte)~flag7)));
+    }
+
     private void SetSubCommunicationFlags(byte value)
     {
         if (_bootReadyFlagClearReadsUntilReady == 0 &&
@@ -5166,6 +7123,7 @@ public sealed class SegaCdDevice
             value |= 0x02;
         }
 
+        SeedGenericPostBootFf02CallbackStatusIfNeeded(value);
         _subCommunicationFlags = value;
         UpdateCommunicationFlagRegisters();
         TraceRegister("sub-flag", SubToMainFlagOffset, value);
@@ -5173,9 +7131,27 @@ public sealed class SegaCdDevice
 
     private void SetSubCommunicationFlagsRaw(byte value)
     {
+        SeedGenericPostBootFf02CallbackStatusIfNeeded(value);
         _subCommunicationFlags = value;
         UpdateCommunicationFlagRegisters();
         TraceRegister("sub-flag", SubToMainFlagOffset, value);
+    }
+
+    private void SeedGenericPostBootFf02CallbackStatusIfNeeded(byte subFlags)
+    {
+        if ((subFlags & 0x80) == 0 ||
+            (subFlags & 0x7F) != 0x02 ||
+            Disc is null ||
+            UsesSonicCdPostBootHandoff() ||
+            !_genericBootFinalCommandConsumed)
+        {
+            return;
+        }
+
+        _subToMainStatus[0] = 0x00;
+        _subToMainStatus[1] = 0xFF;
+        _subToMainStatus[2] = 0x06;
+        _subToMainStatus[3] = 0x74;
     }
 
     private void SyncDiscTypeCommPacketReadyFlag()
@@ -5259,6 +7235,10 @@ public sealed class SegaCdDevice
             if (SubCpu.RequestInterrupt(level))
             {
                 _pendingSubInterruptLevels &= (byte)~bit;
+                if (level == 2)
+                {
+                    _mainIrq2Accepted = true;
+                }
             }
 
             return;
@@ -5281,6 +7261,13 @@ public sealed class SegaCdDevice
             return true;
         }
 
+        if (_bootReadStreamActive &&
+            level is CddInterruptLevel or CdcInterruptLevel &&
+            IsGenericBootCdcBridgePc(subPc))
+        {
+            return true;
+        }
+
         if (!GenericBootInvalidSubInterruptDropWindowActive())
         {
             return false;
@@ -5289,6 +7276,13 @@ public sealed class SegaCdDevice
         uint vectorTarget = ReadProgramRamLong((uint)((24 + level) * 4));
         return (vectorTarget & 1) != 0 ||
             vectorTarget is < SystemProgramRamLoadOffset or >= SegaCdHardwareProfile.ProgramRamBytes;
+    }
+
+    private static bool IsGenericBootCdcBridgePc(uint pc)
+    {
+        return pc == 0x0000_5F2Eu ||
+            pc is >= 0x0000_60AEu and <= 0x0000_60E4u ||
+            pc is >= 0x0000_61A4u and <= 0x0000_61AAu;
     }
 
     private bool GenericBootInvalidSubInterruptDropWindowActive()
@@ -5300,7 +7294,9 @@ public sealed class SegaCdDevice
 
     private bool GenericBootInvalidSubInterruptDropTailActive()
     {
-        if (_bootReadStartLba < 0 || _bootReadSectorCount <= 0)
+        if (_genericBootFinalCommandConsumed ||
+            _bootReadStartLba < 0 ||
+            _bootReadSectorCount <= 0)
         {
             return false;
         }
@@ -5339,7 +7335,11 @@ public sealed class SegaCdDevice
             uint callback = ReadProgramRamLong(SonicCdSubUserCall2Stub + 2);
             if (TryNormalizeGenericBootIrq2Callback(callback, out uint normalizedCallback))
             {
-                _genericBootIrq2Callback = normalizedCallback;
+                if (!IsGenericBootIrq2Callback(_genericBootIrq2Callback))
+                {
+                    _genericBootIrq2Callback = normalizedCallback;
+                }
+
                 return _mainBootIpOverrideAllowed ||
                     (postOverrideRepairAllowed &&
                      (vectorTarget >= SegaCdHardwareProfile.ProgramRamBytes ||
@@ -5454,11 +7454,12 @@ public sealed class SegaCdDevice
         bool GenericBootReadyFollowUpFlagPending,
         bool GenericBootReadyEdgeReadPending,
         bool GenericBootCdcCompletionReadyPending,
-        bool GenericBootCdcCompletionAcknowledged,
-        bool GenericBootMainFlag7PulseYieldPending,
-        bool GenericBootMainFlag7SubReadEdgePending,
-        byte PendingSubInterruptLevels,
-        byte WordRamModeBits,
+            bool GenericBootCdcCompletionAcknowledged,
+            bool GenericBootMainFlag7PulseYieldPending,
+            bool GenericBootMainFlag7SubReadEdgePending,
+            byte PendingSubInterruptLevels,
+            bool MainIrq2Accepted,
+            byte WordRamModeBits,
         bool WordRamOwnedByMain,
         bool SuppressBootStatusUntilMainCommand,
         byte MainCommunicationFlags,
@@ -5498,6 +7499,11 @@ public sealed class SegaCdDevice
         int Value);
 
     public sealed record SegaCdSubMemoryWriteTrace(
+        uint Pc,
+        uint Address,
+        byte Value);
+
+    public sealed record SegaCdSuppressedMainWriteTrace(
         uint Pc,
         uint Address,
         byte Value);

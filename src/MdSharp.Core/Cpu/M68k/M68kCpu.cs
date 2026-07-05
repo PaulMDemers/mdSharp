@@ -613,7 +613,10 @@ public sealed class M68kCpu
         Func<uint, bool> canFastForwardAddress,
         out int cycles,
         out int instructionCount,
-        bool trustCurrentInstructionPattern = false)
+        bool trustCurrentInstructionPattern = false,
+        ushort trustedMoveWord = 0x24D9,
+        ushort trustedDbccWord = 0x51CF,
+        short trustedDisplacement = -4)
     {
         const int TakenIterationCycles = 18;
         const int FallthroughIterationCycles = 22;
@@ -624,19 +627,19 @@ public sealed class M68kCpu
             return false;
         }
 
-        ushort move = trustCurrentInstructionPattern ? (ushort)0x24D9 : _bus.ReadWord(PC);
+        ushort move = trustCurrentInstructionPattern ? trustedMoveWord : _bus.ReadWord(PC);
         if ((move & 0xF1F8) != 0x20D8)
         {
             return false;
         }
 
-        ushort dbcc = trustCurrentInstructionPattern ? (ushort)0x51CF : _bus.ReadWord(PC + 2);
+        ushort dbcc = trustCurrentInstructionPattern ? trustedDbccWord : _bus.ReadWord(PC + 2);
         if ((dbcc & 0xFFF8) != 0x51C8)
         {
             return false;
         }
 
-        short displacement = trustCurrentInstructionPattern ? (short)-4 : (short)_bus.ReadWord(PC + 4);
+        short displacement = trustCurrentInstructionPattern ? trustedDisplacement : (short)_bus.ReadWord(PC + 4);
         if (NormalizePc(unchecked(PC + 4u + (uint)displacement)) != PC)
         {
             return false;

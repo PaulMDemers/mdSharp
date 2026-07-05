@@ -38,9 +38,10 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --cart-info <rom-file>");
     Console.WriteLine("  mdsharp --cart-scan <rom-folder> <output.csv>");
     Console.WriteLine("  mdsharp --segacd-info <cue-iso-or-chd> [us|eu|jp]");
+    Console.WriteLine("  mdsharp --segacd-list-files <cue-iso-or-chd>");
     Console.WriteLine("  mdsharp --segacd-read-file <cue-iso-or-chd> <iso-file-id>");
     Console.WriteLine("  mdsharp --segacd-cdda-dump <cue-iso-or-chd> <output.wav> <track-number> [seconds]");
-    Console.WriteLine("  mdsharp --segacd-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit] [--screenshots]");
+    Console.WriteLine("  mdsharp --segacd-sweep <disc-folder> <output.csv> [auto|us|eu|jp] [frames] [instructions-per-frame] [filter] [limit] [--screenshots]");
     Console.WriteLine("  mdsharp --segacd-audio-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
     Console.WriteLine("  mdsharp --segacd-scripted-audio-sweep <disc-folder> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit]");
     Console.WriteLine("  mdsharp --segacd-render <cue-iso-or-chd> <output.ppm> [us|eu|jp] [frames] [instructions-per-frame]");
@@ -55,8 +56,9 @@ if (args.Length == 0)
     Console.WriteLine("  mdsharp --segacd-maintrace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --segacd-scripted-maintrace <cue-iso-or-chd> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [pc-start] [pc-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --segacd-main-exception-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --segacd-first-main-exception <cue-iso-or-chd> [us|eu|jp] [frames] [instructions-per-frame] [start-frame]");
     Console.WriteLine("  mdsharp --segacd-scripted-main-exception-trace <cue-iso-or-chd> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame]");
-    Console.WriteLine("  mdsharp --segacd-main-memory-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame]");
+    Console.WriteLine("  mdsharp --segacd-main-memory-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame] [offset-start] [offset-end] [readsonly]");
     Console.WriteLine("  mdsharp --segacd-main-write-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [address-start] [address-end] [max-lines]");
     Console.WriteLine("  mdsharp --segacd-scripted-main-write-trace <cue-iso-or-chd> <output.csv> <script> [us|eu|jp] [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
     Console.WriteLine("  mdsharp --segacd-sub-write-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [address-start] [address-end] [max-lines] [start-frame]");
@@ -224,6 +226,18 @@ if (args[0].Equals("--segacd-read-file", StringComparison.OrdinalIgnoreCase))
     return;
 }
 
+if (args[0].Equals("--segacd-list-files", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-list-files <cue-iso-or-chd>");
+        return;
+    }
+
+    PrintSegaCdIsoRootDirectory(args[1]);
+    return;
+}
+
 if (args[0].Equals("--segacd-cdda-dump", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 4)
@@ -242,11 +256,11 @@ if (args[0].Equals("--segacd-sweep", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 3)
     {
-        Console.Error.WriteLine("Usage: mdsharp --segacd-sweep <disc-folder> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [filter] [limit] [--screenshots]");
+        Console.Error.WriteLine("Usage: mdsharp --segacd-sweep <disc-folder> <output.csv> [auto|us|eu|jp] [frames] [instructions-per-frame] [filter] [limit] [--screenshots]");
         return;
     }
 
-    SegaCdRegion region = args.Length > 3 ? ParseSegaCdRegion(args[3]) : SegaCdRegion.Usa;
+    SegaCdRegion? region = args.Length > 3 ? ParseOptionalSegaCdRegion(args[3]) : null;
     int frames = args.Length > 4 && int.TryParse(args[4], out int parsedFrames) ? parsedFrames : 900;
     int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 500_000;
     bool writeScreenshots = args.Any(arg => arg.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));
@@ -514,6 +528,22 @@ if (args[0].Equals("--segacd-main-exception-trace", StringComparison.OrdinalIgno
     return;
 }
 
+if (args[0].Equals("--segacd-first-main-exception", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2)
+    {
+        Console.Error.WriteLine("Usage: mdsharp --segacd-first-main-exception <cue-iso-or-chd> [us|eu|jp] [frames] [instructions-per-frame] [start-frame]");
+        return;
+    }
+
+    SegaCdRegion region = args.Length >= 3 ? ParseSegaCdRegion(args[2]) : SegaCdRegion.Usa;
+    int frames = args.Length >= 4 ? int.Parse(args[3], CultureInfo.InvariantCulture) : 300;
+    int instructionsPerFrame = args.Length >= 5 ? int.Parse(args[4], CultureInfo.InvariantCulture) : 1_000_000;
+    int startFrame = args.Length >= 6 ? int.Parse(args[5], CultureInfo.InvariantCulture) : 0;
+    FindFirstSegaCdMainException(args[1], region, frames, instructionsPerFrame, startFrame);
+    return;
+}
+
 if (args[0].Equals("--segacd-scripted-main-exception-trace", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 4)
@@ -536,7 +566,7 @@ if (args[0].Equals("--segacd-main-memory-trace", StringComparison.OrdinalIgnoreC
 {
     if (args.Length < 3)
     {
-        Console.Error.WriteLine("Usage: mdsharp --segacd-main-memory-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame]");
+        Console.Error.WriteLine("Usage: mdsharp --segacd-main-memory-trace <cue-iso-or-chd> <output.csv> [us|eu|jp] [frames] [instructions-per-frame] [max-lines] [start-frame] [offset-start] [offset-end] [readsonly]");
         return;
     }
 
@@ -545,8 +575,13 @@ if (args[0].Equals("--segacd-main-memory-trace", StringComparison.OrdinalIgnoreC
     int instructionsPerFrame = args.Length > 5 && int.TryParse(args[5], out int parsedInstructions) ? parsedInstructions : 500_000;
     int maxLines = args.Length > 6 && int.TryParse(args[6], out int parsedMaxLines) ? parsedMaxLines : 20_000;
     int startFrame = args.Length > 7 && int.TryParse(args[7], out int parsedStartFrame) ? parsedStartFrame : 0;
-    bool readOnlyNoSnapshots = args.Length > 8 && args[8].Equals("readsonly", StringComparison.OrdinalIgnoreCase);
-    TraceSegaCdMainMemoryAccesses(args[1], args[2], region, frames, instructionsPerFrame, maxLines, startFrame, readOnlyNoSnapshots);
+    uint offsetStart = args.Length > 8 && !args[8].Equals("readsonly", StringComparison.OrdinalIgnoreCase) ? ParseNumber(args[8]) : 0;
+    uint offsetEnd = args.Length > 9 && !args[9].Equals("readsonly", StringComparison.OrdinalIgnoreCase) ? ParseNumber(args[9]) : 0x0FFF;
+    bool readOnlyNoSnapshots =
+        args.Length > 8 && args[8].Equals("readsonly", StringComparison.OrdinalIgnoreCase) ||
+        args.Length > 9 && args[9].Equals("readsonly", StringComparison.OrdinalIgnoreCase) ||
+        args.Length > 10 && args[10].Equals("readsonly", StringComparison.OrdinalIgnoreCase);
+    TraceSegaCdMainMemoryAccesses(args[1], args[2], region, frames, instructionsPerFrame, maxLines, startFrame, offsetStart, offsetEnd, readOnlyNoSnapshots);
     return;
 }
 
@@ -3405,6 +3440,25 @@ void PrintSegaCdIsoFileInfo(string imagePath, string fileIdentifier)
     Console.WriteLine($"First {previewLength:N0}: {Convert.ToHexString(data.AsSpan(0, previewLength))}");
 }
 
+void PrintSegaCdIsoRootDirectory(string imagePath)
+{
+    DiscImage disc = DiscImage.FromFile(imagePath);
+    IReadOnlyList<DiscImage.IsoDirectoryEntry> entries = disc.ListIso9660RootDirectory();
+    Console.WriteLine(Path.GetFullPath(imagePath));
+    Console.WriteLine($"Root ISO entries: {entries.Count:N0}");
+    Console.WriteLine("Type  LBA       Bytes      Identifier");
+    foreach (DiscImage.IsoDirectoryEntry entry in entries.OrderBy(entry => entry.Identifier, StringComparer.OrdinalIgnoreCase))
+    {
+        Console.WriteLine(string.Format(
+            CultureInfo.InvariantCulture,
+            "{0,-5} {1,7:N0} {2,10:N0} {3}",
+            entry.IsDirectory ? "dir" : "file",
+            entry.ExtentLba,
+            entry.DataLength,
+            entry.Identifier));
+    }
+}
+
 void DumpSegaCdCdda(string imagePath, string outputPath, int trackNumber, double seconds)
 {
     DiscImage disc = DiscImage.FromFile(imagePath);
@@ -3454,6 +3508,17 @@ SegaCdRegion ParseSegaCdRegion(string value)
         "j" or "jp" or "jpn" or "japan" => SegaCdRegion.Japan,
         _ => throw new ArgumentException($"Unknown Sega CD BIOS region '{value}'. Use us, eu, or jp."),
     };
+}
+
+SegaCdRegion? ParseOptionalSegaCdRegion(string value)
+{
+    string normalized = value.Trim().ToLowerInvariant();
+    if (normalized is "auto" or "infer" or "detect")
+    {
+        return null;
+    }
+
+    return ParseSegaCdRegion(value);
 }
 
 SegaCdRegion InferSegaCdRegionFromPath(string path)
@@ -3638,6 +3703,7 @@ string FormatSegaCdState(SegaCdDevice device, MegaDrive? machine = null)
     subText += $" mmdStage={device.DebugSonicCdMmdHandoffStageSuccesses}/{device.DebugSonicCdMmdHandoffStageAttempts}:{device.DebugSonicCdMmdHandoffLastFailure}";
     subText += $" spxStage={device.DebugSonicCdSpxStageSuccesses}/{device.DebugSonicCdSpxStageAttempts}:{device.DebugSonicCdSpxStageLastFailure}";
     subText += $" loadFile={device.DebugSonicCdLoadFileHleSuccesses}/{device.DebugSonicCdLoadFileHleAttempts}:{device.DebugSonicCdLoadFileHleLastFailure}";
+    subText += $" {device.DebugGenericBootFinalReadyState}";
     if (device.DebugSonicCdLoadFileHleLastFileName.Length != 0)
     {
         subText += $" lastLoad={device.DebugSonicCdLoadFileHleLastFileName}@${device.DebugSonicCdLoadFileHleLastDestination:X6}->${device.DebugSonicCdLoadFileHleLastReturnAddress:X6}";
@@ -3729,7 +3795,7 @@ void RenderSegaCdBios(SegaCdRegion region, string outputPath, int frames, int in
     Console.WriteLine(FormatSegaCdState(segaCd, machine));
 }
 
-void SweepSegaCdDiscs(string discFolder, string outputCsv, SegaCdRegion region, int frames, int instructionsPerFrame, string filter, int limit, bool writeScreenshots)
+void SweepSegaCdDiscs(string discFolder, string outputCsv, SegaCdRegion? requestedRegion, int frames, int instructionsPerFrame, string filter, int limit, bool writeScreenshots)
 {
     string fullFolder = Path.GetFullPath(discFolder);
     string fullOutput = Path.GetFullPath(outputCsv);
@@ -3749,14 +3815,10 @@ void SweepSegaCdDiscs(string discFolder, string outputCsv, SegaCdRegion region, 
         files = files.Take(limit).ToArray();
     }
 
-    SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
-        throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
-
     using StreamWriter writer = new(fullOutput, false, Encoding.UTF8);
-    writer.WriteLine("disc,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,cramNonzero,sprites,audioPeak,tracks,audioTracks,leadOutLba,subPc,subSr,loadFileHle,loadFileLast,lastLoadDestination,lastLoadReturn,cdcLba,cdcPacket,screenshot,detail");
+    writer.WriteLine("disc,region,status,frames,elapsedMs,fps,pc,exceptions,renderMode,nonBackgroundPixels,maxNonBackgroundPixels,cramNonzero,sprites,audioPeak,tracks,audioTracks,leadOutLba,subPc,subSr,loadFileHle,loadFileLast,lastLoadDestination,lastLoadReturn,cdcLba,cdcPacket,screenshot,detail");
 
-    Console.WriteLine($"Sega CD sweep: {files.Length:N0} disc(s), region={region}, frames={frames:N0}, instructions/frame={instructionsPerFrame:N0}");
-    Console.WriteLine($"BIOS: {bios.FileName} ({bios.Size:N0} bytes, sha1 {bios.Sha1})");
+    Console.WriteLine($"Sega CD sweep: {files.Length:N0} disc(s), region={(requestedRegion?.ToString() ?? "auto")}, frames={frames:N0}, instructions/frame={instructionsPerFrame:N0}");
     if (writeScreenshots)
     {
         Console.WriteLine($"Screenshots: {Path.GetFullPath(screenshotFolder)}");
@@ -3764,9 +3826,12 @@ void SweepSegaCdDiscs(string discFolder, string outputCsv, SegaCdRegion region, 
 
     for (int i = 0; i < files.Length; i++)
     {
-        SegaCdSweepResult result = RunSegaCdSweepCase(files[i], fullFolder, bios, region, frames, instructionsPerFrame, writeScreenshots ? screenshotFolder : string.Empty);
+        SegaCdRegion caseRegion = requestedRegion ?? InferSegaCdRegionFromPath(files[i]);
+        SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(caseRegion, Environment.CurrentDirectory) ??
+            throw new FileNotFoundException($"No {caseRegion} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
+        SegaCdSweepResult result = RunSegaCdSweepCase(files[i], fullFolder, bios, caseRegion, frames, instructionsPerFrame, writeScreenshots ? screenshotFolder : string.Empty);
         writer.WriteLine(result.ToCsv());
-        Console.WriteLine($"{i + 1,4}/{files.Length}: {result.Status,-14} {result.RelativeDisc} frames={result.Frames:N0} fps={result.Fps:0.0} pc=${result.Pc:X8} pixels={result.NonBackgroundPixels:N0} load={result.LoadFileLast}");
+        Console.WriteLine($"{i + 1,4}/{files.Length}: {result.Status,-14} [{result.Region}] {result.RelativeDisc} frames={result.Frames:N0} fps={result.Fps:0.0} pc=${result.Pc:X8} pixels={result.NonBackgroundPixels:N0} load={result.LoadFileLast}");
     }
 
     Console.WriteLine($"Wrote {Path.GetFullPath(outputCsv)}");
@@ -3867,21 +3932,24 @@ SegaCdSweepResult RunSegaCdSweepCase(string discPath, string discRoot, SegaCdBio
     int cramNonzero = machine is null ? 0 : CountNonzeroCram(machine.Vdp);
     Vdp.VdpDiagnostics diagnostics = machine is null ? default : machine.Vdp.GetDiagnostics();
     string exceptions = machine is null ? string.Empty : FormatExceptions(machine.MainCpu);
-    if (status == "ok" && exceptions != "none")
-    {
-        status = "m68k";
-    }
-
-    if (status == "ok" && nonBackgroundPixels <= 64 && maxNonBackgroundPixels <= 64)
-    {
-        status = "blank";
-    }
 
     uint pc = machine?.MainCpu.PC ?? 0;
     bool noDiscProgramLoad = string.IsNullOrEmpty(segaCd?.DebugSonicCdLoadFileHleLastFileName);
     bool gameDisplayActive = maxNonBackgroundPixels > 4096 &&
         cramNonzero > 0 &&
         diagnostics.LikelySpriteCount > 0;
+    if (status == "ok" && exceptions != "none")
+    {
+        if (gameDisplayActive)
+        {
+            status = "handled-exception-display";
+            detail = "68K exception(s) observed, but execution continued with active display";
+        }
+        else
+        {
+            status = "m68k";
+        }
+    }
     if (status == "ok" &&
         noDiscProgramLoad &&
         pc is >= 0x00FF_0500 and <= 0x00FF_0700 &&
@@ -3907,10 +3975,16 @@ SegaCdSweepResult RunSegaCdSweepCase(string discPath, string discRoot, SegaCdBio
         detail = "Sega CD BIOS menu";
     }
 
+    if (status == "ok" && nonBackgroundPixels <= 64 && maxNonBackgroundPixels <= 64)
+    {
+        status = "blank";
+    }
+
     double elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
     double fps = elapsedMs <= 0 ? 0 : completedFrames / (elapsedMs / 1000.0);
     return new SegaCdSweepResult(
         relative,
+        region,
         status,
         completedFrames,
         elapsedMs,
@@ -5259,6 +5333,73 @@ void TraceSegaCdMainExceptions(
     Console.WriteLine(FormatSegaCdState(segaCd, machine));
 }
 
+void FindFirstSegaCdMainException(
+    string discPath,
+    SegaCdRegion region,
+    int frames,
+    int instructionsPerFrame,
+    int startFrame)
+{
+    SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
+        throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
+    DiscImage disc = DiscImage.FromFile(discPath);
+    SegaCdDevice segaCd = new(File.ReadAllBytes(bios.Path), region, disc);
+    MegaDrive machine = new(CartridgeImage.FromBytes(new byte[512 * 1024]), segaCd: segaCd);
+    machine.Reset();
+
+    int currentFrame = 0;
+    M68kCpu.M68kExceptionTrace? first = null;
+    machine.MainCpu.ExceptionObserver = trace =>
+    {
+        if (currentFrame >= startFrame)
+        {
+            first ??= trace;
+        }
+    };
+
+    try
+    {
+        for (currentFrame = 0; currentFrame < frames && first is null; currentFrame++)
+        {
+            machine.RunFrameCycles(instructionsPerFrame);
+        }
+    }
+    finally
+    {
+        machine.MainCpu.ExceptionObserver = null;
+    }
+
+    Console.WriteLine($"Sega CD first main exception: {region}");
+    Console.WriteLine($"Disc: {Path.GetFullPath(discPath)}");
+    Console.WriteLine($"BIOS: {Path.GetFileName(bios.Path)} ({new FileInfo(bios.Path).Length:N0} bytes)");
+    if (first is null)
+    {
+        Console.WriteLine($"Status: no exception in {frames:N0} frame(s) from start frame {startFrame:N0}");
+        Console.WriteLine(FormatSegaCdState(segaCd, machine));
+        return;
+    }
+
+    M68kCpu.M68kExceptionTrace trace = first.Value;
+    Console.WriteLine(
+        "Status: exception; " +
+        $"frame={currentFrame - 1}; " +
+        $"vector={trace.Vector}; " +
+        $"opcodePc=${trace.OpcodePc:X8}; " +
+        $"opcode=${trace.Opcode:X4}; " +
+        $"ext0=${machine.Bus.ReadWord(trace.OpcodePc + 2):X4}; " +
+        $"ext1=${machine.Bus.ReadWord(trace.OpcodePc + 4):X4}; " +
+        $"framePc=${trace.FramePc:X8}; " +
+        $"handler=${trace.HandlerPc:X8}; " +
+        $"oldSr=${trace.OldSr:X4}; " +
+        $"newSr=${trace.NewSr:X4}; " +
+        $"sp=${trace.StackPointer:X8}");
+    Console.WriteLine(
+        $"D0=${trace.D0:X8} D1=${trace.D1:X8} D2=${trace.D2:X8} D3=${trace.D3:X8} " +
+        $"A0=${trace.A0:X8} A1=${trace.A1:X8} A2=${trace.A2:X8} A3=${trace.A3:X8} " +
+        $"A4=${trace.A4:X8} A5=${trace.A5:X8} A6=${trace.A6:X8}");
+    Console.WriteLine(FormatSegaCdState(segaCd, machine));
+}
+
 void TraceSegaCdMainMemoryAccesses(
     string discPath,
     string outputPath,
@@ -5267,8 +5408,15 @@ void TraceSegaCdMainMemoryAccesses(
     int instructionsPerFrame,
     int maxLines,
     int startFrame,
+    uint offsetStart,
+    uint offsetEnd,
     bool readOnlyNoSnapshots = false)
 {
+    if (offsetEnd < offsetStart)
+    {
+        (offsetStart, offsetEnd) = (offsetEnd, offsetStart);
+    }
+
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
     SegaCdBiosImage bios = SegaCdBiosFinder.FindBest(region, Environment.CurrentDirectory) ??
         throw new FileNotFoundException($"No {region} Sega CD BIOS found. Set the matching MDSHARP_SEGACD_BIOS_* variable or place a BIOS in a local Sega CD BIOS folder.");
@@ -5287,17 +5435,17 @@ void TraceSegaCdMainMemoryAccesses(
         uint masked = address & 0x00FF_FFFF;
         if (masked is >= SegaCdHardwareProfile.MainWordRamStart and <= SegaCdHardwareProfile.MainWordRamEndInclusive)
         {
-            return masked - SegaCdHardwareProfile.MainWordRamStart;
+            return (masked - SegaCdHardwareProfile.MainWordRamStart) & (SegaCdHardwareProfile.WordRamBytes - 1);
         }
 
         if (masked is >= SegaCdHardwareProfile.MainWordRamHighAliasStart and <= SegaCdHardwareProfile.MainWordRamHighAliasEndInclusive)
         {
-            return masked - SegaCdHardwareProfile.MainWordRamHighAliasStart;
+            return (masked - SegaCdHardwareProfile.MainWordRamHighAliasStart) & (SegaCdHardwareProfile.WordRamBytes - 1);
         }
 
         if (masked is >= SegaCdHardwareProfile.MainWordRamAliasStart and <= SegaCdHardwareProfile.MainWordRamAliasEndInclusive)
         {
-            return masked - SegaCdHardwareProfile.MainWordRamAliasStart;
+            return (masked - SegaCdHardwareProfile.MainWordRamAliasStart) & (SegaCdHardwareProfile.WordRamBytes - 1);
         }
 
         return null;
@@ -5366,7 +5514,7 @@ void TraceSegaCdMainMemoryAccesses(
     machine.Bus.MemoryReadObserver = read =>
     {
         uint? offset = MainWordRamOffset(read.Address);
-        if (offset is null || offset.Value >= 0x1000)
+        if (offset is null || offset.Value < offsetStart || offset.Value > offsetEnd)
         {
             return;
         }
@@ -5409,6 +5557,7 @@ void TraceSegaCdMainMemoryAccesses(
 
     Console.WriteLine($"Sega CD main memory trace: {region}");
     Console.WriteLine($"Trace start frame: {startFrame:N0}");
+    Console.WriteLine($"Offset range: ${offsetStart:X6}-${offsetEnd:X6}");
     Console.WriteLine($"Disc: {Path.GetFullPath(discPath)}");
     Console.WriteLine($"BIOS: {bios.FileName} ({bios.Size:N0} bytes, sha1 {bios.Sha1})");
     Console.WriteLine($"Status: {status}; frames={currentFrame:N0}; lines={lines:N0}; output={Path.GetFullPath(outputPath)}");
@@ -5450,10 +5599,9 @@ void TraceSegaCdMainMemoryWrites(
     int lines = 0;
     GenesisButton currentPressed = GenesisButton.None;
     using StreamWriter writer = new(outputPath, false, Encoding.UTF8);
-    writer.WriteLine("frame,sequence,pc,address,value,pressed,subPc,reg0e,reg0f,cddStatus,cddCommand,waitFe26,waitFe2e");
-    machine.Bus.MemoryWriteObserver = write =>
+    writer.WriteLine("frame,sequence,suppressed,pc,address,value,pressed,subPc,reg0e,reg0f,cddStatus,cddCommand,waitFe26,waitFe2e");
+    void WriteMainWriteRow(bool suppressed, uint pc, uint address, byte value)
     {
-        uint address = write.Address & 0x00FF_FFFF;
         if (currentFrame < startFrame || lines >= maxLines || address < addressStart || address > addressEnd)
         {
             return;
@@ -5463,9 +5611,10 @@ void TraceSegaCdMainMemoryWrites(
             ',',
             currentFrame.ToString(CultureInfo.InvariantCulture),
             (++lines).ToString(CultureInfo.InvariantCulture),
-            $"${write.Pc:X8}",
+            suppressed ? "1" : "0",
+            $"${pc:X8}",
             $"${address:X8}",
-            $"${write.Value:X2}",
+            $"${value:X2}",
             currentPressed.ToString(),
             $"${segaCd.SubCpu.PC:X8}",
             $"${SegaCdRegisterForTrace(segaCd, 0x0E):X2}",
@@ -5474,6 +5623,15 @@ void TraceSegaCdMainMemoryWrites(
             $"${ReadSegaCdProgramWordForTrace(segaCd, 0x5AE0):X4}",
             $"${ReadGenesisWorkRamByteForTrace(machine, 0xFE26):X2}",
             $"${ReadGenesisWorkRamByteForTrace(machine, 0xFE2E):X2}"));
+    }
+
+    machine.Bus.MemoryWriteObserver = write =>
+    {
+        WriteMainWriteRow(false, write.Pc, write.Address & 0x00FF_FFFF, write.Value);
+    };
+    segaCd.SuppressedMainWriteObserver = write =>
+    {
+        WriteMainWriteRow(true, write.Pc, write.Address & 0x00FF_FFFF, write.Value);
     };
 
     string status = "ok";
@@ -5496,6 +5654,7 @@ void TraceSegaCdMainMemoryWrites(
     finally
     {
         machine.Bus.MemoryWriteObserver = null;
+        segaCd.SuppressedMainWriteObserver = null;
     }
 
     Console.WriteLine($"Sega CD main write trace: {region}");
@@ -18363,6 +18522,7 @@ void WriteWav(string path, short[] samples, int sampleRate, ushort channels = 1)
 
 file sealed record SegaCdSweepResult(
     string RelativeDisc,
+    SegaCdRegion Region,
     string Status,
     int Frames,
     double ElapsedMs,
@@ -18394,6 +18554,7 @@ file sealed record SegaCdSweepResult(
         return string.Join(
             ',',
             $"\"{Escape(RelativeDisc)}\"",
+            Region.ToString(),
             Status,
             Frames.ToString(CultureInfo.InvariantCulture),
             ElapsedMs.ToString("0.###", CultureInfo.InvariantCulture),

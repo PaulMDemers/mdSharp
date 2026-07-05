@@ -165,6 +165,52 @@ public sealed class DiscImage
         return false;
     }
 
+    public IReadOnlyList<IsoDirectoryEntry> ListIso9660RootDirectory()
+    {
+        Span<byte> sector = stackalloc byte[2048];
+        if (!TryReadDataSector2048(16, sector) ||
+            !sector[1..6].SequenceEqual("CD001"u8) ||
+            sector[0] != 0x01 ||
+            !TryParseIsoDirectoryRecord(sector[156..], out IsoDirectoryRecord root) ||
+            root.ExtentLba < 0 ||
+            root.DataLength <= 0 ||
+            !TryReadIsoExtent(root.ExtentLba, root.DataLength, out byte[] rootDirectory))
+        {
+            return [];
+        }
+
+        List<IsoDirectoryEntry> entries = [];
+        int offset = 0;
+        while (offset < rootDirectory.Length)
+        {
+            int recordLength = rootDirectory[offset];
+            if (recordLength == 0)
+            {
+                offset = ((offset / 2048) + 1) * 2048;
+                continue;
+            }
+
+            if (offset + recordLength > rootDirectory.Length)
+            {
+                break;
+            }
+
+            if (TryParseIsoDirectoryRecord(rootDirectory.AsSpan(offset, recordLength), out IsoDirectoryRecord record) &&
+                record.Identifier is not "." and not "..")
+            {
+                entries.Add(new IsoDirectoryEntry(
+                    record.Identifier,
+                    record.ExtentLba,
+                    record.DataLength,
+                    record.IsDirectory));
+            }
+
+            offset += recordLength;
+        }
+
+        return entries;
+    }
+
     public static DiscImage FromFile(string path)
     {
         string fullPath = Path.GetFullPath(path);
@@ -668,6 +714,8 @@ public sealed class DiscImage
 
     private readonly record struct FilePayload(long OffsetBytes, long LengthBytes);
     private readonly record struct IsoDirectoryRecord(int ExtentLba, int DataLength, bool IsDirectory, string Identifier);
+
+    public readonly record struct IsoDirectoryEntry(string Identifier, int ExtentLba, int DataLength, bool IsDirectory);
 
     private sealed class ParsedTrack(int number, string filePath, string fileType, DiscTrackMode mode)
     {

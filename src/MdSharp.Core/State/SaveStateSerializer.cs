@@ -14,7 +14,7 @@ namespace MdSharp.Core.State;
 public static class SaveStateSerializer
 {
     private const uint Magic = 0x5353444D; // MDSS
-    private const int Version = 90;
+    private const int Version = 91;
 
     public static void Save(MegaDrive machine, string path)
     {
@@ -368,6 +368,7 @@ public static class SaveStateSerializer
         writer.Write(state.GenericBootMainFlag7PulseYieldPending);
         writer.Write(state.GenericBootMainFlag7SubReadEdgePending);
         writer.Write(state.PendingSubInterruptLevels);
+        writer.Write(state.MainIrq2Accepted);
         writer.Write(state.WordRamModeBits);
         writer.Write(state.WordRamOwnedByMain);
         writer.Write(state.SuppressBootStatusUntilMainCommand);
@@ -434,6 +435,7 @@ public static class SaveStateSerializer
         bool genericBootMainFlag7PulseYieldPending = version >= 85 && reader.ReadBoolean();
         bool genericBootMainFlag7SubReadEdgePending = version >= 86 && reader.ReadBoolean();
         byte pendingSubInterruptLevels = reader.ReadByte();
+        bool mainIrq2Accepted = version >= 91 && reader.ReadBoolean();
         byte wordRamModeBits = reader.ReadByte();
         bool wordRamOwnedByMain = reader.ReadBoolean();
         bool suppressBootStatusUntilMainCommand = version >= 73 && reader.ReadBoolean();
@@ -509,6 +511,7 @@ public static class SaveStateSerializer
             genericBootMainFlag7PulseYieldPending,
             genericBootMainFlag7SubReadEdgePending,
             pendingSubInterruptLevels,
+            mainIrq2Accepted,
             wordRamModeBits,
             wordRamOwnedByMain,
             suppressBootStatusUntilMainCommand,
